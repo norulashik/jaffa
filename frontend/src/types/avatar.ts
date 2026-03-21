@@ -8,6 +8,10 @@ export interface AvatarConfig {
   bodyType: number;      // 0-2
   jerseyPattern: number; // 0-3
   batStyle: number;      // 0-2
+  iplTeam?: string | null;
+  hairStyle?: number;    // 0-4 (buzz, short, spiky, curly, long)
+  hairColor?: string;
+  facialHair?: number;   // 0-3 (none, stubble, goatee, beard)
 }
 
 export type AvatarSize = "sm" | "md" | "lg";

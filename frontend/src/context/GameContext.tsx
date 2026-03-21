@@ -36,6 +36,7 @@ type GameAction =
   | { type: "ADD_POINTS"; points: number; round: number }
   | { type: "SET_ROUND"; round: number }
   | { type: "SET_LOADING"; isLoading: boolean }
+  | { type: "UPDATE_AVATAR"; avatarConfig: AvatarConfig }
   | { type: "LOGOUT" };
 
 const initialState: GameState = {
@@ -82,6 +83,11 @@ function gameReducer(state: GameState, action: GameAction): GameState {
       return { ...state, currentRound: action.round, boostsUsedThisRound: 0 };
     case "SET_LOADING":
       return { ...state, isLoading: action.isLoading };
+    case "UPDATE_AVATAR":
+      return {
+        ...state,
+        user: state.user ? { ...state.user, avatarConfig: action.avatarConfig } : null,
+      };
     case "LOGOUT":
       if (typeof window !== "undefined") {
         localStorage.removeItem("jaffa_token");

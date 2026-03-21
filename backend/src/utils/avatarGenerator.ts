@@ -11,6 +11,10 @@ export interface AvatarConfig {
   bodyType: number;      // 0-2
   jerseyPattern: number; // 0-3
   batStyle: number;      // 0-2
+  iplTeam?: string | null;
+  hairStyle?: number;    // 0-4
+  hairColor?: string;
+  facialHair?: number;   // 0-3
 }
 
 const SKIN_TONES = ["#F5D0A9", "#D4A574", "#C68642", "#8D5524", "#6B3A1F", "#3B1F0B"];
@@ -39,6 +43,8 @@ const HELMET_COLORS = [
   "#0f4c75", // steel blue
 ];
 
+const HAIR_COLORS = ["#1a1a2e", "#3b2414", "#5c3d1e", "#d4a574", "#8b2500", "#6b6b6b"];
+
 // Hash a UUID string to a number
 function hashUUID(uuid: string): number {
   let hash = 0;
@@ -65,5 +71,8 @@ export function generateAvatarConfig(userId: string): AvatarConfig {
     bodyType: getSegment(userId, 7) % 3,
     jerseyPattern: getSegment(userId, 8) % 4,
     batStyle: getSegment(userId, 9) % 3,
+    hairStyle: getSegment(userId, 10) % 5,
+    hairColor: HAIR_COLORS[getSegment(userId, 11) % HAIR_COLORS.length],
+    facialHair: getSegment(userId, 12) % 4,
   };
 }

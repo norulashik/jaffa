@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { User, OTP } from "../models";
 import { Op } from "sequelize";
 import { generateAvatarConfig } from "../utils/avatarGenerator";
+import { sendOTP, generateOTPCode, isMockOTP } from "../utils/smsService";
 
 const router = Router();
 
@@ -17,9 +18,7 @@ router.post("/send-otp", async (req: Request, res: Response): Promise<void> => {
     }
 
     // Generate 6-digit OTP
-    const code = process.env.OTP_SERVICE === "mock"
-      ? "123456" // Fixed OTP for development
-      : Math.floor(100000 + Math.random() * 900000).toString();
+    const code = generateOTPCode();
 
     // Expire old OTPs for this phone
     await OTP.update(
@@ -34,12 +33,10 @@ router.post("/send-otp", async (req: Request, res: Response): Promise<void> => {
       expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes
     });
 
-    // In production, send via MSG91/Twilio here
-    if (process.env.OTP_SERVICE === "mock") {
-      console.log(`[DEV] OTP for ${phone}: ${code}`);
-    }
+    // Send OTP via configured service (Twilio or mock console log)
+    await sendOTP(phone, code);
 
-    res.json({ message: "OTP sent", dev: process.env.OTP_SERVICE === "mock" ? code : undefined });
+    res.json({ message: "OTP sent", dev: isMockOTP() ? code : undefined });
   } catch (error) {
     console.error("Send OTP error:", error);
     res.status(500).json({ error: "Failed to send OTP" });
@@ -146,6 +143,62 @@ router.get("/me", async (req: Request, res: Response): Promise<void> => {
       phone: user.phone,
       displayName: user.displayName,
       avatarConfig: user.avatarConfig ? JSON.parse(user.avatarConfig) : null,
+    });
+  } catch {
+    res.status(401).json({ error: "Invalid token" });
+  }
+});
+
+// Update avatar config
+router.patch("/avatar", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const token = req.headers.authorization?.replace("Bearer ", "");
+    if (!token) {
+      res.status(401).json({ error: "No token" });
+      return;
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || "dev-secret") as { userId: string };
+    const user = await User.findByPk(decoded.userId);
+
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const avatarConfig = req.body.avatarConfig;
+
+    if (!avatarConfig || typeof avatarConfig !== "object") {
+      res.status(400).json({ error: "Invalid avatar config" });
+      return;
+    }
+
+    const { skinTone, jerseyColor, helmetColor, helmetStyle, accessory,
+            expression, bodyType, jerseyPattern, batStyle, hairStyle, facialHair } = avatarConfig;
+
+    if (typeof skinTone !== "string" || typeof jerseyColor !== "string" || typeof helmetColor !== "string") {
+      res.status(400).json({ error: "Colors must be strings" });
+      return;
+    }
+    if (helmetStyle < 0 || helmetStyle > 3 ||
+        accessory < 0 || accessory > 5 ||
+        expression < 0 || expression > 4 ||
+        bodyType < 0 || bodyType > 2 ||
+        jerseyPattern < 0 || jerseyPattern > 4 ||
+        batStyle < 0 || batStyle > 2 ||
+        (hairStyle !== undefined && (hairStyle < 0 || hairStyle > 4)) ||
+        (facialHair !== undefined && (facialHair < 0 || facialHair > 3))) {
+      res.status(400).json({ error: "Numeric values out of range" });
+      return;
+    }
+
+    await user.update({ avatarConfig: JSON.stringify(avatarConfig) });
+
+    res.json({
+      id: user.id,
+      phone: user.phone,
+      displayName: user.displayName,
+      avatarConfig,
     });
   } catch {
     res.status(401).json({ error: "Invalid token" });

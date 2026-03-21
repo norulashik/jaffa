@@ -77,6 +77,13 @@ export const api = {
   getPlayerCount: (matchId: string, venueId: string) =>
     request<{ count: number }>(`/leaderboard/${matchId}/${venueId}/count`),
 
+  // Avatar
+  updateAvatar: (avatarConfig: import("@/types/avatar").AvatarConfig) =>
+    request<{ id: string; phone: string; displayName: string; avatarConfig: import("@/types/avatar").AvatarConfig }>(
+      "/auth/avatar",
+      { method: "PATCH", body: JSON.stringify({ avatarConfig }) }
+    ),
+
   // Rewards
   getMyRewards: (matchId?: string) =>
     request<any[]>(`/rewards/my${matchId ? `?matchId=${matchId}` : ""}`),
