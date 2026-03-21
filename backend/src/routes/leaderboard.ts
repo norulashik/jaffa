@@ -13,20 +13,24 @@ router.get("/:matchId/:venueId/round/:round", async (req: Request, res: Response
 
     const participants = await MatchParticipant.findAll({
       where: { matchId, venueId },
-      include: [{ model: User, as: "user", attributes: ["id", "displayName"] }],
+      include: [{ model: User, as: "user", attributes: ["id", "displayName", "avatarConfig"] }],
       order: [[pointsField as string, "DESC"]],
       limit: 50,
     });
 
-    const leaderboard = participants.map((p, index) => ({
-      rank: index + 1,
-      userId: p.userId,
-      displayName: (p as unknown as { user: { displayName: string } }).user?.displayName || "Unknown",
-      points: (p as unknown as Record<string, number>)[pointsField as string] || 0,
-      currentStreak: p.currentStreak,
-      bestStreak: p.bestStreak,
-      totalPoints: p.totalPoints,
-    }));
+    const leaderboard = participants.map((p, index) => {
+      const userData = (p as unknown as { user: { displayName: string; avatarConfig: string | null } }).user;
+      return {
+        rank: index + 1,
+        userId: p.userId,
+        displayName: userData?.displayName || "Unknown",
+        avatarConfig: userData?.avatarConfig ? JSON.parse(userData.avatarConfig) : null,
+        points: (p as unknown as Record<string, number>)[pointsField as string] || 0,
+        currentStreak: p.currentStreak,
+        bestStreak: p.bestStreak,
+        totalPoints: p.totalPoints,
+      };
+    });
 
     res.json({ round: roundNum, leaderboard });
   } catch (error) {
@@ -42,24 +46,28 @@ router.get("/:matchId/:venueId/match", async (req: Request, res: Response): Prom
 
     const participants = await MatchParticipant.findAll({
       where: { matchId, venueId },
-      include: [{ model: User, as: "user", attributes: ["id", "displayName"] }],
+      include: [{ model: User, as: "user", attributes: ["id", "displayName", "avatarConfig"] }],
       order: [["totalPoints", "DESC"]],
       limit: 50,
     });
 
-    const leaderboard = participants.map((p, index) => ({
-      rank: index + 1,
-      userId: p.userId,
-      displayName: (p as unknown as { user: { displayName: string } }).user?.displayName || "Unknown",
-      totalPoints: p.totalPoints,
-      currentStreak: p.currentStreak,
-      bestStreak: p.bestStreak,
-      correctPredictions: p.correctPredictions,
-      totalPredictions: p.totalPredictions,
-      accuracy: p.totalPredictions > 0
-        ? Math.round((p.correctPredictions / p.totalPredictions) * 100)
-        : 0,
-    }));
+    const leaderboard = participants.map((p, index) => {
+      const userData = (p as unknown as { user: { displayName: string; avatarConfig: string | null } }).user;
+      return {
+        rank: index + 1,
+        userId: p.userId,
+        displayName: userData?.displayName || "Unknown",
+        avatarConfig: userData?.avatarConfig ? JSON.parse(userData.avatarConfig) : null,
+        totalPoints: p.totalPoints,
+        currentStreak: p.currentStreak,
+        bestStreak: p.bestStreak,
+        correctPredictions: p.correctPredictions,
+        totalPredictions: p.totalPredictions,
+        accuracy: p.totalPredictions > 0
+          ? Math.round((p.correctPredictions / p.totalPredictions) * 100)
+          : 0,
+      };
+    });
 
     res.json({ leaderboard });
   } catch (error) {

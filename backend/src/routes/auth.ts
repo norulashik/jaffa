@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { User, OTP } from "../models";
 import { Op } from "sequelize";
+import { generateAvatarConfig } from "../utils/avatarGenerator";
 
 const router = Router();
 
@@ -83,8 +84,15 @@ router.post("/verify-otp", async (req: Request, res: Response): Promise<void> =>
         return;
       }
 
-      user = await User.create({ phone, displayName });
+      const avatarConfig = JSON.stringify(generateAvatarConfig(phone));
+      user = await User.create({ phone, displayName, avatarConfig });
       isNewUser = true;
+    }
+
+    // Lazy backfill: if existing user has no avatar, generate one
+    if (!user.avatarConfig) {
+      const avatarConfig = JSON.stringify(generateAvatarConfig(user.id));
+      await user.update({ avatarConfig });
     }
 
     // Generate JWT
@@ -100,6 +108,7 @@ router.post("/verify-otp", async (req: Request, res: Response): Promise<void> =>
         id: user.id,
         phone: user.phone,
         displayName: user.displayName,
+        avatarConfig: user.avatarConfig ? JSON.parse(user.avatarConfig) : null,
       },
       isNewUser,
     });
@@ -126,10 +135,17 @@ router.get("/me", async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    // Lazy backfill avatar
+    if (!user.avatarConfig) {
+      const avatarConfig = JSON.stringify(generateAvatarConfig(user.id));
+      await user.update({ avatarConfig });
+    }
+
     res.json({
       id: user.id,
       phone: user.phone,
       displayName: user.displayName,
+      avatarConfig: user.avatarConfig ? JSON.parse(user.avatarConfig) : null,
     });
   } catch {
     res.status(401).json({ error: "Invalid token" });

@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { api } from "@/lib/api";
 import { IoFlame, IoTrophy } from "react-icons/io5";
-import { HiArrowUp, HiArrowDown, HiMinus } from "react-icons/hi2";
+import CricketAvatar from "./CricketAvatar";
 
 interface LeaderboardProps {
   matchId: string;
@@ -93,14 +93,30 @@ export default function Leaderboard({ matchId, venueId, currentRound, userId }: 
                     : "bg-slate-900"
                 }`}
               >
-                {/* Rank */}
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${
-                  rank === 1 ? "bg-yellow-500 text-black" :
-                  rank === 2 ? "bg-slate-300 text-black" :
-                  rank === 3 ? "bg-orange-600 text-white" :
-                  "bg-slate-800 text-slate-400"
-                }`}>
-                  {rank <= 3 ? <IoTrophy /> : rank}
+                {/* Avatar + Rank */}
+                <div className="relative">
+                  {player.avatarConfig ? (
+                    <CricketAvatar config={player.avatarConfig} size="sm" mood={isMe ? "excited" : "idle"} />
+                  ) : (
+                    <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold ${
+                      rank === 1 ? "bg-yellow-500 text-black" :
+                      rank === 2 ? "bg-slate-300 text-black" :
+                      rank === 3 ? "bg-orange-600 text-white" :
+                      "bg-slate-800 text-slate-400"
+                    }`}>
+                      {rank <= 3 ? <IoTrophy /> : rank}
+                    </div>
+                  )}
+                  {player.avatarConfig && (
+                    <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold ${
+                      rank === 1 ? "bg-yellow-500 text-black" :
+                      rank === 2 ? "bg-slate-300 text-black" :
+                      rank === 3 ? "bg-orange-600 text-white" :
+                      "bg-slate-700 text-slate-300"
+                    }`}>
+                      {rank}
+                    </div>
+                  )}
                 </div>
 
                 {/* Name + streak */}

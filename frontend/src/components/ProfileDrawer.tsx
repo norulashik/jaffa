@@ -2,7 +2,8 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import { useGame } from "@/context/GameContext";
-import { IoClose, IoLogOut, IoPerson } from "react-icons/io5";
+import { IoClose, IoLogOut } from "react-icons/io5";
+import CricketAvatar from "./CricketAvatar";
 
 interface ProfileDrawerProps {
   isOpen: boolean;
@@ -53,9 +54,13 @@ export default function ProfileDrawer({ isOpen, onClose, venueName }: ProfileDra
             <div className="p-4 space-y-4">
               {/* Avatar + name */}
               <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full bg-orange-500/20 flex items-center justify-center">
-                  <IoPerson className="text-2xl text-orange-400" />
-                </div>
+                {state.user?.avatarConfig ? (
+                  <CricketAvatar config={state.user.avatarConfig} size="lg" mood="idle" interactive />
+                ) : (
+                  <div className="w-12 h-12 rounded-full bg-orange-500/20 flex items-center justify-center">
+                    <span className="text-2xl text-orange-400">🏏</span>
+                  </div>
+                )}
                 <div>
                   <p className="text-white font-semibold text-lg">{state.user?.displayName}</p>
                   <p className="text-slate-400 text-sm">{state.user?.phone}</p>

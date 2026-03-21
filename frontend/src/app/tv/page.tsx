@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { io, Socket } from "socket.io-client";
 import { IoFlame, IoRocket, IoTrophy } from "react-icons/io5";
 import { MdSportsCricket } from "react-icons/md";
+import CricketAvatar from "@/components/CricketAvatar";
+import { AvatarConfig } from "@/types/avatar";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001";
@@ -15,6 +17,7 @@ interface TVLeaderboardEntry {
   points: number;
   totalPoints: number;
   currentStreak: number;
+  avatarConfig?: AvatarConfig | null;
 }
 
 export default function TVDisplay() {
@@ -376,6 +379,15 @@ function TVLeaderboard({
           }`}>
             {entry.rank}
           </div>
+
+          {/* Avatar */}
+          {entry.avatarConfig && (
+            <CricketAvatar
+              config={entry.avatarConfig}
+              size="md"
+              mood={index === 0 ? "excited" : "idle"}
+            />
+          )}
 
           {/* Name + streak */}
           <div className="flex-1">

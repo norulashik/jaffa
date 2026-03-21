@@ -8,7 +8,8 @@ import { joinVenueMatch, getSocket } from "@/lib/socket";
 import Leaderboard from "./Leaderboard";
 import RewardBanner from "./RewardBanner";
 import ProfileDrawer from "./ProfileDrawer";
-import { IoFlame, IoRocket, IoTrophy, IoPersonCircle, IoCheckmarkCircle } from "react-icons/io5";
+import { IoFlame, IoRocket, IoTrophy, IoCheckmarkCircle } from "react-icons/io5";
+import CricketAvatar from "./CricketAvatar";
 import { MdBolt } from "react-icons/md";
 
 interface LiveGameProps {
@@ -30,12 +31,17 @@ export default function LiveGame({ match, venueId }: LiveGameProps) {
   const [rewards, setRewards] = useState<any[]>([]);
   const [profileOpen, setProfileOpen] = useState(false);
   const [myPicks, setMyPicks] = useState<any[]>([]);
+  const [liveScore, setLiveScore] = useState<any>(match.scoreData || null);
 
   // Initial load
   useEffect(() => {
     loadFullState();
     loadRewards();
     loadMyPicks();
+    // Fetch latest match data for scoreData
+    api.getMatch(match.id).then((m: any) => {
+      if (m.scoreData) setLiveScore(m.scoreData);
+    }).catch(() => {});
   }, [match.id, venueId]);
 
   // Socket connection
@@ -61,6 +67,11 @@ export default function LiveGame({ match, venueId }: LiveGameProps) {
       loadRewards();
       setTimeout(() => setHypeEvent(null), 10000);
     });
+    socket.on("scoreUpdate", (data: any) => {
+      if (data.matchId === match.id && data.scoreData) {
+        setLiveScore(data.scoreData);
+      }
+    });
 
     return () => {
       socket.off("newPrediction");
@@ -69,6 +80,7 @@ export default function LiveGame({ match, venueId }: LiveGameProps) {
       socket.off("predictionPulse");
       socket.off("hypeEvent");
       socket.off("roundWinner");
+      socket.off("scoreUpdate");
     };
   }, [venueId, match.id]);
 
@@ -237,46 +249,49 @@ export default function LiveGame({ match, venueId }: LiveGameProps) {
         <RewardBanner rewards={rewards.filter((r: any) => r.status === "active")} />
       )}
 
+      {/* Live Scorecard */}
+      <LiveScorecard
+        match={match}
+        liveScore={liveScore}
+        currentRound={currentRound}
+        playerCount={playerCount}
+      />
+
       {/* Top Bar */}
-      <div className="bg-slate-900 border-b border-slate-800 px-4 py-3">
+      <div className="bg-slate-900 border-b border-slate-800 px-4 py-2">
         <div className="flex items-center justify-between">
-          <div>
-            <div className="text-xs text-slate-400">{match.team1Short} vs {match.team2Short}</div>
-            <div className="text-sm font-semibold text-white">
-              Round {currentRound} {getRoundName(currentRound)}
+          <div className="flex items-center gap-4">
+            {state.currentStreak > 0 && (
+              <div className={`flex items-center gap-1 text-xs ${state.currentStreak >= 3 ? "text-yellow-400" : "text-slate-400"}`}>
+                <IoFlame /> {state.currentStreak} streak
+              </div>
+            )}
+            <div className="flex items-center gap-1 text-xs text-slate-400">
+              <MdBolt /> {boostsRemaining} boosts
             </div>
+            {allInAvailable && (
+              <div className="flex items-center gap-1 text-xs text-purple-400">
+                <IoRocket /> All-In ready
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-3">
             <div className="text-right">
-              <div className="text-xs text-slate-400">Your Points</div>
+              <div className="text-xs text-slate-400">Points</div>
               <div className="text-lg font-bold text-orange-500">{participant?.totalPoints || 0}</div>
             </div>
             <button
               onClick={() => setProfileOpen(true)}
-              className="text-slate-400 hover:text-orange-400 transition-colors"
+              className="hover:opacity-80 transition-opacity"
             >
-              <IoPersonCircle className="text-3xl" />
+              {state.user?.avatarConfig ? (
+                <CricketAvatar config={state.user.avatarConfig} size="sm" mood="idle" />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-orange-500/20 flex items-center justify-center text-orange-400 text-sm font-bold">
+                  {state.user?.displayName?.charAt(0) || "?"}
+                </div>
+              )}
             </button>
-          </div>
-        </div>
-
-        {/* Stats Row */}
-        <div className="flex items-center gap-4 mt-2">
-          {state.currentStreak > 0 && (
-            <div className={`flex items-center gap-1 text-xs ${state.currentStreak >= 3 ? "text-yellow-400" : "text-slate-400"}`}>
-              <IoFlame /> {state.currentStreak} streak
-            </div>
-          )}
-          <div className="flex items-center gap-1 text-xs text-slate-400">
-            <MdBolt /> {boostsRemaining} boosts
-          </div>
-          {allInAvailable && (
-            <div className="flex items-center gap-1 text-xs text-purple-400">
-              <IoRocket /> All-In ready
-            </div>
-          )}
-          <div className="text-xs text-slate-500 ml-auto">
-            {playerCount} playing
           </div>
         </div>
       </div>
@@ -728,6 +743,109 @@ function HypeOverlay({ event }: { event: any }) {
         )}
       </div>
     </motion.div>
+  );
+}
+
+// Live Scorecard component
+function LiveScorecard({ match, liveScore, currentRound, playerCount }: { match: any; liveScore: any; currentRound: number; playerCount: number }) {
+  const innings1 = liveScore?.innings1;
+  const innings2 = liveScore?.innings2;
+  const currentInnings = liveScore?.currentInnings || 1;
+  const currentOver = liveScore?.currentOver || 0;
+
+  const battingTeam = currentInnings === 1 ? match.team2Short : match.team1Short;
+  const bowlingTeam = currentInnings === 1 ? match.team1Short : match.team2Short;
+  const battingImg = currentInnings === 1 ? liveScore?.team2Img : liveScore?.team1Img;
+  const bowlingImg = currentInnings === 1 ? liveScore?.team1Img : liveScore?.team2Img;
+
+  const activeInnings = currentInnings === 1 ? innings1 : innings2;
+  const score = activeInnings?.score ?? 0;
+  const wickets = activeInnings?.wickets ?? 0;
+  const overs = activeInnings?.overs ?? currentOver;
+
+  // Target info for 2nd innings
+  const target = innings1 && currentInnings === 2 ? innings1.score + 1 : null;
+  const runsNeeded = target ? target - (innings2?.score || 0) : null;
+
+  return (
+    <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 border-b border-slate-700 px-4 py-3">
+      {/* Series & Round */}
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[10px] text-slate-500 uppercase tracking-wider">
+          {liveScore?.series || `${match.team1Short} vs ${match.team2Short}`}
+        </span>
+        <span className="text-[10px] font-medium text-orange-400 uppercase tracking-wider">
+          Round {currentRound} {getRoundName(currentRound)}
+        </span>
+      </div>
+
+      {/* Score Display */}
+      <div className="flex items-center justify-between">
+        {/* Batting Team */}
+        <div className="flex items-center gap-3">
+          {battingImg && (
+            <img src={battingImg} alt={battingTeam} className="w-8 h-8 rounded-full bg-slate-700" />
+          )}
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-white font-bold text-lg">{battingTeam}</span>
+              <span className="text-xs bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded font-medium">BAT</span>
+            </div>
+            <div className="flex items-baseline gap-1">
+              <span className="text-2xl font-black text-white">{score}/{wickets}</span>
+              <span className="text-sm text-slate-400">({overs} ov)</span>
+            </div>
+          </div>
+        </div>
+
+        {/* VS / Target */}
+        <div className="text-center">
+          {target ? (
+            <div>
+              <div className="text-xs text-slate-500">Need</div>
+              <div className="text-lg font-black text-orange-500">{runsNeeded}</div>
+              <div className="text-[10px] text-slate-500">off {(20 - overs) > 0 ? Math.ceil((20 - overs) * 6) : 0} balls</div>
+            </div>
+          ) : (
+            <div className="text-slate-600 font-bold text-sm">VS</div>
+          )}
+        </div>
+
+        {/* Bowling Team */}
+        <div className="flex items-center gap-3">
+          <div className="text-right">
+            <div className="flex items-center justify-end gap-2">
+              <span className="text-slate-400 font-bold text-lg">{bowlingTeam}</span>
+              <span className="text-xs bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-medium">BOWL</span>
+            </div>
+            {innings1 && currentInnings === 2 && (
+              <div className="text-sm text-slate-500">
+                {innings1.score}/{innings1.wickets} ({innings1.overs} ov)
+              </div>
+            )}
+            {currentInnings === 1 && (
+              <div className="text-xs text-slate-600">Yet to bat</div>
+            )}
+          </div>
+          {bowlingImg && (
+            <img src={bowlingImg} alt={bowlingTeam} className="w-8 h-8 rounded-full bg-slate-700" />
+          )}
+        </div>
+      </div>
+
+      {/* CRR / RRR */}
+      <div className="flex items-center justify-between mt-2 text-[11px]">
+        <span className="text-slate-500">
+          CRR: <span className="text-slate-300 font-medium">{overs > 0 ? (score / overs).toFixed(2) : "0.00"}</span>
+        </span>
+        {target && overs < 20 && (
+          <span className="text-slate-500">
+            RRR: <span className="text-orange-400 font-medium">{((runsNeeded || 0) / (20 - overs)).toFixed(2)}</span>
+          </span>
+        )}
+        <span className="text-slate-600">{playerCount} playing</span>
+      </div>
+    </div>
   );
 }
 

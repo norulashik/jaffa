@@ -1,11 +1,13 @@
 "use client";
 
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from "react";
+import { AvatarConfig } from "@/types/avatar";
 
 interface User {
   id: string;
   phone: string;
   displayName: string;
+  avatarConfig?: AvatarConfig | null;
 }
 
 interface GameState {

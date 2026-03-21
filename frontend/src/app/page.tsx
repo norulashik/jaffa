@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { GameProvider, useGame } from "@/context/GameContext";
 import { api } from "@/lib/api";
@@ -237,18 +238,25 @@ function CountdownGate({ match, venue }: { match: any; venue: any }) {
   );
 }
 
+const LoadingFallback = () => (
+  <div className="min-h-screen flex items-center justify-center bg-slate-950">
+    <div className="text-center">
+      <div className="text-5xl font-black text-orange-500 mb-4">JAFFA</div>
+      <div className="text-slate-400 animate-pulse">Loading...</div>
+    </div>
+  </div>
+);
+
+const GameAppNoSSR = dynamic(() => Promise.resolve(GameApp), {
+  ssr: false,
+  loading: () => <LoadingFallback />,
+});
+
 export default function Home() {
   return (
     <GameProvider>
-      <Suspense fallback={
-        <div className="min-h-screen flex items-center justify-center bg-slate-950">
-          <div className="text-center">
-            <div className="text-5xl font-black text-orange-500 mb-4">JAFFA</div>
-            <div className="text-slate-400 animate-pulse">Loading...</div>
-          </div>
-        </div>
-      }>
-        <GameApp />
+      <Suspense fallback={<LoadingFallback />}>
+        <GameAppNoSSR />
       </Suspense>
     </GameProvider>
   );
