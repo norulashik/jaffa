@@ -3,22 +3,35 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = typeof window !== "undefined" ? localStorage.getItem("jaffa_token") : null;
 
-  const res = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "ngrok-skip-browser-warning": "true",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: "Request failed" }));
-    throw new Error(error.error || "Request failed");
+  try {
+    const res = await fetch(`${API_URL}${path}`, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options.headers,
+      },
+    });
+
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: "Request failed" }));
+      throw new Error(error.error || "Request failed");
+    }
+
+    return res.json();
+  } catch (err: any) {
+    if (err.name === "AbortError") {
+      throw new Error("Request timed out. Check your connection.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
   }
-
-  return res.json();
 }
 
 export const api = {

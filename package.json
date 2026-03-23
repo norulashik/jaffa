@@ -5,8 +5,10 @@
   "scripts": {
     "dev": "nodemon --exec ts-node src/index.ts",
     "build": "tsc",
+    "build:frontend": "cd frontend && npm run build",
     "start": "node dist/index.js",
-    "db:sync": "ts-node src/scripts/syncDb.ts"
+    "db:sync": "ts-node src/scripts/syncDb.ts",
+    "seed": "ts-node src/scripts/seed.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

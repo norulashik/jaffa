@@ -59,7 +59,7 @@ export default function PreMatchCards({ match, venueId, onComplete }: PreMatchCa
       api.getPredictions(match.id, venueId, 0)
         .then((preds) => {
           const preMatch = preds.filter(
-            (p: any) => p.category === "pre_match" && !p.userAnswer
+            (p: any) => p.category === "pre_match" && !p.userAnswer && p.status === "open"
           );
           setPredictions(preMatch);
           setLoaded(true);
@@ -118,7 +118,7 @@ export default function PreMatchCards({ match, venueId, onComplete }: PreMatchCa
     return "list";
   };
 
-  if (!loaded || predictions.length === 0) {
+  if (!loaded) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center p-6">
         <div className="text-center">
@@ -128,6 +128,11 @@ export default function PreMatchCards({ match, venueId, onComplete }: PreMatchCa
         </div>
       </div>
     );
+  }
+
+  // If loaded but no unanswered predictions, skip straight to live game
+  if (predictions.length === 0) {
+    return null;
   }
 
   const layoutType = getLayoutType(currentPrediction);

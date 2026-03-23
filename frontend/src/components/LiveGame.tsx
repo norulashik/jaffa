@@ -35,6 +35,9 @@ export default function LiveGame({ match, venueId }: LiveGameProps) {
 
   // Initial load
   useEffect(() => {
+    // Clear locally tracked answers when match/venue changes
+    locallyAnsweredIdsRef.current.clear();
+
     loadFullState();
     loadRewards();
     loadMyPicks();
@@ -72,6 +75,22 @@ export default function LiveGame({ match, venueId }: LiveGameProps) {
         setLiveScore(data.scoreData);
       }
     });
+    socket.on("predictionsLocked", (data: any) => {
+      if (data.matchId === match.id) {
+        // Remove locked predictions from the UI so users can't answer them
+        setPredictions((prev) => prev.filter((p: any) => p.overNumber !== data.overNumber));
+      }
+    });
+
+    // On reconnect: re-join rooms and refresh all state
+    const handleReconnect = () => {
+      console.log("Socket reconnected — refreshing state");
+      joinVenueMatch(venueId, match.id);
+      loadFullState();
+      loadRewards();
+      loadMyPicks();
+    };
+    socket.on("connect", handleReconnect);
 
     return () => {
       socket.off("newPrediction");
@@ -81,6 +100,8 @@ export default function LiveGame({ match, venueId }: LiveGameProps) {
       socket.off("hypeEvent");
       socket.off("roundWinner");
       socket.off("scoreUpdate");
+      socket.off("predictionsLocked");
+      socket.off("connect", handleReconnect);
     };
   }, [venueId, match.id]);
 
@@ -753,10 +774,13 @@ function LiveScorecard({ match, liveScore, currentRound, playerCount }: { match:
   const currentInnings = liveScore?.currentInnings || 1;
   const currentOver = liveScore?.currentOver || 0;
 
-  const battingTeam = currentInnings === 1 ? match.team2Short : match.team1Short;
-  const bowlingTeam = currentInnings === 1 ? match.team1Short : match.team2Short;
-  const battingImg = currentInnings === 1 ? liveScore?.team2Img : liveScore?.team1Img;
-  const bowlingImg = currentInnings === 1 ? liveScore?.team1Img : liveScore?.team2Img;
+  // Determine batting/bowling teams based on toss data, fallback to team1 bats first
+  const battingFirstShort = liveScore?.battingFirstShort || match.team1Short;
+  const bowlingFirstShort = battingFirstShort === match.team1Short ? match.team2Short : match.team1Short;
+  const battingTeam = currentInnings === 1 ? battingFirstShort : bowlingFirstShort;
+  const bowlingTeam = currentInnings === 1 ? bowlingFirstShort : battingFirstShort;
+  const battingImg = battingTeam === match.team1Short ? liveScore?.team1Img : liveScore?.team2Img;
+  const bowlingImg = bowlingTeam === match.team1Short ? liveScore?.team1Img : liveScore?.team2Img;
 
   const activeInnings = currentInnings === 1 ? innings1 : innings2;
   const score = activeInnings?.score ?? 0;

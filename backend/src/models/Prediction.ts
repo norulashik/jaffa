@@ -55,7 +55,7 @@ Prediction.init(
     round: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      validate: { min: 0, max: 4 }, // 0 = pre-match
+      validate: { min: 0, max: 6 }, // 0 = pre-match/rivalry, 1-6 = match rounds
     },
     overNumber: {
       type: DataTypes.INTEGER,

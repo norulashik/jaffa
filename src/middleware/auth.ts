@@ -6,6 +6,17 @@ export interface AuthRequest extends Request {
   venueId?: string;
 }
 
+export function authenticateAdmin(req: Request, res: Response, next: NextFunction): void {
+  const apiKey = req.headers["x-admin-key"] as string;
+  const expectedKey = process.env.ADMIN_API_KEY || "dev-admin-key";
+
+  if (!apiKey || apiKey !== expectedKey) {
+    res.status(403).json({ error: "Unauthorized: invalid admin key" });
+    return;
+  }
+  next();
+}
+
 export function authenticateUser(req: AuthRequest, res: Response, next: NextFunction): void {
   const token = req.headers.authorization?.replace("Bearer ", "");
 

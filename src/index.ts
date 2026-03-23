@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import http from "http";
+import path from "path";
 import { Server as SocketIOServer } from "socket.io";
 import dotenv from "dotenv";
 import { sequelize } from "./models";
@@ -21,13 +22,14 @@ const server = http.createServer(app);
 
 const io = new SocketIOServer(server, {
   cors: {
-    origin: process.env.CORS_ORIGIN || "http://localhost:3000",
+    origin: true,
     methods: ["GET", "POST"],
+    credentials: true,
   },
 });
 
 // Middleware
-app.use(cors({ origin: process.env.CORS_ORIGIN || "http://localhost:3000" }));
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
 // Make io accessible in routes
@@ -172,6 +174,17 @@ ${upcoming.map((f: any) =>
   }
 });
 
+// Serve Next.js production build (for single-port ngrok setup)
+const frontendBuildPath = path.join(__dirname, "../frontend/out");
+app.use(express.static(frontendBuildPath));
+// All non-API routes fall through to the frontend
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api") || req.path.startsWith("/socket.io")) {
+    return next();
+  }
+  res.sendFile(path.join(frontendBuildPath, "index.html"));
+});
+
 // Socket.IO
 setupSocketHandlers(io);
 
@@ -182,7 +195,7 @@ async function start() {
     await sequelize.authenticate();
     console.log("Database connected");
 
-    await sequelize.sync({ alter: true });
+    await sequelize.sync();
     console.log("Database synced");
 
     server.listen(PORT, () => {

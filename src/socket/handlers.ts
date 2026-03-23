@@ -4,19 +4,23 @@ export function setupSocketHandlers(io: SocketIOServer): void {
   io.on("connection", (socket: Socket) => {
     console.log(`Client connected: ${socket.id}`);
 
-    // Join a venue's match room
+    // Join a venue's match room + match-level room
     socket.on("joinVenueMatch", (data: { venueId: string; matchId: string }) => {
-      const room = `venue:${data.venueId}:${data.matchId}`;
-      socket.join(room);
-      console.log(`${socket.id} joined room ${room}`);
+      const venueRoom = `venue:${data.venueId}:${data.matchId}`;
+      const matchRoom = `match:${data.matchId}`;
+      socket.join(venueRoom);
+      socket.join(matchRoom);
+      console.log(`${socket.id} joined rooms ${venueRoom}, ${matchRoom}`);
     });
 
-    // Join TV display room
+    // Join TV display room + match-level room
     socket.on("joinTV", (data: { venueId: string; matchId: string }) => {
-      const room = `venue:${data.venueId}:${data.matchId}`;
-      socket.join(room);
+      const venueRoom = `venue:${data.venueId}:${data.matchId}`;
+      const matchRoom = `match:${data.matchId}`;
+      socket.join(venueRoom);
+      socket.join(matchRoom);
       socket.join(`tv:${data.venueId}`);
-      console.log(`TV display ${socket.id} joined room ${room}`);
+      console.log(`TV display ${socket.id} joined rooms ${venueRoom}, ${matchRoom}`);
     });
 
     // Leave rooms

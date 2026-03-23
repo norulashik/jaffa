@@ -1,6 +1,6 @@
 import { Router, Response } from "express";
 import { Match, Prediction, MatchParticipant, Venue, User, Reward } from "../models";
-import { authenticateVenue, AuthRequest } from "../middleware/auth";
+import { authenticateVenue, authenticateAdmin, AuthRequest } from "../middleware/auth";
 import {
   generatePreMatchPredictions,
   generatePerOverPredictions,
@@ -14,7 +14,7 @@ import { fetchTodayFixtures, fetchSportsmonkLiveScores } from "../services/sport
 const router = Router();
 
 // Create a match (admin/dev endpoint)
-router.post("/match", async (req: any, res: Response): Promise<void> => {
+router.post("/match", authenticateAdmin, async (req: any, res: Response): Promise<void> => {
   try {
     const { team1, team2, team1Short, team2Short, team1Players, team2Players, startTime } = req.body;
 
@@ -51,7 +51,7 @@ router.post("/match", async (req: any, res: Response): Promise<void> => {
 });
 
 // Start match — generates Over 1 predictions so users can answer during the first over
-router.post("/match/:matchId/start", async (req: any, res: Response): Promise<void> => {
+router.post("/match/:matchId/start", authenticateAdmin, async (req: any, res: Response): Promise<void> => {
   try {
     const { matchId } = req.params;
     const { currentBatter } = req.body;
@@ -81,8 +81,8 @@ router.post("/match/:matchId/start", async (req: any, res: Response): Promise<vo
       await Prediction.create(hotTake as any);
     }
 
-    io.emit("newPrediction", { matchId, type: "per_over", overNumber: 1, round });
-    io.emit("matchStarted", { matchId });
+    io.to(`match:${matchId}`).emit("newPrediction", { matchId, type: "per_over", overNumber: 1, round });
+    io.to(`match:${matchId}`).emit("matchStarted", { matchId });
 
     res.json({
       message: "Match started! Over 1 predictions are live.",
@@ -97,7 +97,7 @@ router.post("/match/:matchId/start", async (req: any, res: Response): Promise<vo
 
 // Advance match state — called when an over is COMPLETED
 // Resolves current over predictions, generates next over predictions
-router.post("/match/:matchId/advance-over", async (req: any, res: Response): Promise<void> => {
+router.post("/match/:matchId/advance-over", authenticateAdmin, async (req: any, res: Response): Promise<void> => {
   try {
     const { matchId } = req.params;
     const { overNumber, innings, overResults, currentBatter } = req.body;
@@ -164,7 +164,7 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
       const hotTake = generateHotTake(matchId, nextRound, match.team1Short, match.team2Short);
       if (hotTake) {
         await Prediction.create(hotTake as any);
-        io.emit("newPrediction", { matchId, type: "hot_take", round: nextRound });
+        io.to(`match:${matchId}`).emit("newPrediction", { matchId, type: "hot_take", round: nextRound });
       }
     }
 
@@ -175,7 +175,7 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
         await Prediction.create(p as any);
       }
 
-      io.emit("newPrediction", { matchId, type: "per_over", overNumber: nextOver, round: nextRound });
+      io.to(`match:${matchId}`).emit("newPrediction", { matchId, type: "per_over", overNumber: nextOver, round: nextRound });
     }
 
     res.json({
@@ -191,7 +191,7 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
 });
 
 // Resolve a specific prediction manually
-router.post("/prediction/:predictionId/resolve", async (req: any, res: Response): Promise<void> => {
+router.post("/prediction/:predictionId/resolve", authenticateAdmin, async (req: any, res: Response): Promise<void> => {
   try {
     const { predictionId } = req.params;
     const { correctOption } = req.body;
@@ -210,7 +210,7 @@ router.post("/prediction/:predictionId/resolve", async (req: any, res: Response)
 });
 
 // Start innings break
-router.post("/match/:matchId/innings-break", async (req: any, res: Response): Promise<void> => {
+router.post("/match/:matchId/innings-break", authenticateAdmin, async (req: any, res: Response): Promise<void> => {
   try {
     const { matchId } = req.params;
     const { team1Score, team1Wickets, target } = req.body;
@@ -252,7 +252,7 @@ router.post("/match/:matchId/innings-break", async (req: any, res: Response): Pr
       await generateRoundRewards(matchId, v.venueId, 3, io);
     }
 
-    io.emit("inningsBreak", { matchId, target, team1Score, team1Wickets });
+    io.to(`match:${matchId}`).emit("inningsBreak", { matchId, target, team1Score, team1Wickets });
 
     res.json({ message: "Innings break started", rivalryCallsGenerated: rivalryCalls.length });
   } catch (error) {
@@ -262,7 +262,7 @@ router.post("/match/:matchId/innings-break", async (req: any, res: Response): Pr
 });
 
 // End match
-router.post("/match/:matchId/end", async (req: any, res: Response): Promise<void> => {
+router.post("/match/:matchId/end", authenticateAdmin, async (req: any, res: Response): Promise<void> => {
   try {
     const { matchId } = req.params;
     const { winner, playerOfMatch } = req.body;
@@ -300,7 +300,7 @@ router.post("/match/:matchId/end", async (req: any, res: Response): Promise<void
       await generateRoundRewards(matchId, v.venueId, 0, io);
     }
 
-    io.emit("matchEnd", { matchId, winner, playerOfMatch });
+    io.to(`match:${matchId}`).emit("matchEnd", { matchId, winner, playerOfMatch });
 
     res.json({ message: "Match ended" });
   } catch (error) {
@@ -427,7 +427,7 @@ function resolveOverPrediction(
 // ========== SPORTSMONK API ENDPOINTS ==========
 
 // Fetch today's fixtures from Sportsmonk
-router.get("/cricket/fixtures", async (_req: any, res: Response): Promise<void> => {
+router.get("/cricket/fixtures", authenticateAdmin, async (_req: any, res: Response): Promise<void> => {
   try {
     const fixtures = await fetchTodayFixtures();
     res.json({ total: fixtures.length, fixtures });
@@ -438,7 +438,7 @@ router.get("/cricket/fixtures", async (_req: any, res: Response): Promise<void> 
 });
 
 // Fetch live scores from Sportsmonk
-router.get("/cricket/live", async (_req: any, res: Response): Promise<void> => {
+router.get("/cricket/live", authenticateAdmin, async (_req: any, res: Response): Promise<void> => {
   try {
     const scores = await fetchSportsmonkLiveScores();
     res.json({ total: scores.length, scores });
@@ -449,7 +449,7 @@ router.get("/cricket/live", async (_req: any, res: Response): Promise<void> => {
 });
 
 // Import a Sportsmonk fixture into our database
-router.post("/cricket/import/:fixtureId", async (req: any, res: Response): Promise<void> => {
+router.post("/cricket/import/:fixtureId", authenticateAdmin, async (req: any, res: Response): Promise<void> => {
   try {
     const fixtureId = req.params.fixtureId as string;
     const { team1Players, team2Players } = req.body;
@@ -531,7 +531,7 @@ router.post("/cricket/import/:fixtureId", async (req: any, res: Response): Promi
 });
 
 // Manually trigger Sportsmonk poll
-router.post("/cricket/poll", async (req: any, res: Response): Promise<void> => {
+router.post("/cricket/poll", authenticateAdmin, async (req: any, res: Response): Promise<void> => {
   try {
     const { pollSportsmonkUpdates } = await import("../services/sportsmonkApi");
     const io = req.app.get("io");

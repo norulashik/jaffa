@@ -69,10 +69,8 @@ export default function OTPFlow({ onComplete }: OTPFlowProps) {
     try {
       const fullPhone = phone.startsWith("+91") ? phone : `+91${phone}`;
       const code = otp.join("");
-      // Re-send OTP since previous was consumed
-      await api.sendOTP(fullPhone);
-      // Use mock OTP for dev
-      const result = await api.verifyOTP(fullPhone, code || "123456", displayName);
+      // OTP was NOT consumed on first verify (server keeps it valid for displayName step)
+      const result = await api.verifyOTP(fullPhone, code, displayName);
 
       if (result.token) {
         localStorage.setItem("jaffa_token", result.token);
@@ -110,6 +108,41 @@ export default function OTPFlow({ onComplete }: OTPFlowProps) {
     if (e.key === "Backspace" && !otp[index] && index > 0) {
       otpRefs.current[index - 1]?.focus();
     }
+  };
+
+  const handleOtpPaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    if (pasted.length === 0) return;
+
+    const newOtp = [...otp];
+    for (let i = 0; i < 6; i++) {
+      newOtp[i] = pasted[i] || "";
+    }
+    setOtp(newOtp);
+
+    // Focus last filled field
+    const lastIndex = Math.min(pasted.length - 1, 5);
+    otpRefs.current[lastIndex]?.focus();
+
+    // Auto-submit if all 6 digits pasted
+    if (pasted.length === 6) {
+      handleVerifyOTP(pasted);
+    }
+  };
+
+  const handleResendOTP = async () => {
+    setError("");
+    setLoading(true);
+    try {
+      const fullPhone = phone.startsWith("+91") ? phone : `+91${phone}`;
+      await api.sendOTP(fullPhone);
+      setOtp(["", "", "", "", "", ""]);
+      otpRefs.current[0]?.focus();
+    } catch (err: any) {
+      setError(err.message);
+    }
+    setLoading(false);
   };
 
   return (
@@ -181,6 +214,7 @@ export default function OTPFlow({ onComplete }: OTPFlowProps) {
                     value={digit}
                     onChange={(e) => handleOtpChange(i, e.target.value)}
                     onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                    onPaste={i === 0 ? handleOtpPaste : undefined}
                     className="w-12 h-14 bg-slate-800 text-white text-center text-xl font-bold rounded-xl outline-none focus:ring-2 focus:ring-orange-500"
                     maxLength={1}
                     autoFocus={i === 0}
@@ -191,12 +225,21 @@ export default function OTPFlow({ onComplete }: OTPFlowProps) {
               {error && <p className="text-red-400 text-sm mb-4 text-center">{error}</p>}
               {loading && <p className="text-orange-400 text-sm text-center animate-pulse">Verifying...</p>}
 
-              <button
-                onClick={() => { setStep("phone"); setOtp(["", "", "", "", "", ""]); }}
-                className="text-slate-500 text-sm text-center w-full mt-4 hover:text-slate-300"
-              >
-                Change number
-              </button>
+              <div className="flex justify-center gap-4 mt-4">
+                <button
+                  onClick={() => { setStep("phone"); setOtp(["", "", "", "", "", ""]); }}
+                  className="text-slate-500 text-sm hover:text-slate-300"
+                >
+                  Change number
+                </button>
+                <button
+                  onClick={handleResendOTP}
+                  disabled={loading}
+                  className="text-orange-400 text-sm hover:text-orange-300 disabled:text-slate-600"
+                >
+                  Resend code
+                </button>
+              </div>
             </motion.div>
           )}
 

@@ -71,14 +71,15 @@ function GameApp() {
     }
 
     if (!match) return; // Match still loading, wait
+    if (!venueId) return; // Need venue to get match state
 
     // User is logged in and match is loaded
-    api.getMatchState(match.id, venueId!)
+    api.getMatchState(match.id, venueId)
       .then((data) => {
         if (data.participant) {
           // Already joined — check if they've answered all pre-match questions
           const unansweredPreMatch = data.openPredictions.filter(
-            (p: any) => p.category === "pre_match"
+            (p: any) => p.category === "pre_match" && !p.userAnswered
           );
           if (unansweredPreMatch.length > 0) {
             setGamePhase("prematch");
@@ -104,14 +105,14 @@ function GameApp() {
     );
   }
 
-  // Check if game is open (30 min before match start)
+  // Check if game is open (45 min before match start)
   const isGameOpen = (() => {
     if (!match?.startTime) return false;
     if (match.status === "live") return true; // always open if match is live
     const matchStart = new Date(match.startTime).getTime();
     const now = Date.now();
-    const thirtyMinBefore = matchStart - 30 * 60 * 1000;
-    return now >= thirtyMinBefore;
+    const fortyFiveMinBefore = matchStart - 45 * 60 * 1000;
+    return now >= fortyFiveMinBefore;
   })();
 
   if (!isGameOpen && match && venue) {
@@ -180,7 +181,7 @@ function CountdownGate({ match, venue }: { match: any; venue: any }) {
   const [timeLeft, setTimeLeft] = useState({ hours: 0, mins: 0, secs: 0 });
 
   useEffect(() => {
-    const opensAt = new Date(match.startTime).getTime() - 30 * 60 * 1000;
+    const opensAt = new Date(match.startTime).getTime() - 45 * 60 * 1000;
 
     const tick = () => {
       const diff = opensAt - Date.now();
@@ -208,7 +209,7 @@ function CountdownGate({ match, venue }: { match: any; venue: any }) {
           {match.team1Short} vs {match.team2Short}
         </p>
         <p className="text-white font-semibold text-lg mb-4">
-          Game opens 30 minutes before the match
+          Game opens 45 minutes before the match
         </p>
         <div className="bg-slate-900 rounded-xl p-4 mb-3">
           <p className="text-slate-400 text-sm mb-2">Opens in</p>

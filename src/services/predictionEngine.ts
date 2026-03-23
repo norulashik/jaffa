@@ -233,6 +233,11 @@ const perOverPool = [
 // Track which questions were used recently to avoid repeats within 3 overs
 const recentQuestions: Map<string, string[]> = new Map(); // matchId -> last N question keys
 
+// Clean up tracking data for a completed match
+export function cleanupMatchData(matchId: string): void {
+  recentQuestions.delete(matchId);
+}
+
 export function generatePerOverPredictions(
   matchId: string,
   overNumber: number,

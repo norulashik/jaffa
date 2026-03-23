@@ -14,7 +14,7 @@ router.get("/:matchId", authenticateUser, async (req: AuthRequest, res: Response
     const userId = req.userId!;
 
     const where: any = { matchId };
-    if (round) where.round = Number(round);
+    if (round !== undefined && round !== '') where.round = Number(round);
     if (status) where.status = status;
 
     const predictions = await Prediction.findAll({
@@ -124,7 +124,12 @@ router.post("/:predictionId/answer", authenticateUser, async (req: AuthRequest, 
     }
 
     res.status(201).json({ userPrediction });
-  } catch (error) {
+  } catch (error: any) {
+    // Handle duplicate submission (unique constraint on userId+predictionId)
+    if (error?.name === "SequelizeUniqueConstraintError") {
+      res.status(400).json({ error: "Already answered this prediction" });
+      return;
+    }
     console.error("Submit prediction error:", error);
     res.status(500).json({ error: "Failed to submit prediction" });
   }

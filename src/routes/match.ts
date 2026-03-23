@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { Match, MatchParticipant, Prediction } from "../models";
+import { Match, MatchParticipant, Prediction, UserPrediction } from "../models";
 import { authenticateUser, AuthRequest } from "../middleware/auth";
 
 const router = Router();
@@ -67,7 +67,12 @@ router.post("/:matchId/join", authenticateUser, async (req: AuthRequest, res: Re
     io.to(`venue:${venueId}:${matchId}`).emit("playerCount", { count: playerCount });
 
     res.status(201).json({ participant });
-  } catch (error) {
+  } catch (error: any) {
+    if (error?.name === "SequelizeUniqueConstraintError") {
+      const existing = await MatchParticipant.findOne({ where: { userId: req.userId!, matchId: req.params.matchId as string, venueId: req.body.venueId } });
+      res.json({ participant: existing, message: "Already joined" });
+      return;
+    }
     console.error("Join match error:", error);
     res.status(500).json({ error: "Failed to join match" });
   }
@@ -95,11 +100,22 @@ router.get("/:matchId/state", authenticateUser, async (req: AuthRequest, res: Re
       order: [["createdAt", "ASC"]],
     });
 
+    // Include user's answers so frontend knows which predictions are already answered
+    const userAnswers = await UserPrediction.findAll({
+      where: { userId, matchId },
+      attributes: ["predictionId"],
+    });
+    const answeredIds = new Set(userAnswers.map((a) => a.predictionId));
+    const openWithAnswerStatus = openPredictions.map((p) => ({
+      ...p.toJSON(),
+      userAnswered: answeredIds.has(p.id),
+    }));
+
     const playerCount = await MatchParticipant.count({
       where: { matchId, venueId },
     });
 
-    res.json({ match, participant, openPredictions, playerCount });
+    res.json({ match, participant, openPredictions: openWithAnswerStatus, playerCount });
   } catch (error) {
     console.error("Get match state error:", error);
     res.status(500).json({ error: "Failed to get match state" });

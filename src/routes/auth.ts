@@ -71,15 +71,13 @@ router.post("/verify-otp", async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    // Mark OTP as used
-    await otp.update({ verified: true });
-
     // Find or create user
     let user = await User.findOne({ where: { phone } });
     let isNewUser = false;
 
     if (!user) {
       if (!displayName) {
+        // Don't consume the OTP yet — user needs to come back with displayName
         res.json({ needsDisplayName: true, message: "New user, display name required" });
         return;
       }
@@ -88,6 +86,9 @@ router.post("/verify-otp", async (req: Request, res: Response): Promise<void> =>
       user = await User.create({ phone, displayName, avatarConfig });
       isNewUser = true;
     }
+
+    // OTP is valid and user is resolved — now mark it as consumed
+    await otp.update({ verified: true });
 
     // Lazy backfill: if existing user has no avatar, generate one
     if (!user.avatarConfig) {
