@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&amp;family=Inter:wght@300..700&amp;family=Manrope:wght@300..800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "on-primary-fixed-variant": "#005234",
+              "surface-container": "#1e2024",
+              "on-error-container": "#ffdad6",
+              "error-container": "#93000a",
+              "inverse-on-surface": "#2f3035",
+              "surface-container-low": "#1a1c20",
+              "tertiary": "#fffbff",
+              "on-tertiary": "#3c0090",
+              "primary-fixed": "#4dffb2",
+              "inverse-primary": "#006c46",
+              "secondary-fixed-dim": "#4cd6ff",
+              "on-primary": "#003822",
+              "secondary": "#a6e6ff",
+              "secondary-fixed": "#b7eaff",
+              "error": "#ffb4ab",
+              "outline": "#849589",
+              "outline-variant": "#3a4a40",
+              "on-tertiary-fixed": "#23005b",
+              "on-secondary-fixed": "#001f28",
+              "primary-container": "#00ffab",
+              "surface": "#111317",
+              "surface-container-high": "#282a2e",
+              "on-tertiary-fixed-variant": "#5700c9",
+              "on-surface-variant": "#b9cbbe",
+              "surface-variant": "#333539",
+              "on-surface": "#e2e2e8",
+              "tertiary-container": "#e7daff",
+              "on-error": "#690005",
+              "on-secondary-container": "#00566b",
+              "on-secondary-fixed-variant": "#004e60",
+              "secondary-container": "#14d1ff",
+              "surface-container-lowest": "#0c0e12",
+              "on-tertiary-container": "#7624ff",
+              "primary-fixed-dim": "#00e297",
+              "on-secondary": "#003543",
+              "surface-tint": "#00e297",
+              "inverse-surface": "#e2e2e8",
+              "on-background": "#e2e2e8",
+              "primary": "#f6fff6",
+              "tertiary-fixed": "#e9ddff",
+              "surface-dim": "#111317",
+              "tertiary-fixed-dim": "#d1bcff",
+              "on-primary-container": "#00714a",
+              "surface-container-highest": "#333539",
+              "surface-bright": "#37393e",
+              "background": "#111317",
+              "on-primary-fixed": "#002112"
+            },
+            fontFamily: {
+              "headline": ["Space Grotesk"],
+              "body": ["Inter"],
+              "label": ["Manrope"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-panel {
+            background: rgba(26, 28, 32, 0.4);
+            backdrop-filter: blur(12px);
+        }
+        .neon-border {
+            box-shadow: 0 0 15px rgba(0, 255, 171, 0.2);
+            border: 1px solid rgba(0, 255, 171, 0.4);
+        }
+        .glow-text {
+            text-shadow: 0 0 8px rgba(0, 255, 171, 0.5);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface text-on-surface font-body min-h-screen pb-24">
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full flex justify-between items-center px-6 py-4 max-w-none bg-slate-900/40 backdrop-blur-xl z-50 tonal-shift-bg-slate-800/50 shadow-[0_8px_32px_0_rgba(0,255,171,0.1)]">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-[#00FFAB]" data-icon="sports_cricket">sports_cricket</span>
+<h1 class="text-2xl font-black italic text-[#00FFAB] tracking-widest font-['Space_Grotesk'] uppercase">JAFFA</h1>
+</div>
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-slate-400 hover:text-[#14d1ff] transition-colors duration-300 cursor-pointer" data-icon="search">search</span>
+<div class="w-10 h-10 rounded-full border-2 border-[#00FFAB]/30 overflow-hidden scale-95 active:scale-90 transition-transform cursor-pointer">
+<img alt="Profile" class="w-full h-full object-cover" data-alt="User profile avatar with neon border" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBpdiANDfIDXRna7Z_2PCnPYAMNC1o3eJCahnAkp99eVAltgDnD5ZYqunAEr-JfaJOrLQ4iBgP5oe8Fn9lvd6gW2FyVJwxIrHtxzZNgWLn8D4q3zwwZBmQB6-Hqgv6fyRbtTukBUZ9I5d6rAZoALqSDg_vIWJWrHTXLOIgyUrnH_Z42AIYXV3CZnAyj0yJ5dN6BvTpL7tqSpu-s1W98Y1286QeHcEXnfzrP0SWDiRocCym9-spO3jGrGyeAwkMzMyMksXScUJWc3fo"/>
+</div>
+</div>
+</header>
+<main class="pt-24 px-4 space-y-6 max-w-2xl mx-auto">
+<!-- Live Header Section -->
+<section class="flex justify-between items-end mb-4">
+<div>
+<span class="font-label text-xs uppercase tracking-[0.2em] text-secondary-fixed-dim">Arena Dashboard</span>
+<h2 class="font-headline text-3xl font-bold tracking-tight">Active Battles</h2>
+</div>
+<div class="text-right">
+<span class="font-label text-[10px] uppercase text-outline">Pulse Rate</span>
+<div class="h-1 w-24 bg-surface-container-high rounded-full mt-1 overflow-hidden">
+<div class="h-full bg-gradient-to-r from-secondary-container to-primary-container w-[75%]"></div>
+</div>
+</div>
+</section>
+<!-- LIVE Match Card (Featured) -->
+<div class="relative group">
+<div class="absolute -inset-0.5 bg-gradient-to-r from-primary-container to-secondary-container rounded-xl blur opacity-20 group-hover:opacity-40 transition duration-1000"></div>
+<div class="relative bg-surface-container-low neon-border rounded-xl overflow-hidden p-6">
+<!-- Status Row -->
+<div class="flex justify-between items-center mb-8">
+<div class="flex items-center gap-2 bg-primary-container/10 px-3 py-1 rounded-full border border-primary-container/20">
+<span class="relative flex h-2 w-2">
+<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-container opacity-75"></span>
+<span class="relative inline-flex rounded-full h-2 w-2 bg-primary-container"></span>
+</span>
+<span class="font-label text-[10px] font-bold text-primary-container uppercase tracking-widest">LIVE</span>
+</div>
+<span class="font-label text-[10px] text-on-surface-variant uppercase tracking-widest bg-surface-container-highest px-2 py-1 rounded">The Coffee Bean</span>
+</div>
+<!-- Matchup -->
+<div class="flex justify-between items-center mb-8 px-4">
+<div class="flex flex-col items-center gap-3">
+<div class="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center p-2 shadow-inner">
+<img alt="IND" class="w-full h-full object-contain" data-alt="India national flag circle icon" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA9SBWqyQEvzHj6OZLoJ6I229ZuTYp6PT3_14LuGlyNNO_NJ_KSBf8dZ1LV4MnuO-nngcoMRy1pB_g1b4RWGYHRJWoWQG9JK0VgR0qA0j8kuy8swCK9Hxwy7eT1_Ocv_ZpGQgAolWKGEeys6yIS4dEUa-tTm7rg17QRqYGcoNF7M0yrqTVdTyrtkZujiv0Ls51PH_6t73sH6hdSRU887QGUJXm3TKnV_M51n00y8bF84_mnlKLlm1yhVHDthDMFKpzFUNlBJEgKtys"/>
+</div>
+<span class="font-headline font-bold text-xl tracking-wider">IND</span>
+</div>
+<div class="flex flex-col items-center">
+<span class="font-headline font-black text-4xl text-outline-variant italic opacity-50">VS</span>
+<div class="mt-2 text-center">
+<div class="text-primary-container font-headline font-bold text-lg leading-tight glow-text">142/3</div>
+<div class="text-[10px] text-outline font-label uppercase">16.4 Overs</div>
+</div>
+</div>
+<div class="flex flex-col items-center gap-3">
+<div class="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center p-2 shadow-inner">
+<img alt="AUS" class="w-full h-full object-contain" data-alt="Australia national flag circle icon" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCtzW57Gd01cPG7gXO1QIWLotRQAq8VMxBqPtYr-wkTeYx2jDn1KmPlfKMqIPrD-jtfaOdRy1FS6k0La0zy2O7rAFqSiGm7jh8_FqVedN-xI70t4pd5poRk4IFD2GR89sE-8akN1ZOfvMcZxZ39kjrOa8uAUWSpCc81hyrTuTY_4pW9WnaC_NVLxXyJJzpLvDQmbKOIbcoC_8VU_8mxqgBvEXclTJz_gyRbJg8JbpMzjF7kuH2szKcr7BU6UhNTnw9DedTZfnLlJC8"/>
+</div>
+<span class="font-headline font-bold text-xl tracking-wider">AUS</span>
+</div>
+</div>
+<!-- Footer Action -->
+<div class="flex items-center gap-4">
+<button class="flex-1 bg-primary-container text-on-primary-container font-headline font-bold py-3 rounded-xl scale-95 active:scale-90 transition-all shadow-[0_4px_20px_rgba(0,255,171,0.4)] uppercase tracking-tight">
+                        Join Now
+                    </button>
+<button class="w-12 h-12 bg-surface-container-highest rounded-xl flex items-center justify-center text-on-surface-variant hover:text-primary-container transition-colors">
+<span class="material-symbols-outlined" data-icon="share">share</span>
+</button>
+</div>
+</div>
+</div>
+<!-- Upcoming Matches Title -->
+<h3 class="font-headline text-lg font-bold text-on-surface-variant mt-8 mb-4 border-l-4 border-secondary-container pl-3">Upcoming Battles</h3>
+<!-- Match Card 2 (Standard) -->
+<div class="bg-surface-container-low rounded-xl p-5 border border-white/5 hover:border-white/10 transition-all group">
+<div class="flex justify-between items-start mb-6">
+<div class="flex flex-col">
+<span class="font-label text-[10px] text-outline uppercase tracking-widest">T20 Series • Starts in 2h</span>
+<span class="font-label text-[10px] text-secondary-fixed-dim mt-1">Melbourne Cricket Ground</span>
+</div>
+<div class="bg-surface-container-highest px-3 py-1 rounded-full">
+<span class="font-label text-[10px] font-bold text-on-surface">MAY 24</span>
+</div>
+</div>
+<div class="flex items-center justify-between mb-6">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center p-1.5 border border-white/10">
+<img alt="ENG" class="w-full h-full object-contain" data-alt="England national flag icon" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAm9iXISyAzQwVI33rVHQr_VljyGy0G7FhXZE7LIjV-WMqbQ-LYFhZ2qZTonW6ZZOfYtaZd8bcT1wXA8YIcCUg7TqI2gVA5hlnD87htp2Efknh7U7hcKThzBr962bTvECwWHCKF_Co4bbQ9vKBvKa1dGVWjruzZDdrN2czdhMMPYW0n4YM4oTdpTQEAoEEbEIv9anVwfXQB2wcpUFHV00Bj0hZRHHYP61ZgPe9Wwu9a321SszelGmUCgfgiGw6Ow1MYOrLup4gCin8"/>
+</div>
+<span class="font-headline font-bold text-lg">ENG</span>
+</div>
+<div class="h-[1px] flex-1 mx-4 bg-gradient-to-r from-transparent via-outline-variant to-transparent opacity-30"></div>
+<div class="flex items-center gap-4">
+<span class="font-headline font-bold text-lg">RSA</span>
+<div class="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center p-1.5 border border-white/10">
+<img alt="RSA" class="w-full h-full object-contain" data-alt="South Africa national flag icon" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAx6ubzVGmEOkHEb_Zl45hij5R3tDhxs_QTyTCO4YSnn0EopjIM1Dw0B_z9JKch4AAUI9_SQKH4UblqOSGRFA2JaQRmy4Ue898c1c0EZY4ic-d0HyO4tQ2pXtF7nf1wzoKPCUWHwk-uX_9ACyhBdR2aKDFTlNimfsWenJZQJ7VaSkoZ1UngtLphvE8orT3e9do4uzGYm-Z1Scc-P03llghnorsdTipDCsFLtQCT45MxfnIOm5Pl_dEd3vJMd76ozclxn2stezv2lDQ"/>
+</div>
+</div>
+</div>
+<button class="w-full bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-label text-xs font-bold py-2.5 rounded-lg transition-colors border border-white/5 uppercase tracking-widest">
+                View Odds
+            </button>
+</div>
+<!-- Match Card 3 (Standard) -->
+<div class="bg-surface-container-low rounded-xl p-5 border border-white/5 hover:border-white/10 transition-all group">
+<div class="flex justify-between items-start mb-6">
+<div class="flex flex-col">
+<span class="font-label text-[10px] text-outline uppercase tracking-widest">World Cup Qualifiers</span>
+<span class="font-label text-[10px] text-secondary-fixed-dim mt-1">Eden Gardens</span>
+</div>
+<div class="bg-surface-container-highest px-3 py-1 rounded-full">
+<span class="font-label text-[10px] font-bold text-on-surface">MAY 25</span>
+</div>
+</div>
+<div class="flex items-center justify-between mb-6">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center p-1.5 border border-white/10">
+<img alt="NZ" class="w-full h-full object-contain" data-alt="New Zealand national flag icon" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA2GG92MN_CZzjL0LaTx6flucSst5GBlMJSpXh50sY8WIbdaRNlOUQgOrfxI8Su2YI5Wvv_cmdLiGv7iMxBVFVwGqxKzM3IZhRUU-LxbGEHmTkOzswWEHNoBXEE3RJLv53nuKPOzW9hHJcDWlZLwkDOB7o7af_jTR_vpmNPJZmRCYnE_HmI_Kzcnra1bb9RRRKsnbcWllaKsKlrg3biZ5958IzqmuTGXgmCbKHoJDYaU_Grk3TV3rYxQrr7-7C9g25RIBomnlspf04"/>
+</div>
+<span class="font-headline font-bold text-lg">NZL</span>
+</div>
+<div class="h-[1px] flex-1 mx-4 bg-gradient-to-r from-transparent via-outline-variant to-transparent opacity-30"></div>
+<div class="flex items-center gap-4">
+<span class="font-headline font-bold text-lg">PAK</span>
+<div class="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center p-1.5 border border-white/10">
+<img alt="PAK" class="w-full h-full object-contain" data-alt="Pakistan national flag icon" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCI5LoJCbDkRagfpMUFomPl8kRGIAojvDyelQWIN9kwVh-rhfOMREyMxmoNZVW2J4cmQfGlYMyfHvpuIG8ZYFaVvs96fwjnXyacJuSi6MErOHl40hkcRS7LEU_bYpJ_pPrYbYLtxb8eJw1DaP_SXEkacXHkvEVgOjGAudftS0dZcMOlwlxwQ0KAwBS4WWmrXjtY9OOg_I2pablA_oKmEDSZjm_biEJ45ADeaM6KIVbi8MRL5kNQ5hUKDPHZ42dqEQM3rQu5hIbkmqA"/>
+</div>
+</div>
+</div>
+<button class="w-full bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-label text-xs font-bold py-2.5 rounded-lg transition-colors border border-white/5 uppercase tracking-widest">
+                View Odds
+            </button>
+</div>
+</main>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-6 pt-3 bg-[#111317]/80 backdrop-blur-2xl rounded-t-[2rem] border-t border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.6)]">
+<!-- Home (Active) -->
+<a class="flex flex-col items-center justify-center text-[#00FFAB] bg-[#00FFAB]/10 rounded-xl px-4 py-1 shadow-[0_0_15px_rgba(0,255,171,0.3)] active:scale-95 transition-all duration-200 ease-out" href="#">
+<span class="material-symbols-outlined" data-icon="home" style="font-variation-settings: 'FILL' 1;">home</span>
+<span class="font-['Manrope'] text-[10px] font-bold uppercase tracking-widest mt-1">Home</span>
+</a>
+<!-- Ranks -->
+<a class="flex flex-col items-center justify-center text-slate-500 hover:text-[#14d1ff] active:scale-95 transition-all duration-200 ease-out" href="#">
+<span class="material-symbols-outlined" data-icon="leaderboard">leaderboard</span>
+<span class="font-['Manrope'] text-[10px] font-bold uppercase tracking-widest mt-1">Ranks</span>
+</a>
+<!-- Rewards -->
+<a class="flex flex-col items-center justify-center text-slate-500 hover:text-[#14d1ff] active:scale-95 transition-all duration-200 ease-out" href="#">
+<span class="material-symbols-outlined" data-icon="military_tech">military_tech</span>
+<span class="font-['Manrope'] text-[10px] font-bold uppercase tracking-widest mt-1">Rewards</span>
+</a>
+<!-- Profile -->
+<a class="flex flex-col items-center justify-center text-slate-500 hover:text-[#14d1ff] active:scale-95 transition-all duration-200 ease-out" href="#">
+<span class="material-symbols-outlined" data-icon="person">person</span>
+<span class="font-['Manrope'] text-[10px] font-bold uppercase tracking-widest mt-1">Profile</span>
+</a>
+</nav>
+</body></html>

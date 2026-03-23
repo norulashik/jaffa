@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import http from "http";
 import path from "path";
+import fs from "fs";
 import { Server as SocketIOServer } from "socket.io";
 import dotenv from "dotenv";
 import { sequelize } from "./models";
@@ -181,6 +182,14 @@ app.use(express.static(frontendBuildPath));
 app.use((req, res, next) => {
   if (req.path.startsWith("/api") || req.path.startsWith("/socket.io")) {
     return next();
+  }
+  // Check for page-specific HTML file (e.g. /admin -> admin.html)
+  const cleanPath = req.path.replace(/\/$/, "").replace(/^\//, "");
+  if (cleanPath) {
+    const pageFile = path.join(frontendBuildPath, `${cleanPath}.html`);
+    if (fs.existsSync(pageFile)) {
+      return res.sendFile(pageFile);
+    }
   }
   res.sendFile(path.join(frontendBuildPath, "index.html"));
 });

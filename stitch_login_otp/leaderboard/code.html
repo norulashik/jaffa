@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>JAFFA | Leaderboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700;800&amp;family=Inter:wght@300;400;500;600;700&amp;family=Manrope:wght@300;400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "on-primary-fixed-variant": "#005234",
+                        "surface-container": "#1e2024",
+                        "on-error-container": "#ffdad6",
+                        "error-container": "#93000a",
+                        "inverse-on-surface": "#2f3035",
+                        "surface-container-low": "#1a1c20",
+                        "tertiary": "#fffbff",
+                        "on-tertiary": "#3c0090",
+                        "primary-fixed": "#4dffb2",
+                        "inverse-primary": "#006c46",
+                        "secondary-fixed-dim": "#4cd6ff",
+                        "on-primary": "#003822",
+                        "secondary": "#a6e6ff",
+                        "secondary-fixed": "#b7eaff",
+                        "error": "#ffb4ab",
+                        "outline": "#849589",
+                        "outline-variant": "#3a4a40",
+                        "on-tertiary-fixed": "#23005b",
+                        "on-secondary-fixed": "#001f28",
+                        "primary-container": "#00ffab",
+                        "surface": "#111317",
+                        "surface-container-high": "#282a2e",
+                        "on-tertiary-fixed-variant": "#5700c9",
+                        "on-surface-variant": "#b9cbbe",
+                        "surface-variant": "#333539",
+                        "on-surface": "#e2e2e8",
+                        "tertiary-container": "#e7daff",
+                        "on-error": "#690005",
+                        "on-secondary-container": "#00566b",
+                        "on-secondary-fixed-variant": "#004e60",
+                        "secondary-container": "#14d1ff",
+                        "surface-container-lowest": "#0c0e12",
+                        "on-tertiary-container": "#7624ff",
+                        "primary-fixed-dim": "#00e297",
+                        "on-secondary": "#003543",
+                        "surface-tint": "#00e297",
+                        "inverse-surface": "#e2e2e8",
+                        "on-background": "#e2e2e8",
+                        "primary": "#f6fff6",
+                        "tertiary-fixed": "#e9ddff",
+                        "surface-dim": "#111317",
+                        "tertiary-fixed-dim": "#d1bcff",
+                        "on-primary-container": "#00714a",
+                        "surface-container-highest": "#333539",
+                        "surface-bright": "#37393e",
+                        "background": "#111317",
+                        "on-primary-fixed": "#002112"
+                    },
+                    fontFamily: {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Inter"],
+                        "label": ["Manrope"]
+                    },
+                    borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .gold-glow { box-shadow: 0 0 30px rgba(255, 215, 0, 0.4); }
+        .silver-glow { box-shadow: 0 0 30px rgba(192, 192, 192, 0.3); }
+        .bronze-glow { box-shadow: 0 0 30px rgba(205, 127, 50, 0.3); }
+        .stadium-gradient {
+            background: radial-gradient(circle at top, #1e2024 0%, #111317 100%);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-surface font-body selection:bg-primary-container selection:text-on-primary-container min-h-screen overflow-x-hidden">
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full flex justify-between items-center px-6 py-4 max-w-none bg-slate-900/40 backdrop-blur-xl z-50 shadow-[0_8px_32px_0_rgba(0,255,171,0.1)]">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-[#00FFAB]" data-icon="sports_cricket">sports_cricket</span>
+<h1 class="font-['Space_Grotesk'] font-bold tracking-tight uppercase text-2xl font-black italic text-[#00FFAB] tracking-widest">JAFFA</h1>
+</div>
+<div class="flex items-center gap-4">
+<div class="bg-surface-container-highest/50 p-1.5 rounded-full hover:text-[#14d1ff] transition-colors duration-300 active:scale-95 transition-transform cursor-pointer">
+<span class="material-symbols-outlined">notifications</span>
+</div>
+<div class="w-10 h-10 rounded-full border-2 border-[#00FFAB]/20 overflow-hidden active:scale-90 transition-transform cursor-pointer">
+<img alt="User Profile Avatar" class="w-full h-full object-cover" data-alt="Close up professional user avatar icon" src="https://lh3.googleusercontent.com/aida-public/AB6AXuARilPwsUfrf29clPGLh-8ZsKw4UBq5nYKmtE6Em_raFNhDqR1Y3HJ4Vu0Z5FmuXAUI3Pd5hIMnfVhy7TEk-vOaXWTxlJlIjeYsM19H-UyybJ9NLgC5a7EIvTRBH112SIK3PCKUh86pCkZGtfl5-ZD4I2ov3Q6Jj3OigtUzkrffqC3L0t6SA_o3Ihd4gFKty1OPD5Q0hiTE6gd_eVJ8YEvspExUNWNZNqIYdGlzSCM45N3E-IB3ZsmlydPrCDIv05CE0uneSdg5_No"/>
+</div>
+</div>
+</header>
+<main class="pt-24 pb-32 stadium-gradient">
+<!-- Header & Tabs -->
+<section class="px-6 mb-8">
+<h2 class="font-headline text-display-md text-4xl font-extrabold mb-6 tracking-tight">Ranks</h2>
+<div class="flex p-1 bg-surface-container-lowest rounded-xl w-full max-w-md">
+<button class="flex-1 py-3 text-center rounded-lg font-label font-bold text-sm tracking-widest uppercase transition-all duration-300 bg-surface-container-high text-on-surface">Round</button>
+<button class="flex-1 py-3 text-center rounded-lg font-label font-bold text-sm tracking-widest uppercase transition-all duration-300 text-on-surface-variant hover:text-on-surface">Overall</button>
+</div>
+</section>
+<!-- Podium Section -->
+<section class="px-6 mb-12 relative overflow-hidden">
+<!-- Asymmetric Background Element -->
+<div class="absolute -top-10 -right-10 w-64 h-64 bg-primary-container/5 blur-[100px] rounded-full"></div>
+<div class="flex items-end justify-center gap-2 pt-12">
+<!-- Rank 2 (Silver) -->
+<div class="flex flex-col items-center flex-1 max-w-[100px]">
+<div class="relative mb-4 group">
+<div class="w-20 h-20 rounded-full border-2 border-slate-400 silver-glow overflow-hidden transform group-hover:scale-105 transition-transform">
+<img alt="Silver Medalist" class="w-full h-full object-cover" data-alt="Sports profile photo of second rank user" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDut8SwySOswydkyWBQqA5LyOu9VPmjFNHJgfS2mwQXHcqAJIxBJOBLbnmAIyduttjs_3xEQTbxq1BclFWQV6ngO1XCl4L6HtnNJs7-iZeCqul4aHqMeSZb-q4YJtABPqQ8m7EBNs1ZFVQ4BQ6rcAzHaFEln68MzZRFf-ec59ecM0A3i83HwuSO9amB-EebSJ-YD_TQY-dQTHxipZIyyBg7dyEHeMyjr-smXXSwaBddjpHNymiAV_M1M2eIJUENHvsViWXaZbeqmNA"/>
+</div>
+<div class="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-slate-400 text-surface font-headline font-black px-3 py-0.5 rounded-full text-xs">2</div>
+</div>
+<span class="font-label text-xs font-bold uppercase tracking-tighter text-center">Rahul.K</span>
+<span class="font-headline text-lg font-bold text-secondary-fixed-dim">14,200</span>
+</div>
+<!-- Rank 1 (Gold) -->
+<div class="flex flex-col items-center flex-1 max-w-[120px] -translate-y-6">
+<div class="relative mb-4 group">
+<div class="w-28 h-28 rounded-full border-4 border-[#FFD700] gold-glow overflow-hidden transform group-hover:scale-105 transition-transform shadow-[0_0_40px_rgba(255,215,0,0.5)]">
+<img alt="Gold Medalist" class="w-full h-full object-cover" data-alt="Sports profile photo of first rank user" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBE3jpZmqb35AaXv_3ws2m0W_FNMd5NkCO0pPTrXVDnRg_5M96eQ00jurjotYHzOGV75ZfIcTuArB6Mlc2l1gjGBtgZzvV4BaWvz56Z_RsfutttdJmS3UBWJVfOCgbrVS2gGrOSyWv2SXdrjjVzhRnlLwAYBC3SkxvsLiIvM5ZDivjDLfFTHJu406qWZ4uikFBBFIQfYMcSnt8fzGSwPCuWhoSqOpBNv2kzcMLeu0dAonS0HyD_9iD-nZ0huZS5EIb04y5iN57bR58"/>
+</div>
+<div class="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-[#FFD700] text-surface font-headline font-black px-4 py-1 rounded-full text-sm">1</div>
+<span class="material-symbols-outlined absolute -top-8 left-1/2 -translate-x-1/2 text-[#FFD700] text-3xl animate-bounce" data-icon="military_tech" style="font-variation-settings: 'FILL' 1;">military_tech</span>
+</div>
+<span class="font-label text-sm font-extrabold uppercase tracking-tight text-center">Vikram_Pro</span>
+<span class="font-headline text-2xl font-black text-primary-container">18,540</span>
+</div>
+<!-- Rank 3 (Bronze) -->
+<div class="flex flex-col items-center flex-1 max-w-[100px]">
+<div class="relative mb-4 group">
+<div class="w-18 h-18 rounded-full border-2 border-orange-700 bronze-glow overflow-hidden transform group-hover:scale-105 transition-transform">
+<img alt="Bronze Medalist" class="w-full h-full object-cover" data-alt="Sports profile photo of third rank user" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD0xveusup2R5IkZ59PIg_tKqmp5ieav-IQaRx5q-wEsVmEAShjfo8zlbwpDCTVnVPFjPAdzWsN7kUm86YETwN6da5UI6vq0bBzNRfGwWbi8rzx58C0U1KM9fck4zfgbLMKPRZzauZ9z05_xnm6Yzbt0Y50vZM5FVFFqxlTfCaMT41_BplVQ6d2c4-FBjcUkbT-eONBx7q0yngMEhsCJr-x9eN05-UhAgiqfgjFNZHmhlpyLoZdqA9dbR-vyQ7jS_0RzlEr93ZGIF0"/>
+</div>
+<div class="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-orange-700 text-on-surface font-headline font-black px-3 py-0.5 rounded-full text-xs">3</div>
+</div>
+<span class="font-label text-xs font-bold uppercase tracking-tighter text-center">Sid_S</span>
+<span class="font-headline text-lg font-bold text-tertiary-fixed-dim">12,100</span>
+</div>
+</div>
+</section>
+<!-- Leaderboard List -->
+<section class="px-4 space-y-3">
+<!-- Table Header -->
+<div class="flex px-6 font-label text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface-variant/60">
+<span class="w-12">Rank</span>
+<span class="flex-1">User</span>
+<span class="w-20 text-right">Points</span>
+</div>
+<!-- List Item: 4 -->
+<div class="flex items-center px-6 py-4 bg-surface-container-low rounded-xl group hover:bg-surface-container-high transition-colors">
+<span class="w-12 font-headline font-bold text-on-surface-variant">04</span>
+<div class="flex-1 flex items-center gap-3">
+<img alt="User Avatar" class="w-8 h-8 rounded-full bg-surface-container-highest" data-alt="Abstract player profile icon" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB7oivx5G5rgCmsSa_xZHxHLF12rUqEuBrIO-ttY1ug4hJUz9T6xOxnXy-sJH9l6VfTcMIvZGF2aDYU9nz4OkpZiLrjJX5eHC98wqU5SuQIOEbMnPhleKETZ7_zkCF28thSOOXb_C5Jf-7Y-BVOQrAOw5uwLjoGGS2aRQU-Ek5pcNQRLyxMkPPQ6bNtDq9n7XKlMyBP-jzFby3QGQ0Ohps7vJvldAEUkPkvAYkHk6AYx8vOZ95yBwAxaNyWwNRYJh9kl24WBvaUxcQ"/>
+<span class="font-body font-semibold">Ananya_R</span>
+</div>
+<span class="w-20 text-right font-headline font-bold">11,850</span>
+</div>
+<!-- List Item: Current User (Highlighted) -->
+<div class="flex items-center px-6 py-5 bg-primary-container/10 border-l-4 border-primary-container rounded-xl relative shadow-[0_0_20px_rgba(0,255,171,0.1)]">
+<span class="w-12 font-headline font-black text-primary-container">05</span>
+<div class="flex-1 flex items-center gap-3">
+<div class="relative">
+<img alt="Your Avatar" class="w-10 h-10 rounded-full border-2 border-primary-container" data-alt="Professional user profile picture" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCPTs_t6zXuV9-T6s-M8aOGgUu56ioNtXbPVyGcxgcqGrunvBRIWccRPjUphpulWg2GNZ4Y6y3vWEZ2O2ZY8c8PJ-bh16ZeIj8833Uslh2T1RqLKJm0Q8HXikGwub-2iBlPbpiMhsN_EBA8kvRIwMR6dHJc5wWFOYJgVsDsTwhP34JIsHjrE2UJ_egC8R4cvY0yBea3vkNHJast5Tn8WzoWXZ_kTmvjX7lNQrXJ5n0MeksR16Nuqy-zNRGhWcStULLVEcW9-qRac-g"/>
+<span class="absolute -top-1 -right-1 w-3 h-3 bg-primary-container rounded-full border-2 border-surface animate-pulse"></span>
+</div>
+<div>
+<span class="font-body font-extrabold text-primary-container block">Arjun (You)</span>
+<span class="font-label text-[9px] uppercase tracking-widest text-on-primary-container font-bold bg-primary-container/20 px-1.5 rounded">Rising Star</span>
+</div>
+</div>
+<span class="w-20 text-right font-headline font-black text-primary-container">10,420</span>
+</div>
+<!-- List Item: 6 -->
+<div class="flex items-center px-6 py-4 bg-surface-container-low rounded-xl group hover:bg-surface-container-high transition-colors">
+<span class="w-12 font-headline font-bold text-on-surface-variant">06</span>
+<div class="flex-1 flex items-center gap-3">
+<img alt="User Avatar" class="w-8 h-8 rounded-full bg-surface-container-highest" data-alt="Abstract player profile icon" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB5bPMuPdLuSugO44I7Lpl0-CzHtAMCfXfEFRlzU18_tHyu2vPmxUZlvYm5GBr2XwqJ0QpU6tN4eZyq0CYgqRrxJ9481iGuTc0sh67cg2-Dsxm65iKYIUiqXHyJKv9IUJSjqsOk0zwQq2PjLujlktuuxMtBUO_M3MghvSxSxsNkWyfJrJ98_eA9KQ9N6JvMar9LzzboNGWYJm782n2Kg7fI0eYxm5xEdJ-HuvnN90tQCzk3SLr1ofn2-KP-zpOQEerc1UL3uMqFNXg"/>
+<span class="font-body font-semibold">Chris_77</span>
+</div>
+<span class="w-20 text-right font-headline font-bold">9,940</span>
+</div>
+<!-- List Item: 7 -->
+<div class="flex items-center px-6 py-4 bg-surface-container-low rounded-xl group hover:bg-surface-container-high transition-colors">
+<span class="w-12 font-headline font-bold text-on-surface-variant">07</span>
+<div class="flex-1 flex items-center gap-3">
+<img alt="User Avatar" class="w-8 h-8 rounded-full bg-surface-container-highest" data-alt="Abstract player profile icon" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAexFlvRfN-ckdsYEvek2MGm1QM7WRlZGEZoBJkCC9xZoJiYxo1B30MKScMUxlaJvxVcDLAwMe7ORh0yH4zrVJbiSAXCdh7y-QJZC4jRl6vo2RW-5wafARTjZVDGvP3ZrjOgqSCchqzz9uX8bw1wtBqxMgQQ2pzf-ylStIHHmZrn0iLAQkvdHrHtXLXWhaemhPlpDVjpTGTnhSKA9SotjYW2q1ySflg1VvOmMolyagHXHT6l5abmSc7G1RlzjxAPXjW9g6mMdqIphs"/>
+<span class="font-body font-semibold">RohanV</span>
+</div>
+<span class="w-20 text-right font-headline font-bold">9,120</span>
+</div>
+<!-- List Item: 8 -->
+<div class="flex items-center px-6 py-4 bg-surface-container-low rounded-xl group hover:bg-surface-container-high transition-colors">
+<span class="w-12 font-headline font-bold text-on-surface-variant">08</span>
+<div class="flex-1 flex items-center gap-3">
+<img alt="User Avatar" class="w-8 h-8 rounded-full bg-surface-container-highest" data-alt="Abstract player profile icon" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCFSARalEfwVNWjVezHJitM39KA5C01iR7RM59tDWrnixRzqfiDUwA9gN3ik2NTQHoBhv2W-qWSM0YZ0sP37cMx1p-Dra7KJ0FYCXxhLN6AlHb8bvBesaa6T81aSisDRb6BswET1xduxDAA_J2soXI-YyDoycpXND3bgHfFQilpkUSWfwFHGz7jts5qaZPSTGQRXt_wvqlhABEZoRg7fYVI1qll-dk9EkhCmNI9yKIKZ9h-7bCzyY7IN0c8qkQHM-hN0-rhm5Zpig0"/>
+<span class="font-body font-semibold">Priya_Play</span>
+</div>
+<span class="w-20 text-right font-headline font-bold">8,750</span>
+</div>
+</section>
+</main>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-6 pt-3 bg-[#111317]/80 backdrop-blur-2xl rounded-t-[2rem] border-t border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.6)]">
+<div class="flex flex-col items-center justify-center text-slate-500 hover:text-[#14d1ff] active:scale-95 transition-all duration-200 ease-out cursor-pointer">
+<span class="material-symbols-outlined mb-1" data-icon="home">home</span>
+<span class="font-['Manrope'] text-[10px] font-bold uppercase tracking-widest">Home</span>
+</div>
+<div class="flex flex-col items-center justify-center text-[#00FFAB] bg-[#00FFAB]/10 rounded-xl px-4 py-1 shadow-[0_0_15px_rgba(0,255,171,0.3)] active:scale-95 transition-all duration-200 ease-out cursor-pointer">
+<span class="material-symbols-outlined mb-1" data-icon="leaderboard" style="font-variation-settings: 'FILL' 1;">leaderboard</span>
+<span class="font-['Manrope'] text-[10px] font-bold uppercase tracking-widest">Ranks</span>
+</div>
+<div class="flex flex-col items-center justify-center text-slate-500 hover:text-[#14d1ff] active:scale-95 transition-all duration-200 ease-out cursor-pointer">
+<span class="material-symbols-outlined mb-1" data-icon="military_tech">military_tech</span>
+<span class="font-['Manrope'] text-[10px] font-bold uppercase tracking-widest">Rewards</span>
+</div>
+<div class="flex flex-col items-center justify-center text-slate-500 hover:text-[#14d1ff] active:scale-95 transition-all duration-200 ease-out cursor-pointer">
+<span class="material-symbols-outlined mb-1" data-icon="person">person</span>
+<span class="font-['Manrope'] text-[10px] font-bold uppercase tracking-widest">Profile</span>
+</div>
+</nav>
+</body></html>

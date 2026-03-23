@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Cricket Admin - Redeem</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700;900&amp;family=Inter:wght@300;400;500;600;700&amp;family=Manrope:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "on-error-container": "#ffdad6",
+              "surface-tint": "#00e297",
+              "primary-fixed": "#4dffb2",
+              "on-tertiary-fixed": "#23005b",
+              "primary-fixed-dim": "#00e297",
+              "secondary": "#a6e6ff",
+              "surface-container-highest": "#333539",
+              "on-secondary-container": "#00566b",
+              "secondary-fixed-dim": "#4cd6ff",
+              "tertiary-fixed": "#e9ddff",
+              "background": "#111317",
+              "surface-container-lowest": "#0c0e12",
+              "on-surface": "#e2e2e8",
+              "on-secondary": "#003543",
+              "inverse-surface": "#e2e2e8",
+              "primary": "#f6fff6",
+              "outline": "#849589",
+              "tertiary": "#fffbff",
+              "on-tertiary": "#3c0090",
+              "surface-dim": "#111317",
+              "surface-container-high": "#282a2e",
+              "outline-variant": "#3a4a40",
+              "primary-container": "#00ffab",
+              "on-tertiary-container": "#7624ff",
+              "inverse-primary": "#006c46",
+              "surface-container": "#1e2024",
+              "on-background": "#e2e2e8",
+              "on-secondary-fixed": "#001f28",
+              "error-container": "#93000a",
+              "on-secondary-fixed-variant": "#004e60",
+              "on-error": "#690005",
+              "surface-variant": "#333539",
+              "secondary-container": "#14d1ff",
+              "on-primary-fixed-variant": "#005234",
+              "on-tertiary-fixed-variant": "#5700c9",
+              "on-primary-container": "#00714a",
+              "surface-container-low": "#1a1c20",
+              "error": "#ffb4ab",
+              "surface": "#111317",
+              "secondary-fixed": "#b7eaff",
+              "on-surface-variant": "#b9cbbe",
+              "on-primary": "#003822",
+              "tertiary-fixed-dim": "#d1bcff",
+              "inverse-on-surface": "#2f3035",
+              "on-primary-fixed": "#002112",
+              "tertiary-container": "#e7daff",
+              "surface-bright": "#37393e"
+            },
+            fontFamily: {
+              "headline": ["Space Grotesk"],
+              "body": ["Inter"],
+              "label": ["Manrope"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>
+        .glass-panel {
+            background: rgba(30, 32, 36, 0.4);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+        }
+        .stadium-glow {
+            background: radial-gradient(circle at 50% 50%, rgba(0, 255, 171, 0.05) 0%, transparent 70%);
+        }
+        .neon-shadow {
+            box-shadow: 0 0 20px rgba(0, 255, 171, 0.2);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body min-h-screen overflow-x-hidden selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopNavBar Implementation from JSON -->
+<nav class="bg-[#111317]/80 backdrop-blur-xl docked full-width top-0 z-50 border-b border-white/10 shadow-[0_20px_40px_rgba(0,0,0,0.4)] fixed w-full">
+<div class="flex justify-between items-center w-full px-6 h-16">
+<div class="flex items-center gap-8">
+<span class="text-2xl font-black text-[#00FFAB] tracking-tighter font-headline">Cricket Admin</span>
+<div class="hidden md:flex gap-6 items-center h-full">
+<a class="font-['Space_Grotesk'] font-bold tracking-tight text-gray-400 hover:text-white transition-colors h-full flex items-center" href="#">Overview</a>
+<a class="font-['Space_Grotesk'] font-bold tracking-tight text-[#00FFAB] border-b-2 border-[#00FFAB] pb-1 h-full flex items-center" href="#">Redeem</a>
+<a class="font-['Space_Grotesk'] font-bold tracking-tight text-gray-400 hover:text-white transition-colors h-full flex items-center" href="#">Winners</a>
+<a class="font-['Space_Grotesk'] font-bold tracking-tight text-gray-400 hover:text-white transition-colors h-full flex items-center" href="#">Setup</a>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="p-2 hover:bg-white/5 rounded-lg transition-all duration-200 active:scale-95 text-gray-400">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="p-2 hover:bg-white/5 rounded-lg transition-all duration-200 active:scale-95 text-gray-400">
+<span class="material-symbols-outlined">settings</span>
+</button>
+<div class="w-8 h-8 rounded-full overflow-hidden bg-surface-container-highest ml-2 border border-white/10">
+<img alt="Admin Profile" class="w-full h-full object-cover" data-alt="Close up professional portrait of administrative user" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAJ8MjoQYv1_lp4-R_dP2km9IHIVofwaaNjWbfYW1yBjKWK3lBYfCCRWqBRSjhUZTXsCHOTlle6v_lIEw905BQrYuAzNiBsibQcMWQKhA_ImFUKdHGA0vHJWF1uTvIVPTJ9KGG8ifFyGuQOs2kuwMnOhMudySh5EPVBWL7oI2nTc5b9JGpTCM8_GBrRnegJpSvyCB33pzXgJpxapbz1CLC3Zb6PEXr8Xp0WwZZ8I7CqmbC8e78IaCYCA8T38ZKSmuM-ohIVSbnh8KY"/>
+</div>
+</div>
+</div>
+</nav>
+<!-- SideNavBar Implementation (Hidden on Mobile) -->
+<aside class="hidden lg:flex flex-col h-screen w-64 fixed left-0 top-0 border-r border-white/5 bg-[#0c0e12] py-4 z-40 mt-16">
+<div class="px-6 mb-8 mt-4">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-lg bg-surface-container-high flex items-center justify-center">
+<span class="material-symbols-outlined text-[#00FFAB]" style="font-variation-settings: 'FILL' 1;">sports_cricket</span>
+</div>
+<div>
+<h3 class="font-headline font-bold text-sm text-on-surface">Admin Portal</h3>
+<p class="font-label text-xs text-gray-500">Stadium Pulse Control</p>
+</div>
+</div>
+</div>
+<nav class="flex-1 px-4 space-y-1">
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-gray-500 hover:text-[#00FFAB]/70 transition-all duration-300 ease-in-out font-headline text-sm font-medium" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+                Dashboard
+            </a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg bg-[#00FFAB]/10 text-[#00FFAB] border-r-4 border-[#00FFAB] transition-all duration-300 ease-in-out font-headline text-sm font-medium" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">confirmation_number</span>
+                Redeem Code
+            </a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-gray-500 hover:text-[#00FFAB]/70 transition-all duration-300 ease-in-out font-headline text-sm font-medium" href="#">
+<span class="material-symbols-outlined">sports_cricket</span>
+                Match Management
+            </a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-gray-500 hover:text-[#00FFAB]/70 transition-all duration-300 ease-in-out font-headline text-sm font-medium" href="#">
+<span class="material-symbols-outlined">verified_user</span>
+                User Verification
+            </a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-gray-500 hover:text-[#00FFAB]/70 transition-all duration-300 ease-in-out font-headline text-sm font-medium" href="#">
+<span class="material-symbols-outlined">payments</span>
+                Payouts
+            </a>
+</nav>
+<div class="px-4 mt-auto pt-6 space-y-4">
+<button class="w-full bg-primary-container text-on-primary-container py-3 rounded-md font-headline font-bold text-sm transition-all duration-200 hover:brightness-110 active:scale-95 flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm">add_circle</span>
+                Create New Match
+            </button>
+<div class="border-t border-white/5 pt-4">
+<a class="flex items-center gap-3 px-4 py-3 text-gray-500 hover:text-[#00FFAB]/70 font-headline text-sm" href="#">
+<span class="material-symbols-outlined">help</span>
+                    Support
+                </a>
+<a class="flex items-center gap-3 px-4 py-3 text-gray-500 hover:text-red-400 font-headline text-sm" href="#">
+<span class="material-symbols-outlined">logout</span>
+                    Logout
+                </a>
+</div>
+</div>
+</aside>
+<!-- Main Content Canvas -->
+<main class="pt-24 pb-12 px-6 lg:ml-64 min-h-screen relative flex items-center justify-center">
+<!-- Background Atmospheric Element -->
+<div class="fixed inset-0 stadium-glow pointer-events-none"></div>
+<div class="absolute top-1/4 -left-20 w-96 h-96 bg-primary-container/5 rounded-full blur-[100px] pointer-events-none"></div>
+<div class="absolute bottom-1/4 -right-20 w-80 h-80 bg-secondary-container/5 rounded-full blur-[100px] pointer-events-none"></div>
+<div class="w-full max-w-2xl relative z-10">
+<!-- Glassmorphism Card -->
+<div class="glass-panel border border-white/10 rounded-xl p-8 lg:p-12 shadow-2xl">
+<div class="text-center mb-10">
+<div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary-container/10 mb-6 border border-primary-container/20">
+<span class="material-symbols-outlined text-primary-container text-3xl" style="font-variation-settings: 'FILL' 1;">qr_code_scanner</span>
+</div>
+<h1 class="font-headline text-3xl lg:text-4xl font-black tracking-tight text-on-surface mb-2">Enter Winner's Code</h1>
+<p class="font-body text-gray-400">Validate stadium tokens and claim virtual assets</p>
+</div>
+<form class="space-y-8">
+<!-- 4-Digit Code Entry -->
+<div class="flex justify-center gap-3 lg:gap-6">
+<input class="w-14 h-18 lg:w-20 lg:h-24 bg-surface-container-lowest border-0 rounded-lg text-center text-3xl lg:text-4xl font-headline font-bold text-primary-container focus:ring-2 focus:ring-primary-container/40 transition-all placeholder-gray-700" maxlength="1" placeholder="•" type="text"/>
+<input class="w-14 h-18 lg:w-20 lg:h-24 bg-surface-container-lowest border-0 rounded-lg text-center text-3xl lg:text-4xl font-headline font-bold text-primary-container focus:ring-2 focus:ring-primary-container/40 transition-all placeholder-gray-700" maxlength="1" placeholder="•" type="text"/>
+<input class="w-14 h-18 lg:w-20 lg:h-24 bg-surface-container-lowest border-0 rounded-lg text-center text-3xl lg:text-4xl font-headline font-bold text-primary-container focus:ring-2 focus:ring-primary-container/40 transition-all placeholder-gray-700" maxlength="1" placeholder="•" type="text"/>
+<input class="w-14 h-18 lg:w-20 lg:h-24 bg-surface-container-lowest border-0 rounded-lg text-center text-3xl lg:text-4xl font-headline font-bold text-primary-container focus:ring-2 focus:ring-primary-container/40 transition-all placeholder-gray-700" maxlength="1" placeholder="•" type="text"/>
+</div>
+<div class="pt-4">
+<button class="w-full bg-primary-container text-on-primary-container py-4 lg:py-5 rounded-md font-headline font-black text-lg tracking-wider uppercase transition-all duration-300 hover:brightness-110 active:scale-[0.98] neon-shadow flex items-center justify-center gap-3" type="submit">
+                            Redeem
+                            <span class="material-symbols-outlined">bolt</span>
+</button>
+</div>
+</form>
+<!-- Status Metadata (Bento-style inside card) -->
+<div class="mt-12 grid grid-cols-2 gap-4">
+<div class="bg-surface-container-lowest/50 p-4 rounded-lg border border-white/5">
+<p class="font-label text-[10px] uppercase tracking-widest text-gray-500 mb-1">Station Status</p>
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary-container animate-pulse"></span>
+<span class="font-headline font-bold text-on-surface text-sm">Active Node 04</span>
+</div>
+</div>
+<div class="bg-surface-container-lowest/50 p-4 rounded-lg border border-white/5">
+<p class="font-label text-[10px] uppercase tracking-widest text-gray-500 mb-1">Today's Redemptions</p>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary-container text-sm">group</span>
+<span class="font-headline font-bold text-on-surface text-sm">1,284 Total</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Contextual Information -->
+<div class="mt-10 flex flex-col md:flex-row justify-between items-center px-4 gap-6">
+<div class="flex items-center gap-4">
+<div class="w-12 h-12 rounded-lg overflow-hidden border border-white/10">
+<img alt="Cricket Match" class="w-full h-full object-cover grayscale opacity-50" data-alt="Dynamic shot of a night cricket stadium under bright lights" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDQJodd9OIwM6Cl3naHVxM5bzypG9nRJTe6GlxrtBzSiA1Ea9Q6ZWJ7Js7VZ6KoprR8iac6pfAZjCPmfhNTs-n4-RxC7id3bY7OpP0uUwPmPEEdUv_6g-zEsUDxBcNld6gXOSC6VAzvBfevd2K_SI47ruFCOJbi0wX3-AOjD2Qd9j96aBi3BDbCyRTzujIg1OjTSUMQe7OiqPNt79OEf9vK_tv-q1ig48qf_YBgktW5a2se5MQUXdQao2vUYB9Pk-P5n7SOTMqHx3c"/>
+</div>
+<div>
+<h4 class="font-headline font-bold text-sm text-on-surface">Live Event Context</h4>
+<p class="font-label text-xs text-gray-500">IND vs AUS • Quarter Finals</p>
+</div>
+</div>
+<div class="flex gap-2">
+<button class="px-4 py-2 bg-surface-container-high hover:bg-surface-bright text-gray-300 rounded-md font-headline text-xs font-bold transition-all">
+                        View Log
+                    </button>
+<button class="px-4 py-2 bg-surface-container-high hover:bg-surface-bright text-gray-300 rounded-md font-headline text-xs font-bold transition-all">
+                        Help
+                    </button>
+</div>
+</div>
+</div>
+</main>
+<!-- Visual Polish: Gradient Mesh -->
+<div class="fixed top-0 right-0 -z-10 w-full h-full opacity-20 pointer-events-none">
+<div class="absolute top-0 right-0 w-[500px] h-[500px] bg-primary-container/20 rounded-full blur-[120px] -mr-48 -mt-48"></div>
+<div class="absolute bottom-0 left-0 w-[400px] h-[400px] bg-secondary-container/10 rounded-full blur-[100px] -ml-24 -mb-24"></div>
+</div>
+</body></html>

@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>JAFFA | Live Match Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700;900&amp;family=Inter:wght@300;400;500;600;700&amp;family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "on-primary-fixed-variant": "#005234",
+                        "surface-container": "#1e2024",
+                        "on-error-container": "#ffdad6",
+                        "error-container": "#93000a",
+                        "inverse-on-surface": "#2f3035",
+                        "surface-container-low": "#1a1c20",
+                        "tertiary": "#fffbff",
+                        "on-tertiary": "#3c0090",
+                        "primary-fixed": "#4dffb2",
+                        "inverse-primary": "#006c46",
+                        "secondary-fixed-dim": "#4cd6ff",
+                        "on-primary": "#003822",
+                        "secondary": "#a6e6ff",
+                        "secondary-fixed": "#b7eaff",
+                        "error": "#ffb4ab",
+                        "outline": "#849589",
+                        "outline-variant": "#3a4a40",
+                        "on-tertiary-fixed": "#23005b",
+                        "on-secondary-fixed": "#001f28",
+                        "primary-container": "#00ffab",
+                        "surface": "#111317",
+                        "surface-container-high": "#282a2e",
+                        "on-tertiary-fixed-variant": "#5700c9",
+                        "on-surface-variant": "#b9cbbe",
+                        "surface-variant": "#333539",
+                        "on-surface": "#e2e2e8",
+                        "tertiary-container": "#e7daff",
+                        "on-error": "#690005",
+                        "on-secondary-container": "#00566b",
+                        "on-secondary-fixed-variant": "#004e60",
+                        "secondary-container": "#14d1ff",
+                        "surface-container-lowest": "#0c0e12",
+                        "on-tertiary-container": "#7624ff",
+                        "primary-fixed-dim": "#00e297",
+                        "on-secondary": "#003543",
+                        "surface-tint": "#00e297",
+                        "inverse-surface": "#e2e2e8",
+                        "on-background": "#e2e2e8",
+                        "primary": "#f6fff6",
+                        "tertiary-fixed": "#e9ddff",
+                        "surface-dim": "#111317",
+                        "tertiary-fixed-dim": "#d1bcff",
+                        "on-primary-container": "#00714a",
+                        "surface-container-highest": "#333539",
+                        "surface-bright": "#37393e",
+                        "background": "#111317",
+                        "on-primary-fixed": "#002112"
+                    },
+                    fontFamily: {
+                        "headline": ["Space Grotesk"],
+                        "body": ["Inter"],
+                        "label": ["Manrope"]
+                    },
+                    borderRadius: { "DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem" },
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-panel {
+            background: rgba(40, 42, 46, 0.4);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+        .pulse-glow {
+            box-shadow: 0 0 20px rgba(0, 255, 171, 0.4);
+        }
+        .prediction-card {
+            background: linear-gradient(145deg, rgba(30, 32, 36, 0.8), rgba(17, 19, 23, 0.9));
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .option-button {
+            background: rgba(40, 42, 46, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            transition: all 0.2s ease;
+        }
+        .option-button:active {
+            background: rgba(0, 255, 171, 0.1);
+            border-color: rgba(0, 255, 171, 0.3);
+        }
+    </style>
+<style>
+        body {
+            min-height: max(884px, 100dvh);
+        }
+    </style>
+</head>
+<body class="bg-surface text-on-surface font-body selection:bg-primary-container selection:text-on-primary-container overflow-x-hidden">
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full flex justify-between items-center px-6 py-4 max-w-none bg-slate-900/40 backdrop-blur-xl z-50 shadow-[0_8px_32px_0_rgba(0,255,171,0.1)]">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-[#00FFAB] text-2xl" data-icon="sports_cricket">sports_cricket</span>
+<span class="font-['Space_Grotesk'] font-black italic text-[#00FFAB] tracking-widest text-2xl">JAFFA</span>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex flex-col items-end">
+<span class="font-label text-[10px] text-slate-400 uppercase tracking-tighter">Live Player</span>
+<span class="font-bold text-sm">Virat K.</span>
+</div>
+<div class="w-10 h-10 rounded-full border-2 border-primary-container p-0.5 overflow-hidden">
+<img class="w-full h-full object-cover rounded-full" data-alt="User Profile Avatar photo" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBvhH4hlR2oiBT_VNOND993irOpoZ2tbs6-OrbKRQO2KTkmKseJ6SOugR4KtjACOolE3n8AjArWCj_mtqsAqTBuJcl941mrX-xd43p5I8Ymy0ZhpMn6VAUh3uiQTPapLJnYC38f7xag-rmJf5Rb838hTugn0o08bldKKiqzE9YppVpMYD2y_XPzBYvKg8OYilL0tYCtsnP1UFnUThoSgo9Pv2zGTrl4SRJforkIQ40QWLt9WUo3h5Kap97U8TllZqF-Mmn6WnrU9IY"/>
+</div>
+</div>
+</header>
+<main class="pt-24 pb-32 px-4 min-h-screen space-y-6 max-w-2xl mx-auto">
+<!-- Scoreboard Hero Section -->
+<section class="relative overflow-hidden rounded-xl bg-surface-container-low p-6 shadow-2xl">
+<div class="absolute top-0 right-0 p-3">
+<div class="flex items-center gap-2 bg-error-container/20 px-3 py-1 rounded-full border border-error/30">
+<span class="w-2 h-2 rounded-full bg-error animate-pulse"></span>
+<span class="font-label text-[10px] font-bold text-error uppercase tracking-widest">Live</span>
+</div>
+</div>
+<div class="flex flex-col items-center justify-center space-y-4">
+<div class="flex items-center justify-between w-full">
+<div class="flex flex-col items-start">
+<span class="font-label text-xs text-on-surface-variant font-semibold">IND</span>
+<h1 class="font-headline text-5xl font-black text-primary-container tracking-tighter">142/4</h1>
+</div>
+<div class="text-right">
+<span class="font-label text-xs text-on-surface-variant font-semibold">OVERS</span>
+<h2 class="font-headline text-3xl font-bold text-on-surface">15.2</h2>
+</div>
+</div>
+<div class="w-full bg-surface-container-highest/30 h-1 rounded-full overflow-hidden">
+<div class="bg-gradient-to-r from-secondary-container to-primary-container h-full w-[76%]"></div>
+</div>
+<div class="flex justify-between w-full text-[10px] font-label font-bold text-on-surface-variant tracking-widest">
+<span>CRR: 9.26</span>
+<span>RRR: 11.45</span>
+</div>
+</div>
+</section>
+<!-- Predict Tabs -->
+<div class="flex items-center border-b border-white/5">
+<button class="flex-1 py-3 font-label text-xs font-bold uppercase tracking-widest text-primary-container border-b-2 border-primary-container">Predict (3)</button>
+<button class="flex-1 py-3 font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant">Leaderboard</button>
+<button class="flex-1 py-3 font-label text-xs font-bold uppercase tracking-widest text-on-surface-variant">Rewards</button>
+</div>
+<!-- Prediction Stack -->
+<div class="space-y-4">
+<!-- Card 1 -->
+<section class="prediction-card rounded-xl p-5 relative overflow-hidden">
+<div class="flex justify-between items-start mb-3">
+<div class="flex flex-col">
+<span class="font-label text-[10px] font-black text-amber-500 uppercase tracking-widest">OVER 1</span>
+<h3 class="font-headline text-lg font-bold">Maiden over in over 1? 🎳</h3>
+</div>
+<span class="font-label text-[10px] text-on-surface-variant">CSK vs RCB</span>
+</div>
+<div class="space-y-2 mb-4">
+<button class="option-button w-full p-3 rounded-lg flex justify-between items-center group">
+<span class="font-body text-sm font-medium">Yes — bowler dominance</span>
+<span class="font-label text-xs font-bold text-primary-container">30 pts</span>
+</button>
+<button class="option-button w-full p-3 rounded-lg flex justify-between items-center group">
+<span class="font-body text-sm font-medium">No</span>
+<span class="font-label text-xs font-bold text-primary-container">5 pts</span>
+</button>
+</div>
+<div class="flex gap-2">
+<button class="flex items-center gap-1.5 bg-primary-container/10 border border-primary-container/20 px-3 py-1.5 rounded-full hover:bg-primary-container/20 transition-colors">
+<span class="material-symbols-outlined text-primary-container text-sm" style="font-variation-settings: 'FILL' 1;">bolt</span>
+<span class="font-label text-[10px] font-bold text-primary-container uppercase tracking-tighter">2x Boost (2 left)</span>
+</button>
+<button class="flex items-center gap-1.5 bg-secondary-container/10 border border-secondary-container/20 px-3 py-1.5 rounded-full hover:bg-secondary-container/20 transition-colors">
+<span class="material-symbols-outlined text-secondary-container text-sm" style="font-variation-settings: 'FILL' 1;">rocket_launch</span>
+<span class="font-label text-[10px] font-bold text-secondary-container uppercase tracking-tighter">3x All-In</span>
+</button>
+</div>
+</section>
+<!-- Card 2 -->
+<section class="prediction-card rounded-xl p-5 relative overflow-hidden">
+<div class="flex justify-between items-start mb-3">
+<div class="flex flex-col">
+<span class="font-label text-[10px] font-black text-amber-500 uppercase tracking-widest">OVER 1</span>
+<h3 class="font-headline text-lg font-bold">Will Ruturaj Gaikwad score 10+ in over 1?</h3>
+</div>
+<span class="font-label text-[10px] text-on-surface-variant">CSK vs RCB</span>
+</div>
+<div class="space-y-2 mb-4">
+<button class="option-button w-full p-3 rounded-lg flex justify-between items-center group">
+<span class="font-body text-sm font-medium">Yes — going big</span>
+<span class="font-label text-xs font-bold text-primary-container">20 pts</span>
+</button>
+<button class="option-button w-full p-3 rounded-lg flex justify-between items-center group">
+<span class="font-body text-sm font-medium">No — staying steady</span>
+<span class="font-label text-xs font-bold text-primary-container">10 pts</span>
+</button>
+</div>
+<div class="flex gap-2">
+<button class="flex items-center gap-1.5 bg-primary-container/10 border border-primary-container/20 px-3 py-1.5 rounded-full">
+<span class="material-symbols-outlined text-primary-container text-sm" style="font-variation-settings: 'FILL' 1;">bolt</span>
+<span class="font-label text-[10px] font-bold text-primary-container uppercase tracking-tighter">2x Boost (2 left)</span>
+</button>
+<button class="flex items-center gap-1.5 bg-secondary-container/10 border border-secondary-container/20 px-3 py-1.5 rounded-full">
+<span class="material-symbols-outlined text-secondary-container text-sm" style="font-variation-settings: 'FILL' 1;">rocket_launch</span>
+<span class="font-label text-[10px] font-bold text-secondary-container uppercase tracking-tighter">3x All-In</span>
+</button>
+</div>
+</section>
+<!-- Card 3 (Hot Take) -->
+<section class="prediction-card rounded-xl p-5 relative overflow-hidden border-l-4 border-l-amber-500">
+<div class="flex justify-between items-start mb-3">
+<div class="flex flex-col">
+<span class="font-label text-[10px] font-black text-amber-500 uppercase tracking-widest">HOT TAKE</span>
+<h3 class="font-headline text-lg font-bold">More runs in the powerplay — first 3 overs or last 3?</h3>
+</div>
+</div>
+<div class="space-y-2 mb-4">
+<button class="option-button w-full p-3 rounded-lg flex justify-between items-center group">
+<span class="font-body text-sm font-medium">First 3 overs (1-3)</span>
+<span class="font-label text-xs font-bold text-primary-container">20 pts</span>
+</button>
+<button class="option-button w-full p-3 rounded-lg flex justify-between items-center group">
+<span class="font-body text-sm font-medium">Last 3 overs (4-6)</span>
+<span class="font-label text-xs font-bold text-primary-container">20 pts</span>
+</button>
+</div>
+<div class="flex gap-2">
+<button class="flex items-center gap-1.5 bg-primary-container/10 border border-primary-container/20 px-3 py-1.5 rounded-full">
+<span class="material-symbols-outlined text-primary-container text-sm" style="font-variation-settings: 'FILL' 1;">bolt</span>
+<span class="font-label text-[10px] font-bold text-primary-container uppercase tracking-tighter">2x Boost (2 left)</span>
+</button>
+<button class="flex items-center gap-1.5 bg-secondary-container/10 border border-secondary-container/20 px-3 py-1.5 rounded-full">
+<span class="material-symbols-outlined text-secondary-container text-sm" style="font-variation-settings: 'FILL' 1;">rocket_launch</span>
+<span class="font-label text-[10px] font-bold text-secondary-container uppercase tracking-tighter">3x All-In</span>
+</button>
+</div>
+</section>
+</div>
+<!-- Quick Stats -->
+<section class="grid grid-cols-2 gap-4">
+<div class="bg-surface-container-low p-5 rounded-xl flex items-center gap-4">
+<div class="w-12 h-12 bg-surface-container-highest rounded-lg flex items-center justify-center">
+<span class="material-symbols-outlined text-secondary-container" data-icon="trending_up">trending_up</span>
+</div>
+<div>
+<span class="block font-label text-[10px] text-on-surface-variant font-bold uppercase tracking-widest">Win Prob</span>
+<span class="block font-headline text-xl font-bold">68%</span>
+</div>
+</div>
+<div class="bg-surface-container-low p-5 rounded-xl flex items-center gap-4">
+<div class="w-12 h-12 bg-surface-container-highest rounded-lg flex items-center justify-center">
+<span class="material-symbols-outlined text-primary-container" data-icon="account_balance_wallet">account_balance_wallet</span>
+</div>
+<div>
+<span class="block font-label text-[10px] text-on-surface-variant font-bold uppercase tracking-widest">Pool Size</span>
+<span class="block font-headline text-xl font-bold">2.4k</span>
+</div>
+</div>
+</section>
+</main>
+<!-- Footer Stats Bar -->
+<div class="fixed bottom-[84px] left-0 w-full px-4 z-40 pointer-events-none">
+<div class="max-w-2xl mx-auto bg-surface-container-highest/90 backdrop-blur-md rounded-full px-6 py-3 flex items-center justify-between pointer-events-auto border border-white/5 shadow-2xl">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-primary-container text-sm" data-icon="stars">stars</span>
+<span class="font-label text-xs font-bold uppercase tracking-tighter">Points: <span class="text-on-surface">1250</span></span>
+</div>
+<div class="w-[1px] h-4 bg-white/10"></div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary-container text-sm" data-icon="leaderboard">leaderboard</span>
+<span class="font-label text-xs font-bold uppercase tracking-tighter">Rank: <span class="text-on-surface">#42</span></span>
+</div>
+<div class="w-[1px] h-4 bg-white/10"></div>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-error text-sm" data-icon="local_fire_department" style="font-variation-settings: 'FILL' 1;">local_fire_department</span>
+<span class="font-label text-xs font-bold uppercase tracking-tighter">Streak: <span class="text-on-surface">5</span></span>
+</div>
+</div>
+</div>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-6 pt-3 bg-[#111317]/80 backdrop-blur-2xl rounded-t-[2rem] border-t border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.6)]">
+<!-- Home (Active) -->
+<a class="flex flex-col items-center justify-center text-[#00FFAB] bg-[#00FFAB]/10 rounded-xl px-4 py-1 shadow-[0_0_15px_rgba(0,255,171,0.3)] active:scale-95 transition-all duration-200 ease-out" href="#">
+<span class="material-symbols-outlined" data-icon="home" style="font-variation-settings: 'FILL' 1;">home</span>
+<span class="font-['Manrope'] text-[10px] font-bold uppercase tracking-widest mt-1">Home</span>
+</a>
+<!-- Ranks -->
+<a class="flex flex-col items-center justify-center text-slate-500 hover:text-[#14d1ff] active:scale-95 transition-all duration-200 ease-out" href="#">
+<span class="material-symbols-outlined" data-icon="leaderboard">leaderboard</span>
+<span class="font-['Manrope'] text-[10px] font-bold uppercase tracking-widest mt-1">Ranks</span>
+</a>
+<!-- Rewards -->
+<a class="flex flex-col items-center justify-center text-slate-500 hover:text-[#14d1ff] active:scale-95 transition-all duration-200 ease-out" href="#">
+<span class="material-symbols-outlined" data-icon="military_tech">military_tech</span>
+<span class="font-['Manrope'] text-[10px] font-bold uppercase tracking-widest mt-1">Rewards</span>
+</a>
+<!-- Profile -->
+<a class="flex flex-col items-center justify-center text-slate-500 hover:text-[#14d1ff] active:scale-95 transition-all duration-200 ease-out" href="#">
+<span class="material-symbols-outlined" data-icon="person">person</span>
+<span class="font-['Manrope'] text-[10px] font-bold uppercase tracking-widest mt-1">Profile</span>
+</a>
+</nav>
+</body></html>

@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700;800;900&amp;family=Inter:wght@300;400;500;600;700&amp;family=Manrope:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "on-error-container": "#ffdad6",
+              "surface-tint": "#00e297",
+              "primary-fixed": "#4dffb2",
+              "on-tertiary-fixed": "#23005b",
+              "primary-fixed-dim": "#00e297",
+              "secondary": "#a6e6ff",
+              "surface-container-highest": "#333539",
+              "on-secondary-container": "#00566b",
+              "secondary-fixed-dim": "#4cd6ff",
+              "tertiary-fixed": "#e9ddff",
+              "background": "#111317",
+              "surface-container-lowest": "#0c0e12",
+              "on-surface": "#e2e2e8",
+              "on-secondary": "#003543",
+              "inverse-surface": "#e2e2e8",
+              "primary": "#f6fff6",
+              "outline": "#849589",
+              "tertiary": "#fffbff",
+              "on-tertiary": "#3c0090",
+              "surface-dim": "#111317",
+              "surface-container-high": "#282a2e",
+              "outline-variant": "#3a4a40",
+              "primary-container": "#00ffab",
+              "on-tertiary-container": "#7624ff",
+              "inverse-primary": "#006c46",
+              "surface-container": "#1e2024",
+              "on-background": "#e2e2e8",
+              "on-secondary-fixed": "#001f28",
+              "error-container": "#93000a",
+              "on-secondary-fixed-variant": "#004e60",
+              "on-error": "#690005",
+              "surface-variant": "#333539",
+              "secondary-container": "#14d1ff",
+              "on-primary-fixed-variant": "#005234",
+              "on-tertiary-fixed-variant": "#5700c9",
+              "on-primary-container": "#00714a",
+              "surface-container-low": "#1a1c20",
+              "error": "#ffb4ab",
+              "surface": "#111317",
+              "secondary-fixed": "#b7eaff",
+              "on-surface-variant": "#b9cbbe",
+              "on-primary": "#003822",
+              "tertiary-fixed-dim": "#d1bcff",
+              "inverse-on-surface": "#2f3035",
+              "on-primary-fixed": "#002112",
+              "tertiary-container": "#e7daff",
+              "surface-bright": "#37393e"
+            },
+            fontFamily: {
+              "headline": ["Space Grotesk"],
+              "body": ["Inter"],
+              "label": ["Manrope"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-panel {
+            background: rgba(30, 32, 36, 0.4);
+            backdrop-filter: blur(20px);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopNavBar Implementation -->
+<nav class="bg-[#111317]/80 backdrop-blur-xl border-b border-white/10 shadow-[0_20px_40px_rgba(0,0,0,0.4)] docked full-width top-0 z-50 flex justify-between items-center w-full px-6 h-16 fixed">
+<div class="flex items-center gap-8">
+<span class="text-2xl font-black text-[#00FFAB] tracking-tighter font-['Space_Grotesk']">Cricket Admin</span>
+<div class="hidden md:flex gap-6 items-center">
+<a class="font-['Space_Grotesk'] font-bold tracking-tight text-gray-400 hover:text-white transition-colors" href="#">Overview</a>
+<a class="font-['Space_Grotesk'] font-bold tracking-tight text-gray-400 hover:text-white transition-colors" href="#">Redeem</a>
+<a class="font-['Space_Grotesk'] font-bold tracking-tight text-gray-400 hover:text-white transition-colors" href="#">Winners</a>
+<a class="font-['Space_Grotesk'] font-bold tracking-tight text-[#00FFAB] border-b-2 border-[#00FFAB] pb-1" href="#">Setup</a>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="material-symbols-outlined text-gray-400 hover:bg-white/5 rounded-lg p-2 active:scale-95 transition-all duration-200" data-icon="notifications">notifications</button>
+<button class="material-symbols-outlined text-gray-400 hover:bg-white/5 rounded-lg p-2 active:scale-95 transition-all duration-200" data-icon="settings">settings</button>
+<img alt="Admin Profile" class="w-8 h-8 rounded-full border border-[#00FFAB]/20" data-alt="Close up avatar of the administrator profile" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCkpOFRhvtyE0rj_SK8isJNObS6ReimT9eZpWc1vrzcgXNmialRX5GwOwT_4f70GNrnqCyREsc0IlS6icqY8Rbb5wHgsvUb7fuRUQFPKgFguUX1R9OfIlmIjHRLyDx2kE8KDrO3ApWOiwKWhcO5V687JpSKTXHrb14oWFDIeHOny2UanzWtC2oMsGIza464WWM5xKWJIqLcw7YPvtiBUNvc2TcCm6rHXN8Yv4KVhR-zH7L2dZ1p4wUVKZZRweFIzoWp75yTXtuikqw"/>
+</div>
+</nav>
+<main class="pt-24 pb-12 px-6 max-w-7xl mx-auto">
+<!-- Header Section -->
+<header class="mb-12">
+<h1 class="font-headline text-5xl font-black text-white tracking-tighter mb-2">REWARDS <span class="text-primary-container">CONFIGURATION</span></h1>
+<p class="font-label text-on-surface-variant max-w-2xl">Define the high-stakes incentives for the current stadium cycle. Adjust top-tier rankings and grand prizes for the ultimate fan experience.</p>
+</header>
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+<!-- Left Column: Round Rewards -->
+<section class="lg:col-span-7 space-y-8">
+<div class="bg-surface-container-low p-8 rounded-xl relative overflow-hidden">
+<div class="absolute top-0 right-0 w-32 h-32 bg-primary-container/5 rounded-full -mr-16 -mt-16 blur-3xl"></div>
+<div class="flex items-center gap-3 mb-8">
+<span class="material-symbols-outlined text-primary-container" data-icon="military_tech">military_tech</span>
+<h2 class="font-headline text-2xl font-bold tracking-tight">Round Rewards (Top 3)</h2>
+</div>
+<div class="space-y-6">
+<!-- Rank 1 -->
+<div class="group bg-surface-container p-6 rounded-lg transition-all duration-300 hover:bg-surface-container-high border-l-4 border-primary-container">
+<div class="flex justify-between items-center mb-4">
+<label class="font-label text-xs uppercase tracking-widest text-primary-container font-bold">First Place</label>
+<span class="text-xs text-on-surface-variant font-mono">ID: RW-001</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div class="space-y-1">
+<label class="text-[10px] text-on-surface-variant uppercase ml-1">Prize Name</label>
+<input class="w-full bg-surface-container-lowest border-none rounded-md text-on-surface focus:ring-1 focus:ring-primary-container/30 transition-all font-body text-sm py-3 px-4" placeholder="Enter prize name" type="text" value="Premium Pitch-side Box"/>
+</div>
+<div class="space-y-1">
+<label class="text-[10px] text-on-surface-variant uppercase ml-1">Cash Equivalent</label>
+<input class="w-full bg-surface-container-lowest border-none rounded-md text-on-surface focus:ring-1 focus:ring-primary-container/30 transition-all font-body text-sm py-3 px-4" placeholder="Amount" type="text" value="₹25,000"/>
+</div>
+</div>
+</div>
+<!-- Rank 2 -->
+<div class="group bg-surface-container p-6 rounded-lg transition-all duration-300 hover:bg-surface-container-high border-l-4 border-secondary-container">
+<div class="flex justify-between items-center mb-4">
+<label class="font-label text-xs uppercase tracking-widest text-secondary-container font-bold">Second Place</label>
+<span class="text-xs text-on-surface-variant font-mono">ID: RW-002</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div class="space-y-1">
+<label class="text-[10px] text-on-surface-variant uppercase ml-1">Prize Name</label>
+<input class="w-full bg-surface-container-lowest border-none rounded-md text-on-surface focus:ring-1 focus:ring-primary-container/30 transition-all font-body text-sm py-3 px-4" placeholder="Enter prize name" type="text" value="Signed Jersey &amp; Merch Kit"/>
+</div>
+<div class="space-y-1">
+<label class="text-[10px] text-on-surface-variant uppercase ml-1">Cash Equivalent</label>
+<input class="w-full bg-surface-container-lowest border-none rounded-md text-on-surface focus:ring-1 focus:ring-primary-container/30 transition-all font-body text-sm py-3 px-4" placeholder="Amount" type="text" value="₹10,000"/>
+</div>
+</div>
+</div>
+<!-- Rank 3 -->
+<div class="group bg-surface-container p-6 rounded-lg transition-all duration-300 hover:bg-surface-container-high border-l-4 border-tertiary-fixed-dim">
+<div class="flex justify-between items-center mb-4">
+<label class="font-label text-xs uppercase tracking-widest text-tertiary-fixed-dim font-bold">Third Place</label>
+<span class="text-xs text-on-surface-variant font-mono">ID: RW-003</span>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<div class="space-y-1">
+<label class="text-[10px] text-on-surface-variant uppercase ml-1">Prize Name</label>
+<input class="w-full bg-surface-container-lowest border-none rounded-md text-on-surface focus:ring-1 focus:ring-primary-container/30 transition-all font-body text-sm py-3 px-4" placeholder="Enter prize name" type="text" value="VIP Merchandise Voucher"/>
+</div>
+<div class="space-y-1">
+<label class="text-[10px] text-on-surface-variant uppercase ml-1">Cash Equivalent</label>
+<input class="w-full bg-surface-container-lowest border-none rounded-md text-on-surface focus:ring-1 focus:ring-primary-container/30 transition-all font-body text-sm py-3 px-4" placeholder="Amount" type="text" value="₹5,000"/>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Right Column: Grand Prize & QR -->
+<section class="lg:col-span-5 space-y-8">
+<!-- Grand Prize Card -->
+<div class="bg-surface-container-low p-8 rounded-xl border border-primary-container/10">
+<div class="flex items-center gap-3 mb-8">
+<span class="material-symbols-outlined text-primary-container" data-icon="workspace_premium" style="font-variation-settings: 'FILL' 1;">workspace_premium</span>
+<h2 class="font-headline text-2xl font-bold tracking-tight">Grand Prize</h2>
+</div>
+<div class="bg-gradient-to-br from-surface-container-high to-surface-container-lowest p-6 rounded-lg border border-white/5 space-y-6">
+<div class="space-y-4">
+<div class="space-y-1">
+<label class="text-[10px] text-on-surface-variant uppercase ml-1">Prize Title</label>
+<input class="w-full bg-surface-container-lowest border-none rounded-md text-primary-container font-headline font-bold text-lg py-3 px-4 focus:ring-1 focus:ring-primary-container/30" placeholder="Title" type="text" value="All-Expenses Paid Finals Trip"/>
+</div>
+<div class="space-y-1">
+<label class="text-[10px] text-on-surface-variant uppercase ml-1">Prize Description</label>
+<textarea class="w-full bg-surface-container-lowest border-none rounded-md text-on-surface font-body text-sm py-3 px-4 focus:ring-1 focus:ring-primary-container/30 resize-none" rows="3">Includes round-trip flights, 5-star accommodation, and dugout access for the tournament finals.</textarea>
+</div>
+<div class="space-y-1">
+<label class="text-[10px] text-on-surface-variant uppercase ml-1">Total Valuation</label>
+<div class="relative">
+<span class="absolute left-4 top-1/2 -translate-y-1/2 text-primary-container font-bold">₹</span>
+<input class="w-full bg-surface-container-lowest border-none rounded-md text-on-surface font-headline font-bold text-2xl py-3 pl-10 pr-4 focus:ring-1 focus:ring-primary-container/30" type="text" value="2,50,000"/>
+</div>
+</div>
+</div>
+</div>
+<div class="mt-8">
+<button class="w-full bg-primary-container text-on-primary-container font-headline font-black uppercase tracking-widest py-4 rounded-md hover:shadow-[0_0_20px_rgba(0,255,171,0.4)] transition-all duration-300 active:scale-[0.98]">
+                            Save Rewards
+                        </button>
+</div>
+</div>
+<!-- QR Code Link Section -->
+<div class="bg-surface-container-low p-8 rounded-xl relative overflow-hidden">
+<div class="flex items-center gap-3 mb-6">
+<span class="material-symbols-outlined text-on-surface-variant" data-icon="qr_code_2">qr_code_2</span>
+<h2 class="font-headline text-xl font-bold tracking-tight">QR Code Link</h2>
+</div>
+<div class="flex flex-col md:flex-row gap-6 items-center">
+<div class="bg-white p-3 rounded-lg w-32 h-32 flex-shrink-0 group cursor-pointer hover:scale-105 transition-transform">
+<img alt="QR Code Link" class="w-full h-full" data-alt="A clean modern QR code for digital reward redemption" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDSjxmtE_zs8LzjLhhZmU_ivhvs8s8ld_DLDt-_DMlk4n3wy4JLGDqx3uAg6CJvKwym7BjZxrdH00hWwS8zsrVTexfx1aFsZSsiiVx4V70G4dLjg2xpP_tP5mhyuhvsQqx1hMyt4_3oQju0aGbhUbX6O7wBNx2XeJz9RL8Cn-0WwL-5iRAYseiqiVAOu2DpX1sgcsVgAEc9OAnGsXevKNkmN3nDd0MZZlsLUzZXdBfGDElhJciZgAWdkBWjtO9ChZIIma3l9WtzCX8"/>
+</div>
+<div class="space-y-4 flex-grow">
+<p class="text-sm font-label text-on-surface-variant">Share this link with stadium attendees to allow them to view current rewards and leaderboard status.</p>
+<div class="flex gap-2">
+<input class="flex-grow bg-surface-container-lowest border-none rounded-md text-xs font-mono text-primary-container py-2 px-3" readonly="" type="text" value="https://pulse.stadium/live/rewards/XJ72"/>
+<button class="bg-surface-container-high p-2 rounded-md material-symbols-outlined text-sm hover:text-primary-container transition-colors" data-icon="content_copy">content_copy</button>
+</div>
+</div>
+</div>
+</div>
+</section>
+</div>
+<!-- System Status Footer (Bento Style) -->
+<footer class="mt-12 grid grid-cols-1 md:grid-cols-4 gap-4">
+<div class="bg-surface-container-low p-4 rounded-lg flex items-center justify-between">
+<span class="text-[10px] uppercase font-bold text-on-surface-variant">Last Saved</span>
+<span class="text-xs font-mono text-primary-container">12 MIN AGO</span>
+</div>
+<div class="bg-surface-container-low p-4 rounded-lg flex items-center justify-between">
+<span class="text-[10px] uppercase font-bold text-on-surface-variant">Active Round</span>
+<span class="text-xs font-mono text-secondary-container">#1024-C</span>
+</div>
+<div class="bg-surface-container-low p-4 rounded-lg flex items-center justify-between">
+<span class="text-[10px] uppercase font-bold text-on-surface-variant">Sync Status</span>
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 bg-primary-container rounded-full animate-pulse"></span>
+<span class="text-xs font-mono text-on-surface">ONLINE</span>
+</div>
+</div>
+<div class="bg-surface-container-low p-4 rounded-lg flex items-center justify-between">
+<span class="text-[10px] uppercase font-bold text-on-surface-variant">Admin Auth</span>
+<span class="text-xs font-mono text-on-surface">SECURE</span>
+</div>
+</footer>
+</main>
+</body></html>

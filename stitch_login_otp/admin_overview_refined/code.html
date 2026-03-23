@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Cricket Admin Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700;900&amp;family=Inter:wght@300;400;500;600&amp;family=Manrope:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "on-error-container": "#ffdad6",
+              "surface-tint": "#00e297",
+              "primary-fixed": "#4dffb2",
+              "on-tertiary-fixed": "#23005b",
+              "primary-fixed-dim": "#00e297",
+              "secondary": "#a6e6ff",
+              "surface-container-highest": "#333539",
+              "on-secondary-container": "#00566b",
+              "secondary-fixed-dim": "#4cd6ff",
+              "tertiary-fixed": "#e9ddff",
+              "background": "#111317",
+              "surface-container-lowest": "#0c0e12",
+              "on-surface": "#e2e2e8",
+              "on-secondary": "#003543",
+              "inverse-surface": "#e2e2e8",
+              "primary": "#f6fff6",
+              "outline": "#849589",
+              "tertiary": "#fffbff",
+              "on-tertiary": "#3c0090",
+              "surface-dim": "#111317",
+              "surface-container-high": "#282a2e",
+              "outline-variant": "#3a4a40",
+              "primary-container": "#00ffab",
+              "on-tertiary-container": "#7624ff",
+              "inverse-primary": "#006c46",
+              "surface-container": "#1e2024",
+              "on-background": "#e2e2e8",
+              "on-secondary-fixed": "#001f28",
+              "error-container": "#93000a",
+              "on-secondary-fixed-variant": "#004e60",
+              "on-error": "#690005",
+              "surface-variant": "#333539",
+              "secondary-container": "#14d1ff",
+              "on-primary-fixed-variant": "#005234",
+              "on-tertiary-fixed-variant": "#5700c9",
+              "on-primary-container": "#00714a",
+              "surface-container-low": "#1a1c20",
+              "error": "#ffb4ab",
+              "surface": "#111317",
+              "secondary-fixed": "#b7eaff",
+              "on-surface-variant": "#b9cbbe",
+              "on-primary": "#003822",
+              "tertiary-fixed-dim": "#d1bcff",
+              "inverse-on-surface": "#2f3035",
+              "on-primary-fixed": "#002112",
+              "tertiary-container": "#e7daff",
+              "surface-bright": "#37393e"
+            },
+            fontFamily: {
+              "headline": ["Space Grotesk"],
+              "body": ["Inter"],
+              "label": ["Manrope"]
+            },
+            borderRadius: {"DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "full": "0.75rem"},
+          },
+        },
+      }
+    </script>
+<style>
+      .glass-card {
+        background: rgba(30, 32, 36, 0.4);
+        backdrop-filter: blur(20px);
+      }
+      .neon-glow {
+        box-shadow: 0 0 20px rgba(0, 255, 171, 0.2);
+      }
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body min-h-screen">
+<!-- TopNavBar (Shared Component) -->
+<nav class="bg-[#111317]/80 backdrop-blur-xl docked full-width top-0 z-50 border-b border-white/10 shadow-[0_20px_40px_rgba(0,0,0,0.4)] fixed flex justify-between items-center w-full px-6 h-16">
+<div class="flex items-center gap-8">
+<span class="text-2xl font-black text-[#00FFAB] tracking-tighter font-headline">Cricket Admin</span>
+<div class="hidden md:flex items-center gap-6 font-headline font-bold tracking-tight">
+<a class="text-[#00FFAB] border-b-2 border-[#00FFAB] pb-1 transition-all duration-200" href="#">Overview</a>
+<a class="text-gray-400 hover:text-white transition-colors hover:bg-white/5 rounded-lg px-3 py-1 active:scale-95 transition-all duration-200" href="#">Redeem</a>
+<a class="text-gray-400 hover:text-white transition-colors hover:bg-white/5 rounded-lg px-3 py-1 active:scale-95 transition-all duration-200" href="#">Winners</a>
+<a class="text-gray-400 hover:text-white transition-colors hover:bg-white/5 rounded-lg px-3 py-1 active:scale-95 transition-all duration-200" href="#">Setup</a>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="text-gray-400 hover:text-[#00FFAB] transition-colors p-2 rounded-lg hover:bg-white/5">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+<button class="text-gray-400 hover:text-[#00FFAB] transition-colors p-2 rounded-lg hover:bg-white/5">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+</button>
+<div class="w-8 h-8 rounded-full bg-surface-container-highest overflow-hidden border border-white/10">
+<img alt="Admin Profile" data-alt="Avatar profile of the administrator user" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCIUL3iMcPUi0Qoo3ihKyngwLQMosjxX_qN9tkACAOlyGkCiCggrdI5dH5vDXz70XIg1iZs3omdLAZcTMCbUDbAChhBFShweDlOp0CmgZq0VWLr2iJjvCUs85_FGd8YCARsIgKG2G0L7_DDrP7wHyfAtcAuMZ1KxT_g4oBXjVg8DQagvJ5hGkzTEtI8BYnugpZJ-xswmOvJdMX9-JR7a9Um78SEflOkRYXDI2U4S1DutJjtlxfL9Y61A-SCsd1dlmgVw0HAGZKw4uk"/>
+</div>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="pt-24 pb-12 px-6 max-w-7xl mx-auto flex gap-6">
+<!-- SideNavBar (Shared Component) -->
+<aside class="hidden lg:flex flex-col h-[calc(100vh-8rem)] w-64 sticky top-24 bg-[#0c0e12] border-r border-white/5 tonal-shift bg-[#111317] py-4 rounded-xl">
+<div class="px-6 mb-8">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 rounded-lg bg-primary-container/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-primary-container" data-icon="sports_cricket">sports_cricket</span>
+</div>
+<div>
+<h2 class="font-headline font-bold text-on-surface text-sm">Admin Portal</h2>
+<p class="text-[10px] text-gray-500 font-label uppercase tracking-widest">Stadium Pulse Control</p>
+</div>
+</div>
+</div>
+<nav class="flex-1 px-3 space-y-1">
+<a class="flex items-center gap-3 px-3 py-3 rounded-lg bg-[#00FFAB]/10 text-[#00FFAB] border-r-4 border-[#00FFAB] font-headline text-sm font-medium transition-all duration-300" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="dashboard">dashboard</span>
+                    Dashboard
+                </a>
+<a class="flex items-center gap-3 px-3 py-3 rounded-lg text-gray-500 hover:text-[#00FFAB]/70 hover:bg-[#111317] font-headline text-sm font-medium transition-all duration-300" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="sports_cricket">sports_cricket</span>
+                    Match Management
+                </a>
+<a class="flex items-center gap-3 px-3 py-3 rounded-lg text-gray-500 hover:text-[#00FFAB]/70 hover:bg-[#111317] font-headline text-sm font-medium transition-all duration-300" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="verified_user">verified_user</span>
+                    User Verification
+                </a>
+<a class="flex items-center gap-3 px-3 py-3 rounded-lg text-gray-500 hover:text-[#00FFAB]/70 hover:bg-[#111317] font-headline text-sm font-medium transition-all duration-300" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="payments">payments</span>
+                    Payouts
+                </a>
+<a class="flex items-center gap-3 px-3 py-3 rounded-lg text-gray-500 hover:text-[#00FFAB]/70 hover:bg-[#111317] font-headline text-sm font-medium transition-all duration-300" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="terminal">terminal</span>
+                    System Logs
+                </a>
+</nav>
+<div class="px-6 mt-6">
+<button class="w-full py-3 bg-primary-container text-on-primary-container font-headline font-bold text-xs rounded-md shadow-[0_0_20px_rgba(0,255,171,0.3)] hover:scale-[1.02] transition-transform">
+                    Create New Match
+                </button>
+</div>
+<div class="px-3 mt-auto pt-4 border-t border-white/5 space-y-1">
+<a class="flex items-center gap-3 px-3 py-3 rounded-lg text-gray-500 hover:text-[#00FFAB]/70 hover:bg-[#111317] font-headline text-sm font-medium transition-all duration-300" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="help">help</span>
+                    Support
+                </a>
+<a class="flex items-center gap-3 px-3 py-3 rounded-lg text-gray-500 hover:text-red-400 hover:bg-red-400/5 font-headline text-sm font-medium transition-all duration-300" href="#">
+<span class="material-symbols-outlined text-[20px]" data-icon="logout">logout</span>
+                    Logout
+                </a>
+</div>
+</aside>
+<!-- Content Canvas -->
+<div class="flex-1 space-y-8">
+<!-- Hero Header -->
+<header class="relative overflow-hidden rounded-xl p-10 bg-surface-container-low border border-white/5">
+<div class="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-primary-container/10 blur-[100px] rounded-full"></div>
+<div class="relative z-10 flex flex-col md:flex-row md:items-end justify-between gap-6">
+<div>
+<h1 class="text-5xl font-black font-headline tracking-tighter text-white mb-2">Stadium <span class="text-primary-container">Pulse</span></h1>
+<p class="text-gray-400 font-body max-w-md">Real-time performance analytics and stadium operational controls.</p>
+</div>
+<div class="flex gap-4">
+<div class="px-4 py-2 glass-card border border-white/10 rounded-lg flex items-center gap-3">
+<span class="w-2 h-2 rounded-full bg-primary-container animate-pulse"></span>
+<span class="text-xs font-label text-primary-container font-bold uppercase tracking-widest">System Online</span>
+</div>
+</div>
+</div>
+</header>
+<!-- Key Stats Grid -->
+<section class="grid grid-cols-1 md:grid-cols-3 gap-6">
+<div class="glass-card p-6 rounded-xl border border-white/5 hover:border-primary-container/30 transition-colors group">
+<div class="flex justify-between items-start mb-4">
+<div class="p-3 bg-surface-container-highest rounded-lg text-primary-container group-hover:neon-glow transition-all">
+<span class="material-symbols-outlined" data-icon="group">group</span>
+</div>
+<span class="text-[10px] font-label font-bold text-primary-container bg-primary-container/10 px-2 py-0.5 rounded uppercase">+12%</span>
+</div>
+<h3 class="text-gray-500 text-xs font-label uppercase tracking-widest mb-1">Total Players</h3>
+<div class="text-4xl font-black font-headline text-white">1</div>
+</div>
+<div class="glass-card p-6 rounded-xl border border-white/5 hover:border-secondary-container/30 transition-colors group">
+<div class="flex justify-between items-start mb-4">
+<div class="p-3 bg-surface-container-highest rounded-lg text-secondary-container">
+<span class="material-symbols-outlined" data-icon="military_tech">military_tech</span>
+</div>
+<span class="text-[10px] font-label font-bold text-gray-500 bg-white/5 px-2 py-0.5 rounded uppercase">Neutral</span>
+</div>
+<h3 class="text-gray-500 text-xs font-label uppercase tracking-widest mb-1">Total Rewards</h3>
+<div class="text-4xl font-black font-headline text-white">0</div>
+</div>
+<div class="glass-card p-6 rounded-xl border border-white/5 hover:border-tertiary-fixed-dim/30 transition-colors group">
+<div class="flex justify-between items-start mb-4">
+<div class="p-3 bg-surface-container-highest rounded-lg text-tertiary-fixed-dim">
+<span class="material-symbols-outlined" data-icon="redeem">redeem</span>
+</div>
+<span class="text-[10px] font-label font-bold text-gray-500 bg-white/5 px-2 py-0.5 rounded uppercase">Neutral</span>
+</div>
+<h3 class="text-gray-500 text-xs font-label uppercase tracking-widest mb-1">Total Redeemed</h3>
+<div class="text-4xl font-black font-headline text-white">0</div>
+</div>
+</section>
+<!-- Bento Grid Main Content -->
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+<!-- Top Players List -->
+<section class="lg:col-span-8 glass-card rounded-xl border border-white/5 overflow-hidden">
+<div class="p-6 border-b border-white/5 flex justify-between items-center">
+<h2 class="font-headline font-bold text-lg text-white">Top Players</h2>
+<button class="text-xs font-label text-primary-container hover:underline">View All</button>
+</div>
+<div class="p-2">
+<table class="w-full text-left">
+<thead class="text-[10px] font-label text-gray-500 uppercase tracking-widest">
+<tr>
+<th class="px-4 py-3">Player</th>
+<th class="px-4 py-3 text-center">Matches</th>
+<th class="px-4 py-3 text-center">Score</th>
+<th class="px-4 py-3 text-right">Status</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-white/5">
+<tr class="hover:bg-white/5 transition-colors group">
+<td class="px-4 py-4 flex items-center gap-3">
+<div class="w-10 h-10 rounded-full overflow-hidden bg-surface-container-high border border-white/10">
+<img alt="Player 1" data-alt="Close up portrait of a professional cricket player" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD7yFIpqjbpGoYFbd8YBd2EShE-8YUZHitp7BRaij3XeDPdBw6mKZtNT5LvQNiVvI3ZBF3vkoNZDCTeuwzwpr-xoDVIAAJfUqMIYcg593diKPmZwNNIuSfAvTOajN8oSP79Gdhdm2jXg2Gh7JYex-t9YygvDFRIS6L372UxR5K_J-56cdLfvyqe9j8G_4rAprN1erM-Wm8DjywC81e_fgQRxRA0DbApgvUFdYfWfM4Yq8QRsD5xWV0T2cc6pg-jcm3ounrKGrsb_Bc"/>
+</div>
+<div>
+<div class="font-headline font-bold text-white group-hover:text-primary-container transition-colors">Virat Kohli</div>
+<div class="text-xs text-gray-500 font-label">Royal Challengers</div>
+</div>
+</td>
+<td class="px-4 py-4 text-center text-sm font-label text-gray-300">242</td>
+<td class="px-4 py-4 text-center text-sm font-headline font-black text-secondary-container">7,263</td>
+<td class="px-4 py-4 text-right">
+<span class="px-2 py-1 rounded bg-primary-container/10 text-primary-container text-[10px] font-bold uppercase tracking-wider">Active</span>
+</td>
+</tr>
+<tr class="hover:bg-white/5 transition-colors group">
+<td class="px-4 py-4 flex items-center gap-3">
+<div class="w-10 h-10 rounded-full overflow-hidden bg-surface-container-high border border-white/10">
+<img alt="Player 2" data-alt="Professional athlete profile picture" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCv2JBrrwJPsihxEvpLQBO76_sSMvycdHoXsLB3dgSWANKye4LC1tmZKAllnKyuE1Jnz_IB9JPDNqlk50kbwu_WVUQds1Q7XOKdRJWr2RdNJ6A5bw_u06O9opAXFRkPX-da7Hh1rAPkWhtgZ4G-uty2zT6U2u5YL3Uk_O5Z78rGH9FYRkhHvq-CuM3fzuAVeISXRjal3PFdkoONlL9duUPSvyOmziUAN-eMfNj9YNLYOawND7gW0vhh_8z8WFBCRkriZmA5m9afuig"/>
+</div>
+<div>
+<div class="font-headline font-bold text-white group-hover:text-primary-container transition-colors">MS Dhoni</div>
+<div class="text-xs text-gray-500 font-label">Chennai Super Kings</div>
+</div>
+</td>
+<td class="px-4 py-4 text-center text-sm font-label text-gray-300">250</td>
+<td class="px-4 py-4 text-center text-sm font-headline font-black text-secondary-container">5,082</td>
+<td class="px-4 py-4 text-right">
+<span class="px-2 py-1 rounded bg-white/5 text-gray-500 text-[10px] font-bold uppercase tracking-wider">Inactive</span>
+</td>
+</tr>
+<tr class="hover:bg-white/5 transition-colors group">
+<td class="px-4 py-4 flex items-center gap-3">
+<div class="w-10 h-10 rounded-full overflow-hidden bg-surface-container-high border border-white/10">
+<img alt="Player 3" data-alt="Portrait of a cricketer in sportswear" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBMlb958Bsj_zIgXCx4-7Efa8zDeCBrTg_dzneXYXi8lqpBM7gOedeQ37wAESO04lIA4vc-L3EIikwR7VD1AzONuvG26ovww-DxcrYnMPWcbFCrVFW-CZOWL1-hJ_AgvZMy66oD_LzdIUcZ1POPNtvAFvMpy4pj1kMlT6xHW-TzdMPiK_VHk--EDMoTzY_VDrBEAyk9huT18_WUoAHIMmJKw382UEZQKHkxhb91jEolj3nPQFvDpTB6fNMeOTqPnY_56eIkOxktNhk"/>
+</div>
+<div>
+<div class="font-headline font-bold text-white group-hover:text-primary-container transition-colors">Rohit Sharma</div>
+<div class="text-xs text-gray-500 font-label">Mumbai Indians</div>
+</div>
+</td>
+<td class="px-4 py-4 text-center text-sm font-label text-gray-300">243</td>
+<td class="px-4 py-4 text-center text-sm font-headline font-black text-secondary-container">6,211</td>
+<td class="px-4 py-4 text-right">
+<span class="px-2 py-1 rounded bg-primary-container/10 text-primary-container text-[10px] font-bold uppercase tracking-wider">Active</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<!-- Activity / Sidebar Cards -->
+<aside class="lg:col-span-4 space-y-6">
+<div class="glass-card p-6 rounded-xl border border-white/5 relative overflow-hidden">
+<!-- Glow background element -->
+<div class="absolute -bottom-10 -right-10 w-32 h-32 bg-secondary-container/10 blur-[40px] rounded-full"></div>
+<h2 class="font-headline font-bold text-lg text-white mb-6">Upcoming Matches</h2>
+<div class="space-y-4 relative z-10">
+<div class="bg-surface-container-lowest p-4 rounded-lg border border-white/5">
+<div class="flex justify-between items-center mb-3">
+<span class="text-[10px] font-label text-gray-500 font-bold uppercase">Today • 19:30</span>
+<span class="px-2 py-0.5 bg-red-500/10 text-red-500 text-[10px] font-bold rounded uppercase">Hot</span>
+</div>
+<div class="flex justify-between items-center">
+<div class="text-center flex-1">
+<div class="font-headline font-black text-white text-sm">RCB</div>
+</div>
+<div class="px-3 text-[10px] font-black text-primary-container font-headline">VS</div>
+<div class="text-center flex-1">
+<div class="font-headline font-black text-white text-sm">CSK</div>
+</div>
+</div>
+</div>
+<div class="bg-surface-container-lowest p-4 rounded-lg border border-white/5 opacity-60">
+<div class="flex justify-between items-center mb-3">
+<span class="text-[10px] font-label text-gray-500 font-bold uppercase">Tomorrow • 15:30</span>
+</div>
+<div class="flex justify-between items-center">
+<div class="text-center flex-1">
+<div class="font-headline font-black text-white text-sm">MI</div>
+</div>
+<div class="px-3 text-[10px] font-black text-gray-500 font-headline">VS</div>
+<div class="text-center flex-1">
+<div class="font-headline font-black text-white text-sm">GT</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="bg-gradient-to-br from-primary-container to-surface-tint p-6 rounded-xl text-on-primary-container relative overflow-hidden group">
+<div class="absolute top-0 right-0 p-4 opacity-20 group-hover:scale-125 transition-transform">
+<span class="material-symbols-outlined text-4xl" data-icon="rocket_launch" style="font-variation-settings: 'FILL' 1;">rocket_launch</span>
+</div>
+<h3 class="font-headline font-black text-xl mb-2">Pro Analytics</h3>
+<p class="text-on-primary-container/80 text-xs font-medium mb-4">Unlock advanced stadium pulse and player heatmaps for better management.</p>
+<button class="w-full py-2 bg-on-primary-container text-primary-container font-bold text-xs rounded uppercase tracking-widest hover:bg-on-primary-container/90 transition-colors">Upgrade Now</button>
+</div>
+</aside>
+</div>
+</div>
+</main>
+</body></html>

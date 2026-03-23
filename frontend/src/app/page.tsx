@@ -1,264 +1,95 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
-import dynamic from "next/dynamic";
-import { useSearchParams } from "next/navigation";
-import { GameProvider, useGame } from "@/context/GameContext";
-import { api } from "@/lib/api";
-import LandingPage from "@/components/LandingPage";
-import OTPFlow from "@/components/OTPFlow";
-import PreMatchCards from "@/components/PreMatchCards";
-import LiveGame from "@/components/LiveGame";
+import { useRouter } from "next/navigation";
+import MaterialIcon from "@/components/MaterialIcon";
 
-function GameApp() {
-  const { state, dispatch } = useGame();
-  const searchParams = useSearchParams();
-
-  const [venue, setVenue] = useState<any>(null);
-  const [match, setMatch] = useState<any>(null);
-  const [gamePhase, setGamePhase] = useState<"landing" | "otp" | "prematch" | "live">("landing");
-  const [playerCount, setPlayerCount] = useState(0);
-
-  const venueId = searchParams.get("v") || searchParams.get("venue");
-  const matchId = searchParams.get("m") || searchParams.get("match");
-
-  // Load venue info
-  useEffect(() => {
-    if (venueId) {
-      api.getVenue(venueId).then(setVenue).catch(console.error);
-      dispatch({ type: "SET_VENUE", venueId, venueName: "" });
-    }
-  }, [venueId]);
-
-  // Load match info
-  useEffect(() => {
-    if (matchId) {
-      api.getMatch(matchId).then(setMatch).catch(console.error);
-      dispatch({ type: "SET_MATCH", matchId });
-    } else {
-      // Get current matches
-      api.getMatches().then((matches) => {
-        if (matches.length > 0) {
-          setMatch(matches[0]);
-          dispatch({ type: "SET_MATCH", matchId: matches[0].id });
-        }
-      }).catch(console.error);
-    }
-  }, [matchId]);
-
-  // Update venue name
-  useEffect(() => {
-    if (venue?.name) {
-      dispatch({ type: "SET_VENUE", venueId: venue.id, venueName: venue.name });
-    }
-  }, [venue]);
-
-  // Load player count
-  useEffect(() => {
-    if (match?.id && venueId) {
-      api.getPlayerCount(match.id, venueId).then((d) => setPlayerCount(d.count)).catch(() => {});
-    }
-  }, [match?.id, venueId]);
-
-  // Auto-advance phase based on state
-  useEffect(() => {
-    if (state.isLoading) return;
-    if (!venueId && !matchId) return; // No URL params, show fallback
-
-    if (!state.user) {
-      setGamePhase("landing");
-      return;
-    }
-
-    if (!match) return; // Match still loading, wait
-    if (!venueId) return; // Need venue to get match state
-
-    // User is logged in and match is loaded
-    api.getMatchState(match.id, venueId)
-      .then((data) => {
-        if (data.participant) {
-          // Already joined — check if they've answered all pre-match questions
-          const unansweredPreMatch = data.openPredictions.filter(
-            (p: any) => p.category === "pre_match" && !p.userAnswered
-          );
-          if (unansweredPreMatch.length > 0) {
-            setGamePhase("prematch");
-          } else {
-            setGamePhase("live");
-          }
-        } else {
-          // Not joined yet — show pre-match cards (which also joins them)
-          setGamePhase("prematch");
-        }
-      })
-      .catch(() => setGamePhase("prematch"));
-  }, [state.user, state.isLoading, match, venueId, matchId]);
-
-  if (state.isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-950">
-        <div className="text-center">
-          <div className="text-5xl font-black text-orange-500 mb-4">JAFFA</div>
-          <div className="text-slate-400 animate-pulse">Loading...</div>
-        </div>
-      </div>
-    );
-  }
-
-  // Check if game is open (45 min before match start)
-  const isGameOpen = (() => {
-    if (!match?.startTime) return false;
-    if (match.status === "live") return true; // always open if match is live
-    const matchStart = new Date(match.startTime).getTime();
-    const now = Date.now();
-    const fortyFiveMinBefore = matchStart - 45 * 60 * 1000;
-    return now >= fortyFiveMinBefore;
-  })();
-
-  if (!isGameOpen && match && venue) {
-    return (
-      <CountdownGate match={match} venue={venue} />
-    );
-  }
-
-  if (gamePhase === "landing" && !state.user) {
-    return (
-      <LandingPage
-        venue={venue}
-        match={match}
-        playerCount={playerCount}
-        onJoin={() => setGamePhase("otp")}
-      />
-    );
-  }
-
-  if (gamePhase === "otp") {
-    return (
-      <OTPFlow
-        onComplete={() => {
-          setGamePhase("prematch");
-        }}
-      />
-    );
-  }
-
-  if (gamePhase === "prematch" && match) {
-    return (
-      <PreMatchCards
-        match={match}
-        venueId={venueId || ""}
-        onComplete={() => setGamePhase("live")}
-      />
-    );
-  }
-
-  if (gamePhase === "live" && match) {
-    return (
-      <LiveGame
-        match={match}
-        venueId={venueId || ""}
-      />
-    );
-  }
-
-  // Fallback: no venue or match
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-950 p-6">
-      <div className="text-center max-w-sm">
-        <div className="text-5xl font-black text-orange-500 mb-4">JAFFA</div>
-        <p className="text-slate-400 mb-6">
-          Scan the QR code at your cafe to join the game!
-        </p>
-        <div className="text-sm text-slate-600">
-          Predict. Play. Win.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CountdownGate({ match, venue }: { match: any; venue: any }) {
-  const [timeLeft, setTimeLeft] = useState({ hours: 0, mins: 0, secs: 0 });
-
-  useEffect(() => {
-    const opensAt = new Date(match.startTime).getTime() - 45 * 60 * 1000;
-
-    const tick = () => {
-      const diff = opensAt - Date.now();
-      if (diff <= 0) {
-        window.location.reload();
-        return;
-      }
-      setTimeLeft({
-        hours: Math.floor(diff / (1000 * 60 * 60)),
-        mins: Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60)),
-        secs: Math.floor((diff % (1000 * 60)) / 1000),
-      });
-    };
-
-    tick();
-    const interval = setInterval(tick, 1000);
-    return () => clearInterval(interval);
-  }, [match.startTime]);
+export default function SplashScreen() {
+  const router = useRouter();
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 flex flex-col items-center justify-center p-6">
-      <h1 className="text-5xl font-black text-orange-500 mb-4">JAFFA</h1>
-      <div className="w-full max-w-sm bg-slate-800/50 backdrop-blur border border-slate-700 rounded-2xl p-6 mb-6 text-center">
-        <p className="text-xs font-medium text-orange-400 uppercase tracking-wider mb-3">
-          {match.team1Short} vs {match.team2Short}
-        </p>
-        <p className="text-white font-semibold text-lg mb-4">
-          Game opens 45 minutes before the match
-        </p>
-        <div className="bg-slate-900 rounded-xl p-4 mb-3">
-          <p className="text-slate-400 text-sm mb-2">Opens in</p>
-          <div className="flex justify-center gap-3">
-            <div className="text-center">
-              <p className="text-3xl font-black text-orange-500">{String(timeLeft.hours).padStart(2, "0")}</p>
-              <p className="text-xs text-slate-500">hours</p>
-            </div>
-            <p className="text-3xl font-black text-slate-600">:</p>
-            <div className="text-center">
-              <p className="text-3xl font-black text-orange-500">{String(timeLeft.mins).padStart(2, "0")}</p>
-              <p className="text-xs text-slate-500">mins</p>
-            </div>
-            <p className="text-3xl font-black text-slate-600">:</p>
-            <div className="text-center">
-              <p className="text-3xl font-black text-orange-500">{String(timeLeft.secs).padStart(2, "0")}</p>
-              <p className="text-xs text-slate-500">secs</p>
-            </div>
+    <main className="relative h-screen w-full flex flex-col items-center justify-center bg-stadium-gradient overflow-hidden">
+      {/* Ambient Deep Purple Glow */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-1/4 -left-1/4 w-full h-full bg-on-tertiary-fixed-variant/20 blur-[120px] rounded-full"></div>
+        <div className="absolute -bottom-1/4 -right-1/4 w-full h-full bg-on-secondary-container/10 blur-[120px] rounded-full"></div>
+      </div>
+
+      {/* Impact Effect Layers */}
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="glass-impact w-[140vw] h-[140vw] max-w-[1200px] max-h-[1200px] rounded-full"></div>
+        <div className="absolute w-full h-full">
+          <div className="cracked-line w-[400px] rotate-[15deg] top-1/2 left-1/2 opacity-20"></div>
+          <div className="cracked-line w-[300px] rotate-[165deg] top-1/2 left-1/2 opacity-10"></div>
+          <div className="cracked-line w-[500px] rotate-[280deg] top-1/2 left-1/2 opacity-15"></div>
+          <div className="cracked-line w-[350px] rotate-[75deg] top-1/2 left-1/2 opacity-5"></div>
+        </div>
+      </div>
+
+      {/* Central Content Cluster */}
+      <div className="relative z-10 flex flex-col items-center">
+        {/* Glassmorphic Logo Container */}
+        <div className="relative mb-12 group">
+          <div className="absolute inset-0 bg-primary-container/20 blur-3xl scale-125 opacity-50"></div>
+          <div className="relative bg-surface-bright/30 backdrop-blur-2xl p-10 rounded-full border border-white/10 shadow-[0_0_80px_rgba(0,255,171,0.15)] flex items-center justify-center overflow-hidden">
+            <MaterialIcon
+              icon="sports_cricket"
+              filled
+              className="text-8xl text-primary-container text-glow"
+            />
+            <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent pointer-events-none"></div>
           </div>
+          <div className="absolute -top-4 -right-2 w-2 h-2 bg-secondary-container rounded-full blur-[1px]"></div>
+          <div className="absolute bottom-8 -left-6 w-1 h-1 bg-primary-container rounded-full blur-[1px]"></div>
         </div>
-        <p className="text-slate-500 text-xs">
-          Playing at {venue.name}
-        </p>
+
+        {/* Brand Typography */}
+        <div className="text-center space-y-4 px-6">
+          <h1 className="font-headline font-black italic text-7xl md:text-9xl tracking-[0.2em] text-primary-container uppercase drop-shadow-[0_0_30px_rgba(0,255,171,0.4)]">
+            JAFFA
+          </h1>
+          <div className="h-1 w-24 bg-gradient-to-r from-transparent via-primary-container to-transparent mx-auto"></div>
+          <p className="font-label text-secondary-fixed-dim uppercase tracking-[0.4em] text-xs md:text-sm font-bold opacity-80 mt-6">
+            Predict. Play. Win at your café.
+          </p>
+        </div>
       </div>
-      <p className="text-slate-600 text-sm">Come back closer to match time!</p>
-    </div>
-  );
-}
 
-const LoadingFallback = () => (
-  <div className="min-h-screen flex items-center justify-center bg-slate-950">
-    <div className="text-center">
-      <div className="text-5xl font-black text-orange-500 mb-4">JAFFA</div>
-      <div className="text-slate-400 animate-pulse">Loading...</div>
-    </div>
-  </div>
-);
+      {/* Progress/Pulse Meter at Bottom */}
+      <div className="absolute bottom-16 w-48 h-[2px] bg-surface-container-highest overflow-hidden rounded-full">
+        <div className="h-full w-2/3 bg-gradient-to-r from-secondary-container to-primary-container shadow-[0_0_10px_#00FFAB] animate-[pulse_2s_infinite]"></div>
+      </div>
 
-const GameAppNoSSR = dynamic(() => Promise.resolve(GameApp), {
-  ssr: false,
-  loading: () => <LoadingFallback />,
-});
+      {/* Corner Details for Broadcast Feel */}
+      <div className="absolute top-10 left-10 hidden md:block">
+        <div className="flex items-center gap-3">
+          <div className="w-3 h-3 bg-red-600 rounded-full animate-pulse"></div>
+          <span className="font-label text-xs font-bold tracking-widest text-on-surface-variant uppercase">
+            Live Stream Connected
+          </span>
+        </div>
+      </div>
+      <div className="absolute bottom-10 right-10 hidden md:block">
+        <div className="flex flex-col items-end">
+          <span className="font-headline text-lg font-bold text-on-surface opacity-30">V.2.4.0</span>
+          <span className="font-label text-[10px] tracking-widest text-on-surface-variant uppercase">
+            Stadium Engine Active
+          </span>
+        </div>
+      </div>
 
-export default function Home() {
-  return (
-    <GameProvider>
-      <Suspense fallback={<LoadingFallback />}>
-        <GameAppNoSSR />
-      </Suspense>
-    </GameProvider>
+      {/* Call to Action */}
+      <div className="absolute bottom-24 z-20">
+        <button
+          onClick={() => router.push("/login")}
+          className="group flex items-center gap-4 px-8 py-4 bg-primary-container text-on-primary-container rounded-md font-headline font-extrabold text-lg uppercase tracking-wider transition-all hover:shadow-[0_0_40px_rgba(0,255,171,0.4)] active:scale-95"
+        >
+          Enter Arena
+          <MaterialIcon
+            icon="double_arrow"
+            className="transition-transform group-hover:translate-x-1"
+          />
+        </button>
+      </div>
+    </main>
   );
 }
