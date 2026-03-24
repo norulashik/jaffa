@@ -1,10 +1,19 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import MaterialIcon from "@/components/MaterialIcon";
 
 export default function SplashScreen() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const venueId = searchParams.get("v");
+    const matchId = searchParams.get("m");
+    if (venueId) localStorage.setItem("jaffa_venue_id", venueId);
+    if (matchId) localStorage.setItem("jaffa_match_id", matchId);
+  }, [searchParams]);
 
   return (
     <main className="relative h-screen w-full flex flex-col items-center justify-center bg-stadium-gradient overflow-hidden">

@@ -50,8 +50,9 @@ export default function MatchDashboard() {
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackData, setFeedbackData] = useState<any>(null);
   const [matchData, setMatchData] = useState<any>(null);
+  const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string>>({});
 
-  const venueId = typeof window !== "undefined" ? localStorage.getItem("jaffa_venueId") || "" : "";
+  const venueId = typeof window !== "undefined" ? localStorage.getItem("jaffa_venue_id") || "" : "";
 
   // Phase 1: Join match and load pre-match predictions
   useEffect(() => {
@@ -70,22 +71,19 @@ export default function MatchDashboard() {
           // Already joined — that's fine
         }
 
-        // Load pre-match predictions (round 0)
+        // Check for unanswered pre-match questions
         try {
           const preds = await api.getPredictions(matchId, venueId, 0);
           const unanswered = (preds || []).filter(
             (p: any) => p.category === "pre_match" && !p.userAnswer && p.status === "open"
           );
-
           if (unanswered.length > 0) {
             setPreMatchPredictions(unanswered);
             setPhase("prematch");
           } else {
-            // No pre-match questions, go straight to live
             setPhase("live");
           }
         } catch {
-          // If predictions fail, go to live
           setPhase("live");
         }
       } catch {
@@ -109,7 +107,9 @@ export default function MatchDashboard() {
     }
 
     socket.on("newPrediction", (data: any) => {
-      setPredictions((prev) => [...prev, data]);
+      if (data.category !== "pre_match") {
+        setPredictions((prev) => [...prev, data]);
+      }
     });
 
     socket.on("scoreUpdate", (data: any) => {
@@ -135,7 +135,14 @@ export default function MatchDashboard() {
         api.getPredictions(matchId, venueId),
       ]);
       setMatchData(match);
-      setPredictions(preds || []);
+      const filtered = (preds || []).filter((p: any) => p.category !== "pre_match");
+      setPredictions(filtered);
+      // Restore already-answered selections
+      const answered: Record<string, string> = {};
+      filtered.forEach((p: any) => {
+        if (p.userAnswer?.selectedOption) answered[p.id] = p.userAnswer.selectedOption;
+      });
+      setSelectedAnswers(answered);
     } catch {
       // Use placeholder data
     }
@@ -180,11 +187,14 @@ export default function MatchDashboard() {
   }, [preMatchSubmitting, selectedPreMatchOption, preMatchPredictions, currentCardIndex, venueId]);
 
   // Live: handle option select
-  const handleOptionSelect = async (predictionId: string, option: string) => {
+  const handleOptionSelect = async (predictionId: string, optionKey: string) => {
+    if (selectedAnswers[predictionId]) return; // already answered
+    setSelectedAnswers((prev) => ({ ...prev, [predictionId]: optionKey }));
     try {
-      await api.submitPrediction(predictionId, option, venueId);
+      await api.submitPrediction(predictionId, optionKey, venueId);
     } catch {
-      // Handle error silently
+      // Revert on failure
+      setSelectedAnswers((prev) => { const n = { ...prev }; delete n[predictionId]; return n; });
     }
   };
 
@@ -316,42 +326,6 @@ export default function MatchDashboard() {
   }
 
   // ─── LIVE DASHBOARD PHASE ───
-  // Placeholder predictions matching Stitch design
-  const demoPredictions = [
-    {
-      id: "1",
-      badge: "OVER 1",
-      question: "Maiden over in over 1? \u{1F3B3}",
-      matchLabel: "CSK vs RCB",
-      options: [
-        { label: "Yes — bowler dominance", points: 30 },
-        { label: "No", points: 5 },
-      ],
-    },
-    {
-      id: "2",
-      badge: "OVER 1",
-      question: "Will Ruturaj Gaikwad score 10+ in over 1?",
-      matchLabel: "CSK vs RCB",
-      options: [
-        { label: "Yes — going big", points: 20 },
-        { label: "No — staying steady", points: 10 },
-      ],
-    },
-    {
-      id: "3",
-      badge: "HOT TAKE",
-      question: "More runs in the powerplay — first 3 overs or last 3?",
-      isHotTake: true,
-      options: [
-        { label: "First 3 overs (1-3)", points: 20 },
-        { label: "Last 3 overs (4-6)", points: 20 },
-      ],
-    },
-  ];
-
-  const displayPredictions = predictions.length > 0 ? predictions : demoPredictions;
-
   return (
     <div className="bg-surface text-on-surface font-body overflow-x-hidden">
       {/* TopAppBar */}
@@ -408,73 +382,155 @@ export default function MatchDashboard() {
         </section>
 
         {/* Predict Tabs */}
-        <div className="flex items-center border-b border-white/5">
-          {(["predict", "leaderboard", "rewards"] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`flex-1 py-3 font-label text-xs font-bold uppercase tracking-widest ${
-                activeTab === tab
-                  ? "text-primary-container border-b-2 border-primary-container"
-                  : "text-on-surface-variant"
-              }`}
-            >
-              {tab === "predict" ? `Predict (${displayPredictions.length})` : tab.charAt(0).toUpperCase() + tab.slice(1)}
-            </button>
-          ))}
-        </div>
+        {(() => {
+          const openPreds = predictions.filter((p: any) => p.status === "open" && !selectedAnswers[p.id] && !p.userAnswer?.selectedOption);
+          const answeredPreds = predictions.filter((p: any) => selectedAnswers[p.id] || p.userAnswer?.selectedOption);
 
-        {/* Prediction Stack */}
-        {activeTab === "predict" && (
-          <div className="space-y-4">
-            {displayPredictions.map((pred: any) => (
-              <section
-                key={pred.id}
-                className={`prediction-card rounded-xl p-5 relative overflow-hidden ${
-                  pred.isHotTake ? "border-l-4 border-l-amber-500" : ""
-                }`}
-              >
-                <div className="flex justify-between items-start mb-3">
-                  <div className="flex flex-col">
-                    <span className="font-label text-[10px] font-black text-amber-500 uppercase tracking-widest">
-                      {pred.badge || pred.category?.toUpperCase() || "OVER 1"}
-                    </span>
-                    <h3 className="font-headline text-lg font-bold">{pred.question}</h3>
-                  </div>
-                  {pred.matchLabel && (
-                    <span className="font-label text-[10px] text-on-surface-variant">{pred.matchLabel}</span>
+          const getCategoryLabel = (pred: any) => {
+            if (pred.category === "per_over") return `Over ${pred.overNumber || ""}`;
+            if (pred.category === "hot_take") return "Hot Take";
+            return pred.category?.replace(/_/g, " ") || "Predict";
+          };
+
+          const getOptionLabel = (pred: any, key: string) =>
+            pred.options?.find((o: any) => (o.key || o.label) === key)?.label || key;
+
+          return (
+            <>
+              <div className="flex items-center border-b border-white/5">
+                {(["predict", "leaderboard", "rewards"] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`flex-1 py-3 font-label text-xs font-bold uppercase tracking-widest ${
+                      activeTab === tab
+                        ? "text-primary-container border-b-2 border-primary-container"
+                        : "text-on-surface-variant"
+                    }`}
+                  >
+                    {tab === "predict" ? `Predict${openPreds.length > 0 ? ` (${openPreds.length})` : ""}` : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                  </button>
+                ))}
+              </div>
+
+              {activeTab === "predict" && (
+                <div className="space-y-4">
+                  {/* Open unanswered predictions */}
+                  {openPreds.map((pred: any) => (
+                    <section key={pred.id} className={`prediction-card rounded-xl p-5 relative overflow-hidden ${pred.category === "hot_take" ? "border-l-4 border-l-amber-500" : ""}`}>
+                      <div className="flex justify-between items-start mb-3">
+                        <div className="flex flex-col">
+                          <span className="font-label text-[10px] font-black text-amber-500 uppercase tracking-widest">
+                            {getCategoryLabel(pred)}
+                          </span>
+                          <h3 className="font-headline text-lg font-bold">{pred.question}</h3>
+                        </div>
+                      </div>
+                      <div className="space-y-2 mb-4">
+                        {(pred.options || []).map((opt: any, i: number) => {
+                          const optKey = opt.key || opt.label;
+                          return (
+                            <button
+                              key={i}
+                              onClick={() => handleOptionSelect(pred.id, optKey)}
+                              className="option-button w-full p-3 rounded-lg flex justify-between items-center transition-all duration-200 text-on-surface hover:bg-surface-container active:scale-[0.98]"
+                            >
+                              <span className="font-body text-sm font-medium">{opt.label}</span>
+                              <span className="font-label text-xs font-bold text-primary-container">{opt.points} pts</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="flex gap-2">
+                        <button className="flex items-center gap-1.5 bg-primary-container/10 border border-primary-container/20 px-3 py-1.5 rounded-full">
+                          <MaterialIcon icon="bolt" filled className="text-primary-container text-sm" />
+                          <span className="font-label text-[10px] font-bold text-primary-container uppercase tracking-tighter">2x Boost</span>
+                        </button>
+                        <button className="flex items-center gap-1.5 bg-secondary-container/10 border border-secondary-container/20 px-3 py-1.5 rounded-full">
+                          <MaterialIcon icon="rocket_launch" filled className="text-secondary-container text-sm" />
+                          <span className="font-label text-[10px] font-bold text-secondary-container uppercase tracking-tighter">3x All-In</span>
+                        </button>
+                      </div>
+                    </section>
+                  ))}
+
+                  {/* All caught up */}
+                  {openPreds.length === 0 && (
+                    <div className="flex flex-col items-center justify-center py-16 text-center">
+                      <span className="text-5xl mb-4">🏏</span>
+                      <h3 className="font-headline text-xl font-bold text-on-surface mb-2">All caught up!</h3>
+                      <p className="font-body text-sm text-on-surface-variant max-w-[240px]">
+                        New predictions drop at the end of this over. Keep watching!
+                      </p>
+                    </div>
+                  )}
+
+                  {/* My Picks */}
+                  {answeredPreds.length > 0 && (
+                    <div className="mt-2">
+                      <div className="flex justify-between items-center mb-3 px-1">
+                        <span className="font-label text-sm font-bold text-on-surface-variant">My Picks ({answeredPreds.length})</span>
+                      </div>
+                      <div className="space-y-2">
+                        {answeredPreds.map((pred: any) => {
+                          const selectedKey = selectedAnswers[pred.id] || pred.userAnswer?.selectedOption;
+                          const selectedLabel = getOptionLabel(pred, selectedKey);
+                          const isClosed = pred.status === "closed";
+                          const isCorrect = pred.userAnswer?.isCorrect;
+                          const pointsEarned = pred.userAnswer?.pointsEarned;
+                          const correctAnswerLabel = isClosed && isCorrect === false && pred.correctAnswer
+                            ? getOptionLabel(pred, pred.correctAnswer)
+                            : null;
+
+                          let statusText = "Pending";
+                          let statusColor = "text-amber-400";
+                          let cardBg = "bg-surface-container-low";
+                          if (isClosed && isCorrect === true) {
+                            statusText = `+${pointsEarned || 0} pts`;
+                            statusColor = "text-primary-container";
+                            cardBg = "bg-primary-container/10";
+                          } else if (isClosed && isCorrect === false) {
+                            statusText = "Wrong";
+                            statusColor = "text-error";
+                            cardBg = "bg-error/5";
+                          }
+
+                          return (
+                            <div key={pred.id} className={`${cardBg} rounded-xl p-4 border border-white/5`}>
+                              <div className="flex justify-between items-start mb-1">
+                                <span className="font-label text-[10px] text-on-surface-variant uppercase tracking-widest">
+                                  {getCategoryLabel(pred)}
+                                </span>
+                                <span className={`font-label text-xs font-bold ${statusColor}`}>{statusText}</span>
+                              </div>
+                              <p className="font-body text-sm font-medium text-on-surface mb-2">{pred.question}</p>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={`font-label text-xs px-3 py-1 rounded-full font-bold ${
+                                  isClosed && isCorrect === false
+                                    ? "bg-error/20 text-error"
+                                    : isClosed && isCorrect === true
+                                    ? "bg-primary-container/20 text-primary-container"
+                                    : "bg-surface-container-highest text-on-surface-variant"
+                                }`}>
+                                  Your pick: {selectedLabel}
+                                </span>
+                                {correctAnswerLabel && (
+                                  <span className="font-label text-xs text-on-surface-variant">
+                                    Answer: {correctAnswerLabel}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                   )}
                 </div>
-                <div className="space-y-2 mb-4">
-                  {(pred.options || []).map((opt: any, i: number) => (
-                    <button
-                      key={i}
-                      onClick={() => handleOptionSelect(pred.id, opt.label)}
-                      className="option-button w-full p-3 rounded-lg flex justify-between items-center group"
-                    >
-                      <span className="font-body text-sm font-medium">{opt.label}</span>
-                      <span className="font-label text-xs font-bold text-primary-container">{opt.points} pts</span>
-                    </button>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <button className="flex items-center gap-1.5 bg-primary-container/10 border border-primary-container/20 px-3 py-1.5 rounded-full hover:bg-primary-container/20 transition-colors">
-                    <MaterialIcon icon="bolt" filled className="text-primary-container text-sm" />
-                    <span className="font-label text-[10px] font-bold text-primary-container uppercase tracking-tighter">
-                      2x Boost (2 left)
-                    </span>
-                  </button>
-                  <button className="flex items-center gap-1.5 bg-secondary-container/10 border border-secondary-container/20 px-3 py-1.5 rounded-full hover:bg-secondary-container/20 transition-colors">
-                    <MaterialIcon icon="rocket_launch" filled className="text-secondary-container text-sm" />
-                    <span className="font-label text-[10px] font-bold text-secondary-container uppercase tracking-tighter">
-                      3x All-In
-                    </span>
-                  </button>
-                </div>
-              </section>
-            ))}
-          </div>
-        )}
+              )}
+            </>
+          );
+        })()}
 
         {/* Quick Stats */}
         <section className="grid grid-cols-2 gap-4">

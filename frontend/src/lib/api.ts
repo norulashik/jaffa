@@ -46,6 +46,9 @@ export const api = {
 
   getMe: () => request<{ id: string; phone: string; displayName: string }>("/auth/me"),
 
+  updateAvatar: (avatarConfig: any) =>
+    request<{ success: boolean }>("/auth/avatar", { method: "PUT", body: JSON.stringify({ avatarConfig }) }),
+
   // Venues
   getVenue: (venueId: string) =>
     request<{ id: string; name: string; rewardConfig: any; latitude: number; longitude: number; radiusMeters: number }>(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import MaterialIcon from "@/components/MaterialIcon";
 import { api } from "@/lib/api";
@@ -16,7 +16,15 @@ export default function LoginOTP() {
   const [needsDisplayName, setNeedsDisplayName] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [verifiedCode, setVerifiedCode] = useState("");
+  const [venueName, setVenueName] = useState("");
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  useEffect(() => {
+    const venueId = localStorage.getItem("jaffa_venue_id");
+    if (venueId) {
+      api.getVenue(venueId).then((v) => setVenueName(v.name)).catch(() => {});
+    }
+  }, []);
 
   const handleSendOTP = async () => {
     if (!phone || phone.length < 10) {
@@ -85,10 +93,11 @@ export default function LoginOTP() {
       }
     } catch (err: any) {
       setError(err.message || "Invalid OTP");
-      if (!needsDisplayName) {
-        setOtp(["", "", "", "", "", ""]);
-        otpRefs.current[0]?.focus();
-      }
+      // Reset fully so user can re-enter OTP
+      setOtp(["", "", "", "", "", ""]);
+      setNeedsDisplayName(false);
+      setVerifiedCode("");
+      setOtpSent(false);
     } finally {
       setLoading(false);
     }
@@ -126,6 +135,12 @@ export default function LoginOTP() {
         <div className="w-full max-w-md space-y-10">
           {/* Branding/Hero Section */}
           <div className="text-left space-y-2">
+            {venueName && (
+              <div className="flex items-center gap-2 mb-2">
+                <MaterialIcon icon="store" className="text-secondary-container text-sm" />
+                <span className="font-label text-xs font-bold uppercase tracking-widest text-secondary-container">{venueName}</span>
+              </div>
+            )}
             <h1 className="font-headline text-4xl md:text-5xl font-extrabold tracking-tight text-on-surface">
               The Arena <br />
               <span className="text-primary-container">Awaits.</span>
@@ -171,7 +186,7 @@ export default function LoginOTP() {
             <button
               onClick={handleSendOTP}
               disabled={loading}
-              className="relative w-full overflow-hidden bg-primary-container hover:bg-primary-fixed-dim text-on-primary-container font-headline font-extrabold text-sm uppercase tracking-widest py-5 rounded-xl transition-all duration-300 active:scale-95 neon-glow group disabled:opacity-50"
+              className={`relative w-full overflow-hidden bg-primary-container hover:bg-primary-fixed-dim text-on-primary-container font-headline font-extrabold text-sm uppercase tracking-widest py-5 rounded-xl transition-all duration-300 active:scale-95 neon-glow group disabled:opacity-50 ${needsDisplayName ? "hidden" : ""}`}
             >
               <span className="relative z-10 flex items-center justify-center gap-2">
                 {loading ? "Sending..." : otpSent ? "Resend OTP" : "Send OTP"}

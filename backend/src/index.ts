@@ -21,13 +21,13 @@ const server = http.createServer(app);
 
 const io = new SocketIOServer(server, {
   cors: {
-    origin: process.env.CORS_ORIGIN || "http://localhost:3000",
+    origin: process.env.CORS_ORIGIN || "http://localhost:3001",
     methods: ["GET", "POST"],
   },
 });
 
 // Middleware
-app.use(cors({ origin: process.env.CORS_ORIGIN || "http://localhost:3000" }));
+app.use(cors({ origin: process.env.CORS_ORIGIN || "http://localhost:3001" }));
 app.use(express.json());
 
 // Make io accessible in routes
@@ -175,14 +175,17 @@ ${upcoming.map((f: any) =>
 // Socket.IO
 setupSocketHandlers(io);
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 5000;
 
 async function start() {
   try {
     await sequelize.authenticate();
     console.log("Database connected");
 
-    await sequelize.sync({ alter: true });
+    // Use force:false to create missing tables without touching existing ones.
+    // This avoids SQLite's simulate-ALTER issues (FK constraints, duplicate data).
+    // To apply schema changes in dev: delete jaffa.db and restart.
+    await sequelize.sync({ force: false });
     console.log("Database synced");
 
     server.listen(PORT, () => {

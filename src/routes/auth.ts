@@ -153,4 +153,19 @@ router.get("/me", async (req: Request, res: Response): Promise<void> => {
   }
 });
 
+// Update avatar config
+router.put("/avatar", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const token = req.headers.authorization?.replace("Bearer ", "");
+    if (!token) { res.status(401).json({ error: "No token" }); return; }
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || "dev-secret") as { userId: string };
+    const user = await User.findByPk(decoded.userId);
+    if (!user) { res.status(404).json({ error: "User not found" }); return; }
+    await user.update({ avatarConfig: JSON.stringify(req.body.avatarConfig) });
+    res.json({ success: true });
+  } catch {
+    res.status(401).json({ error: "Invalid token" });
+  }
+});
+
 export default router;
