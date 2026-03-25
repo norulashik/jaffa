@@ -5,8 +5,6 @@ import { sequelize, Venue, Match } from "../models";
 import bcrypt from "bcryptjs";
 import {
   generatePreMatchPredictions,
-  generatePerOverPredictions,
-  generateHotTake,
 } from "../services/predictionEngine";
 import Prediction from "../models/Prediction";
 
@@ -42,9 +40,9 @@ async function seed() {
       },
     });
 
-    // NZ vs SA 3rd T20I — Sportmonks fixture ID 67087
+    // NZ vs SA 4th T20I — Sportmonks fixture ID 67089
     const match = await Match.create({
-      externalId: "67087",
+      externalId: "67089",
       team1: "New Zealand",
       team2: "South Africa",
       team1Short: "NZ",
@@ -57,18 +55,16 @@ async function seed() {
         "Tony de Zorzi", "Reeza Hendricks", "Aiden Markram",
         "Heinrich Klaasen", "David Miller",
       ],
-      startTime: new Date("2026-03-20T06:15:00.000Z"),
-      status: "live",
-      currentInnings: 1,
-      currentOver: 1,
-      currentPhase: "innings1_powerplay",
+      startTime: new Date("2026-03-25T06:15:00.000Z"),
+      status: "upcoming",
+      currentInnings: 0,
+      currentOver: 0,
+      currentPhase: "pre_match",
       scoreData: {
         venue: "Seddon Park, Hamilton",
-        series: "NZ vs SA 3rd T20I 2026",
+        series: "NZ vs SA 4th T20I 2026",
         team1Img: "https://cdn.sportmonks.com/images/cricket/teams/10/42.png",
         team2Img: "https://cdn.sportmonks.com/images/cricket/teams/8/40.png",
-        tossWonTeamId: 42,
-        elected: "bowling",
       },
     });
 
@@ -82,24 +78,13 @@ async function seed() {
       await Prediction.create(q as any);
     }
 
-    // Over 1 predictions
-    const over1Preds = generatePerOverPredictions(match.id, 1, 1, "Tony de Zorzi");
-    for (const p of over1Preds) {
-      await Prediction.create(p as any);
-    }
-
-    // Round 1 hot take
-    const hotTake = generateHotTake(match.id, 1, match.team1Short, match.team2Short);
-    if (hotTake) {
-      await Prediction.create(hotTake as any);
-    }
-
-    console.log("\n=== NZ vs SA 3rd T20I — LIVE MATCH SEED ===");
+    console.log("\n=== NZ vs SA 4th T20I — UPCOMING MATCH SEED ===");
     console.log(`Venue ID: ${venue.id}`);
     console.log(`Match ID: ${match.id}`);
-    console.log(`Sportmonks Fixture ID: 67087`);
-    console.log(`Match: NZ vs SA, 3rd T20I`);
-    console.log(`Status: LIVE (polling Sportmonks every 30s)`);
+    console.log(`Sportmonks Fixture ID: 67089`);
+    console.log(`Match: NZ vs SA, 4th T20I`);
+    console.log(`Status: UPCOMING (auto-starts when toss detected — polling every 5s)`);
+    console.log(`Start Time: 2026-03-25T06:15:00.000Z`);
     console.log(`\nPlayer App: http://localhost:3000/?v=${venue.id}&m=${match.id}`);
     console.log(`Admin: http://localhost:3000/admin`);
     console.log(`TV: http://localhost:3000/tv?v=${venue.id}&m=${match.id}`);

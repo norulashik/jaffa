@@ -5,7 +5,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useGame } from "@/context/GameContext";
 import { api } from "@/lib/api";
 import { joinVenueMatch, getSocket } from "@/lib/socket";
-import Leaderboard from "./Leaderboard";
 import RewardBanner from "./RewardBanner";
 import ProfileDrawer from "./ProfileDrawer";
 import { IoFlame, IoRocket, IoTrophy, IoCheckmarkCircle } from "react-icons/io5";
@@ -17,11 +16,8 @@ interface LiveGameProps {
   venueId: string;
 }
 
-type Tab = "predict" | "leaderboard" | "rewards";
-
 export default function LiveGame({ match, venueId }: LiveGameProps) {
   const { state, dispatch } = useGame();
-  const [activeTab, setActiveTab] = useState<Tab>("predict");
   const [predictions, setPredictions] = useState<any[]>([]);
   const [participant, setParticipant] = useState<any>(null);
   const [playerCount, setPlayerCount] = useState(0);
@@ -75,6 +71,23 @@ export default function LiveGame({ match, venueId }: LiveGameProps) {
         setLiveScore(data.scoreData);
       }
     });
+    socket.on("inningsBreak", (data: any) => {
+      if (data.matchId === match.id) {
+        setLiveScore((prev: any) => ({
+          ...prev,
+          target: data.target,
+          currentInnings: 2,
+          innings1: {
+            ...prev?.innings1,
+            score: data.team1Score,
+            wickets: data.team1Wickets,
+          },
+        }));
+        // Reload predictions to pick up rivalry calls
+        loadPredictions();
+        loadRewards();
+      }
+    });
     socket.on("predictionsLocked", (data: any) => {
       if (data.matchId === match.id) {
         // Remove locked predictions from the UI so users can't answer them
@@ -100,6 +113,7 @@ export default function LiveGame({ match, venueId }: LiveGameProps) {
       socket.off("hypeEvent");
       socket.off("roundWinner");
       socket.off("scoreUpdate");
+      socket.off("inningsBreak");
       socket.off("predictionsLocked");
       socket.off("connect", handleReconnect);
     };
@@ -317,50 +331,18 @@ export default function LiveGame({ match, venueId }: LiveGameProps) {
         </div>
       </div>
 
-      {/* Tab Navigation */}
-      <div className="flex bg-slate-900 border-b border-slate-800">
-        {(["predict", "leaderboard", "rewards"] as Tab[]).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`flex-1 py-3 text-sm font-medium transition-colors ${
-              activeTab === tab
-                ? "text-orange-500 border-b-2 border-orange-500"
-                : "text-slate-500 hover:text-slate-300"
-            }`}
-          >
-            {tab === "predict" && `Predict${predictions.length > 0 ? ` (${predictions.length})` : ""}`}
-            {tab === "leaderboard" && "Leaderboard"}
-            {tab === "rewards" && `Rewards${rewards.filter((r: any) => r.status === "active").length > 0 ? " !" : ""}`}
-          </button>
-        ))}
-      </div>
-
       {/* Content */}
       <div className="flex-1 overflow-y-auto no-scrollbar">
-        {activeTab === "predict" && (
-          <PredictionList
-            predictions={predictions}
-            boostsRemaining={boostsRemaining}
-            allInAvailable={allInAvailable}
-            onSubmit={handleSubmit}
-            lastResult={lastResult}
-            answeredPredictions={answeredPredictions}
-            match={match}
-            myPicks={myPicks}
-          />
-        )}
-        {activeTab === "leaderboard" && (
-          <Leaderboard
-            matchId={match.id}
-            venueId={venueId}
-            currentRound={currentRound}
-            userId={state.user?.id}
-          />
-        )}
-        {activeTab === "rewards" && (
-          <RewardsList rewards={rewards} />
-        )}
+        <PredictionList
+          predictions={predictions}
+          boostsRemaining={boostsRemaining}
+          allInAvailable={allInAvailable}
+          onSubmit={handleSubmit}
+          lastResult={lastResult}
+          answeredPredictions={answeredPredictions}
+          match={match}
+          myPicks={myPicks}
+        />
       </div>
 
       {/* Profile Drawer */}
@@ -658,58 +640,6 @@ function MyPicksSection({ picks }: { picks: any[] }) {
           })}
         </div>
       )}
-    </div>
-  );
-}
-
-// Rewards list component
-function RewardsList({ rewards }: { rewards: any[] }) {
-  if (rewards.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20 px-6">
-        <IoTrophy className="text-4xl text-slate-600 mb-4" />
-        <p className="text-white font-semibold text-lg mb-2">No rewards yet</p>
-        <p className="text-slate-400 text-sm text-center">
-          Finish in the top 3 of any round to win rewards!
-        </p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-4 space-y-3">
-      {rewards.map((reward: any) => (
-        <div
-          key={reward.id}
-          className={`p-4 rounded-xl border ${
-            reward.status === "active"
-              ? "bg-gradient-to-r from-orange-500/10 to-yellow-500/10 border-orange-500/30"
-              : reward.status === "redeemed"
-              ? "bg-slate-800/50 border-slate-700"
-              : "bg-slate-800/30 border-slate-700/50 opacity-50"
-          }`}
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-medium uppercase text-orange-400">
-              {reward.round === 0 ? "Grand Prize" : `Round ${reward.round}`} — #{reward.position}
-            </span>
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-              reward.status === "active" ? "bg-green-500/20 text-green-400" :
-              reward.status === "redeemed" ? "bg-slate-600 text-slate-300" :
-              "bg-red-500/20 text-red-400"
-            }`}>
-              {reward.status === "active" ? "CLAIM" : reward.status === "redeemed" ? "USED" : "EXPIRED"}
-            </span>
-          </div>
-          <p className="text-white font-semibold">{reward.rewardText}</p>
-          {reward.status === "active" && (
-            <div className="mt-3 bg-slate-900 rounded-lg p-3 text-center">
-              <p className="text-xs text-slate-400 mb-1">Show this code to staff</p>
-              <p className="text-3xl font-black text-orange-500 tracking-widest">{reward.code}</p>
-            </div>
-          )}
-        </div>
-      ))}
     </div>
   );
 }

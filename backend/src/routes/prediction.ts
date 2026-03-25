@@ -1,6 +1,7 @@
 import { Router, Response } from "express";
 import { Prediction, UserPrediction, MatchParticipant, User } from "../models";
 import { authenticateUser, AuthRequest } from "../middleware/auth";
+import sequelize from "../config/database";
 
 const router = Router();
 
@@ -58,12 +59,8 @@ router.post("/:predictionId/answer", authenticateUser, async (req: AuthRequest, 
       return;
     }
 
-    const existing = await UserPrediction.findOne({
-      where: { userId, predictionId },
-    });
-
-    if (existing) {
-      res.status(400).json({ error: "Already answered this prediction" });
+    if (prediction.expiresAt && new Date() > new Date(prediction.expiresAt)) {
+      res.status(400).json({ error: "Prediction window has expired" });
       return;
     }
 
@@ -73,45 +70,59 @@ router.post("/:predictionId/answer", authenticateUser, async (req: AuthRequest, 
       return;
     }
 
-    const participant = await MatchParticipant.findOne({
-      where: { userId, matchId: prediction.matchId, venueId },
+    // Use transaction to prevent race conditions (duplicate answers, boost over-use)
+    const userPrediction = await sequelize.transaction(async (t) => {
+      const existing = await UserPrediction.findOne({
+        where: { userId, predictionId },
+        transaction: t,
+        lock: t.LOCK.UPDATE,
+      });
+
+      if (existing) {
+        throw new Error("ALREADY_ANSWERED");
+      }
+
+      const participant = await MatchParticipant.findOne({
+        where: { userId, matchId: prediction.matchId, venueId },
+        transaction: t,
+        lock: t.LOCK.UPDATE,
+      });
+
+      if (!participant) {
+        throw new Error("NOT_PARTICIPANT");
+      }
+
+      if (boostType === "boost" && participant.boostsUsedRound >= 2) {
+        throw new Error("NO_BOOSTS");
+      }
+
+      if (boostType === "all_in" && participant.allInUsed) {
+        throw new Error("ALL_IN_USED");
+      }
+
+      const up = await UserPrediction.create({
+        userId,
+        predictionId,
+        matchId: prediction.matchId,
+        venueId,
+        selectedOption,
+        boostType: boostType || "none",
+      }, { transaction: t });
+
+      const updateData: Record<string, unknown> = {
+        totalPredictions: participant.totalPredictions + 1,
+      };
+      if (boostType === "boost") {
+        updateData.boostsUsedRound = participant.boostsUsedRound + 1;
+      } else if (boostType === "all_in") {
+        updateData.allInUsed = true;
+      }
+      await participant.update(updateData, { transaction: t });
+
+      return up;
     });
 
-    if (!participant) {
-      res.status(400).json({ error: "Not a participant in this match" });
-      return;
-    }
-
-    if (boostType === "boost" && participant.boostsUsedRound >= 2) {
-      res.status(400).json({ error: "No boosts remaining for this round" });
-      return;
-    }
-
-    if (boostType === "all_in" && participant.allInUsed) {
-      res.status(400).json({ error: "All-In already used this match" });
-      return;
-    }
-
-    const userPrediction = await UserPrediction.create({
-      userId,
-      predictionId,
-      matchId: prediction.matchId,
-      venueId,
-      selectedOption,
-      boostType: boostType || "none",
-    });
-
-    if (boostType === "boost") {
-      await participant.update({ boostsUsedRound: participant.boostsUsedRound + 1 });
-    } else if (boostType === "all_in") {
-      await participant.update({ allInUsed: true });
-    }
-
-    await participant.update({
-      totalPredictions: participant.totalPredictions + 1,
-    });
-
-    // Emit hype moment if all-in
+    // Emit hype moment if all-in (outside transaction — non-critical)
     if (boostType === "all_in") {
       const io = req.app.get("io");
       const user = await User.findByPk(userId);
@@ -124,7 +135,23 @@ router.post("/:predictionId/answer", authenticateUser, async (req: AuthRequest, 
     }
 
     res.status(201).json({ userPrediction });
-  } catch (error) {
+  } catch (error: any) {
+    if (error.message === "ALREADY_ANSWERED") {
+      res.status(400).json({ error: "Already answered this prediction" });
+      return;
+    }
+    if (error.message === "NOT_PARTICIPANT") {
+      res.status(400).json({ error: "Not a participant in this match" });
+      return;
+    }
+    if (error.message === "NO_BOOSTS") {
+      res.status(400).json({ error: "No boosts remaining for this round" });
+      return;
+    }
+    if (error.message === "ALL_IN_USED") {
+      res.status(400).json({ error: "All-In already used this match" });
+      return;
+    }
     console.error("Submit prediction error:", error);
     res.status(500).json({ error: "Failed to submit prediction" });
   }

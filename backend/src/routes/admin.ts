@@ -9,7 +9,7 @@ import {
   getCurrentRound,
 } from "../services/predictionEngine";
 import { resolvePrediction, generateRoundRewards } from "../services/pointsEngine";
-import { fetchTodayFixtures, fetchSportsmonkLiveScores } from "../services/sportsmonkApi";
+import { fetchTodayFixtures, fetchSportsmonkLiveScores, resolveOverPredictionFromStats } from "../services/sportsmonkApi";
 
 const router = Router();
 
@@ -68,7 +68,7 @@ router.post("/match/:matchId/start", async (req: any, res: Response): Promise<vo
       currentPhase: "innings1_powerplay",
     });
 
-    // Generate Over 1 predictions
+    // Generate Over 1 predictions (locked when 1st ball is bowled)
     const round = 1;
     const overPreds = generatePerOverPredictions(matchId, 1, round, currentBatter);
     for (const p of overPreds) {
@@ -76,9 +76,10 @@ router.post("/match/:matchId/start", async (req: any, res: Response): Promise<vo
     }
 
     // Generate Round 1 hot take
+    const hotTakeExpiresAt = new Date(Date.now() + 120_000);
     const hotTake = generateHotTake(matchId, round, match.team1Short, match.team2Short);
     if (hotTake) {
-      await Prediction.create(hotTake as any);
+      await Prediction.create({ ...hotTake, expiresAt: hotTakeExpiresAt } as any);
     }
 
     io.emit("newPrediction", { matchId, type: "per_over", overNumber: 1, round });
@@ -108,14 +109,15 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
     const io = req.app.get("io");
     const round = getCurrentRound(innings, overNumber);
 
-    // Update match state
-    const newPhase = innings === 1
-      ? overNumber <= 6 ? "innings1_powerplay" : overNumber <= 15 ? "innings1_middle" : "innings1_death"
-      : overNumber <= 6 ? "innings2_powerplay" : overNumber <= 15 ? "innings2_middle" : "innings2_death";
+    const nextOver = overNumber + 1;
 
+    // Update match state — phase reflects the NEXT over being bowled, not the completed one
+    const newPhase = innings === 1
+      ? nextOver <= 6 ? "innings1_powerplay" : nextOver <= 15 ? "innings1_middle" : "innings1_death"
+      : nextOver <= 6 ? "innings2_powerplay" : nextOver <= 15 ? "innings2_middle" : "innings2_death";
     await match.update({
       status: "live",
-      currentOver: overNumber,
+      currentOver: nextOver,
       currentInnings: innings,
       currentPhase: newPhase,
       scoreData: {
@@ -124,20 +126,36 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
       },
     });
 
-    // Resolve per-over predictions for this over
+    // Resolve per-over predictions for this over (filter by round to avoid cross-innings collision)
     const overPredictions = await Prediction.findAll({
-      where: { matchId, overNumber, status: "open" },
+      where: { matchId, overNumber, round, category: "per_over" },
     });
 
+    // Lock & resolve predictions for the completed over
     for (const pred of overPredictions) {
-      const correctOption = resolveOverPrediction(pred, overResults);
+      if (pred.status === "open") await pred.update({ status: "locked" });
+    }
+    for (const pred of overPredictions) {
+      const correctOption = resolveOverPredictionFromStats(pred, overResults as any);
       if (correctOption) {
         await resolvePrediction(pred, correctOption, io);
+      } else {
+        console.warn(`[Admin] Could not resolve prediction "${pred.question}" (id=${pred.id}) — no matching rule`);
       }
     }
 
+    // Lock next over's predictions (users were answering these during the completed over)
+    const nextOverPreds = await Prediction.findAll({
+      where: { matchId, overNumber: nextOver, category: "per_over", status: "open" },
+    });
+    for (const pred of nextOverPreds) {
+      await pred.update({ status: "locked" });
+    }
+    if (nextOverPreds.length > 0) {
+      io.emit("predictionsLocked", { matchId, overNumber: nextOver });
+    }
+
     // Generate next over's predictions
-    const nextOver = overNumber + 1;
     const nextRound = getCurrentRound(innings, nextOver);
 
     // Check if round changed — generate hot take + round rewards
@@ -160,22 +178,56 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
         await generateRoundRewards(matchId, v.venueId, prevRound, io);
       }
 
-      // Generate hot take for new round
-      const hotTake = generateHotTake(matchId, nextRound, match.team1Short, match.team2Short);
-      if (hotTake) {
-        await Prediction.create(hotTake as any);
-        io.emit("newPrediction", { matchId, type: "hot_take", round: nextRound });
+      // Generate hot take for new round (with dedup check)
+      const existingHotTake = await Prediction.findOne({
+        where: { matchId, category: "hot_take", round: nextRound },
+      });
+      if (!existingHotTake) {
+        const roundHotTakeExpiresAt = new Date(Date.now() + 120_000);
+        const hotTake = generateHotTake(matchId, nextRound, match.team1Short, match.team2Short);
+        if (hotTake) {
+          await Prediction.create({ ...hotTake, expiresAt: roundHotTakeExpiresAt } as any);
+          io.emit("newPrediction", { matchId, type: "hot_take", round: nextRound });
+        }
       }
     }
 
-    // Generate per-over predictions for next over (if match continues)
-    if ((innings === 1 && nextOver <= 20) || (innings === 2 && nextOver <= 20)) {
-      const newPredictions = generatePerOverPredictions(matchId, nextOver, nextRound, currentBatter);
-      for (const p of newPredictions) {
-        await Prediction.create(p as any);
+    // Generate per-over predictions TWO overs ahead (to be answered during the next over)
+    const twoAhead = nextOver + 1;
+    const twoAheadRound = getCurrentRound(innings, twoAhead);
+    if (twoAhead <= 20) {
+      // Sum total wickets from all stored over results for this innings
+      const sd = match.scoreData as Record<string, any> || {};
+      let totalWickets = 0;
+      let totalScore = 0;
+      for (let ov = 1; ov <= overNumber; ov++) {
+        const ovData = sd[`innings${innings}_over${ov}`];
+        if (ovData) {
+          totalWickets += ovData.wickets || 0;
+          totalScore += ovData.runs || 0;
+        }
       }
+      const isAllOut = totalWickets >= 10;
 
-      io.emit("newPrediction", { matchId, type: "per_over", overNumber: nextOver, round: nextRound });
+      // For 2nd innings, check if target is chased using innings1Final or Sportsmonk data
+      const inn1Final = sd.innings1Final || sd.innings1;
+      const inn1Score = inn1Final?.runs ?? inn1Final?.score ?? 0;
+      const targetChased = innings === 2 && inn1Score > 0 && totalScore >= (inn1Score + 1);
+
+      if (!isAllOut && !targetChased) {
+        // Deduplication: check if predictions for this over+round already exist
+        const existingPreds = await Prediction.findAll({
+          where: { matchId, overNumber: twoAhead, round: twoAheadRound, category: "per_over" },
+        });
+
+        if (existingPreds.length === 0) {
+          const newPredictions = generatePerOverPredictions(matchId, twoAhead, twoAheadRound, currentBatter);
+          for (const p of newPredictions) {
+            await Prediction.create(p as any);
+          }
+          io.emit("newPrediction", { matchId, type: "per_over", overNumber: twoAhead, round: twoAheadRound });
+        }
+      }
     }
 
     res.json({
@@ -222,6 +274,7 @@ router.post("/match/:matchId/innings-break", async (req: any, res: Response): Pr
 
     await match.update({
       currentPhase: "innings_break",
+      currentInnings: 2,
       scoreData: {
         ...match.scoreData,
         innings1Final: { runs: team1Score, wickets: team1Wickets },
@@ -229,16 +282,28 @@ router.post("/match/:matchId/innings-break", async (req: any, res: Response): Pr
       },
     });
 
+    // Determine chasing team from scoreData (who batted first is in innings1)
+    // Fallback to team2 if scoreData not yet populated
+    const scoreData = match.scoreData as any;
+    const innings1TeamShort = scoreData?.innings1?.teamShort;
+    const chasingTeamShort = innings1TeamShort
+      ? (innings1TeamShort === match.team1Short ? match.team2Short : match.team1Short)
+      : match.team2Short;
+    const chasingTeamPlayers = innings1TeamShort
+      ? (innings1TeamShort === match.team1Short ? match.team2Players : match.team1Players)
+      : match.team2Players;
+
     // Generate rivalry calls for second innings
     const rivalryCalls = generateRivalryCalls(
       matchId,
       target,
-      match.team2Short,
-      match.team2Players
+      chasingTeamShort,
+      chasingTeamPlayers
     );
 
+    const rivalryExpiresAt = new Date(Date.now() + 120_000);
     for (const rc of rivalryCalls) {
-      await Prediction.create(rc as any);
+      await Prediction.create({ ...rc, expiresAt: rivalryExpiresAt } as any);
     }
 
     // Generate round 3 rewards
@@ -252,9 +317,29 @@ router.post("/match/:matchId/innings-break", async (req: any, res: Response): Pr
       await generateRoundRewards(matchId, v.venueId, 3, io);
     }
 
+    // Generate Over 1 (2nd innings) per-over predictions — locked when 1st ball of innings 2 is bowled
+    const inn2Round = getCurrentRound(2, 1); // = 4
+    const inn2OverPreds = generatePerOverPredictions(matchId, 1, inn2Round);
+    for (const p of inn2OverPreds) {
+      await Prediction.create(p as any);
+    }
+
+    // Generate Round 4 hot take (with dedup check)
+    const existingHotTake = await Prediction.findOne({
+      where: { matchId, category: "hot_take", round: inn2Round },
+    });
+    if (!existingHotTake) {
+      const hotTakeExpiresAt = new Date(Date.now() + 120_000);
+      const hotTake = generateHotTake(matchId, inn2Round, match.team1Short, match.team2Short);
+      if (hotTake) {
+        await Prediction.create({ ...hotTake, expiresAt: hotTakeExpiresAt } as any);
+      }
+    }
+
+    io.emit("newPrediction", { matchId, type: "per_over", overNumber: 1, round: inn2Round });
     io.emit("inningsBreak", { matchId, target, team1Score, team1Wickets });
 
-    res.json({ message: "Innings break started", rivalryCallsGenerated: rivalryCalls.length });
+    res.json({ message: "Innings break started", rivalryCallsGenerated: rivalryCalls.length, inn2OverPreds: inn2OverPreds.length });
   } catch (error) {
     console.error("Innings break error:", error);
     res.status(500).json({ error: "Failed to start innings break" });
@@ -350,79 +435,6 @@ router.get("/venue/stats", authenticateVenue, async (req: AuthRequest, res: Resp
     res.status(500).json({ error: "Failed to get stats" });
   }
 });
-
-// Helper: resolve per-over prediction based on over results
-function resolveOverPrediction(
-  prediction: Prediction,
-  overResults: {
-    runs: number;
-    wickets: number;
-    sixes: number;
-    boundaries: number;
-    dots: number;
-    wides: number;
-    noballs: number;
-    lastBallRuns: number;
-    lastBallWicket: boolean;
-    firstBallBoundary: boolean;
-  }
-): string | null {
-  const q = prediction.question.toLowerCase();
-
-  if (q.includes("how many runs")) {
-    if (overResults.runs <= 5) return "low";
-    if (overResults.runs <= 10) return "medium";
-    return "high";
-  }
-
-  if (q.includes("wicket in over")) {
-    return overResults.wickets > 0 ? "yes" : "no";
-  }
-
-  if (q.includes("sixes in over")) {
-    if (overResults.sixes === 0) return "zero";
-    if (overResults.sixes === 1) return "one";
-    if (overResults.sixes === 2) return "two";
-    return "three_plus";
-  }
-
-  if (q.includes("boundary off the first ball")) {
-    return overResults.firstBallBoundary ? "yes" : "no";
-  }
-
-  if (q.includes("dot balls")) {
-    if (overResults.dots <= 2) return "few";
-    if (overResults.dots <= 4) return "some";
-    return "lots";
-  }
-
-  if (q.includes("how does over") && q.includes("last ball")) {
-    if (overResults.lastBallWicket) return "wicket";
-    if (overResults.lastBallRuns >= 4) return "boundary";
-    if (overResults.lastBallRuns >= 1) return "single";
-    return "dot";
-  }
-
-  if (q.includes("score 10+")) {
-    return overResults.runs >= 10 ? "yes" : "no";
-  }
-
-  if (q.includes("more than 2 boundaries")) {
-    return overResults.boundaries > 2 ? "yes" : "no";
-  }
-
-  if (q.includes("maiden")) {
-    return overResults.runs === 0 ? "yes" : "no";
-  }
-
-  if (q.includes("last ball of over") && q.includes("runs")) {
-    if (overResults.lastBallRuns === 0) return "zero";
-    if (overResults.lastBallRuns <= 2) return "single_double";
-    return "three_plus";
-  }
-
-  return null;
-}
 
 // ========== SPORTSMONK API ENDPOINTS ==========
 

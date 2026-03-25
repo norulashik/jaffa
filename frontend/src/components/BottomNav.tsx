@@ -3,25 +3,35 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import MaterialIcon from "./MaterialIcon";
+import { useGame } from "@/context/GameContext";
 
-const navItems = [
-  { href: "/lobby", icon: "home", label: "Home" },
-  { href: "/leaderboard", icon: "leaderboard", label: "Ranks" },
-  { href: "/rewards", icon: "military_tech", label: "Rewards" },
-  { href: "/profile", icon: "person", label: "Profile" },
+const staticNavItems = [
+  { key: "home", icon: "home", label: "Home" },
+  { key: "leaderboard", href: "/leaderboard", icon: "leaderboard", label: "Ranks" },
+  { key: "rewards", href: "/rewards", icon: "military_tech", label: "Rewards" },
 ];
 
 export default function BottomNav() {
   const pathname = usePathname();
+  const { state } = useGame();
+
+  const matchId = state.matchId || (typeof window !== "undefined" ? localStorage.getItem("jaffa_match_id") : null);
+  const homeHref = matchId ? `/match/${matchId}` : "/lobby";
+
+  const navItems = staticNavItems.map((item) =>
+    item.key === "home" ? { ...item, href: homeHref } : item
+  );
 
   return (
     <nav className="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-6 pt-3 bg-[#111317]/80 backdrop-blur-2xl rounded-t-[2rem] border-t border-white/10 shadow-[0_-10px_40px_rgba(0,0,0,0.6)]">
       {navItems.map((item) => {
-        const isActive = pathname === item.href || pathname?.startsWith(item.href + "/");
+        const isActive = item.key === "home"
+          ? pathname === "/lobby" || pathname?.startsWith("/match/")
+          : pathname === item.href || pathname?.startsWith(item.href + "/");
         return (
           <Link
-            key={item.href}
-            href={item.href}
+            key={item.key}
+            href={item.href!}
             className={`flex flex-col items-center justify-center active:scale-95 transition-all duration-200 ease-out ${
               isActive
                 ? "text-[#00FFAB] bg-[#00FFAB]/10 rounded-xl px-4 py-1 shadow-[0_0_15px_rgba(0,255,171,0.3)]"

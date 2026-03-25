@@ -144,7 +144,7 @@ const perOverPool = [
     key: "runs_this_over",
     question: (over: number) => `Over ${over} — how many runs?`,
     options: [
-      { key: "low", label: "1-5 runs", points: 10 },
+      { key: "low", label: "0-5 runs", points: 10 },
       { key: "medium", label: "6-10 runs", points: 10 },
       { key: "high", label: "11+ runs", points: 10 },
     ],
@@ -195,12 +195,12 @@ const perOverPool = [
     ],
   },
   {
-    key: "batter_score",
-    question: (over: number, batterName?: string) =>
-      `Will ${batterName || "the batter"} score 10+ in over ${over}?`,
+    key: "over_score_10_plus",
+    question: (over: number, _batterName?: string) =>
+      `Will over ${over} score 10+ total runs?`,
     options: [
-      { key: "yes", label: "Yes — going big", points: 20 },
-      { key: "no", label: "No — staying steady", points: 10 },
+      { key: "yes", label: "Yes — big over", points: 20 },
+      { key: "no", label: "No — under 10", points: 10 },
     ],
   },
   {
@@ -249,18 +249,19 @@ export function generatePerOverPredictions(
   const recentKey = matchId;
   const recent = recentQuestions.get(recentKey) || [];
 
-  // Filter out recently used questions
-  const available = perOverPool.filter((q) => !recent.includes(q.key));
+  // Always include "how many runs" question
+  const runsQuestion = perOverPool.find((q) => q.key === "runs_this_over")!;
 
-  // If somehow all are recent, reset
-  const pool = available.length >= 2 ? available : perOverPool;
-
-  // Pick 2 random questions
+  // Pick 2 random from remaining pool (excluding runs_this_over), with dedup
+  const remainingPool = perOverPool.filter((q) => q.key !== "runs_this_over");
+  const available = remainingPool.filter((q) => !recent.includes(q.key));
+  const pool = available.length >= 2 ? available : remainingPool;
   const shuffled = [...pool].sort(() => Math.random() - 0.5);
-  const selected = shuffled.slice(0, 2);
+  const randomPicks = shuffled.slice(0, 2);
+  const selected = [runsQuestion, ...randomPicks];
 
-  // Update recent tracking (keep last 6 = 3 overs × 2 questions)
-  const newRecent = [...recent, ...selected.map((s) => s.key)].slice(-6);
+  // Only track the 2 random picks in dedup (runs_this_over is always used)
+  const newRecent = [...recent, ...randomPicks.map((s) => s.key)].slice(-6);
   recentQuestions.set(recentKey, newRecent);
 
   return selected.map((template) => ({
@@ -378,7 +379,7 @@ export function generateRivalryCalls(
     {
       matchId,
       category: "rivalry_call",
-      round: 0, // innings break, not tied to a specific round
+      round: 4, // assigned to chase powerplay round for points tracking
       question: `${team2Short} need ${target} — chase done in which phase?`,
       options: [
         { key: "powerplay", label: "Powerplay (overs 1-6)", points: 35 },
@@ -395,7 +396,7 @@ export function generateRivalryCalls(
     predictions.push({
       matchId,
       category: "rivalry_call",
-      round: 0,
+      round: 4, // assigned to chase powerplay round for points tracking
       question: "Who hits the winning runs?",
       options: candidates.map((player) => ({
         key: player.toLowerCase().replace(/\s+/g, "_"),

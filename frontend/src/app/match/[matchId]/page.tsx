@@ -2,12 +2,14 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
 import MaterialIcon from "@/components/MaterialIcon";
 import CorrectAnswerFeedback from "@/components/CorrectAnswerFeedback";
 import { api } from "@/lib/api";
 import { connectSocket, joinVenueMatch, disconnectSocket } from "@/lib/socket";
+import { useGame } from "@/context/GameContext";
 
 interface Prediction {
   id: string;
@@ -45,14 +47,24 @@ export default function MatchDashboard() {
   const [cardExiting, setCardExiting] = useState(false);
 
   // Live dashboard state
-  const [activeTab, setActiveTab] = useState<"predict" | "leaderboard" | "rewards">("predict");
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackData, setFeedbackData] = useState<any>(null);
   const [matchData, setMatchData] = useState<any>(null);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string>>({});
+  const [showAllPicks, setShowAllPicks] = useState(false);
+  const [picksExpanded, setPicksExpanded] = useState(true);
+  const [userRank, setUserRank] = useState<number | null>(null);
+  const [now, setNow] = useState(Date.now());
+  const { state: gameState, dispatch } = useGame();
 
   const venueId = typeof window !== "undefined" ? localStorage.getItem("jaffa_venue_id") || "" : "";
+
+  // Tick every second for countdown timers
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Phase 1: Join match and load pre-match predictions
   useEffect(() => {
@@ -71,19 +83,25 @@ export default function MatchDashboard() {
           // Already joined — that's fine
         }
 
-        // Check for unanswered pre-match questions
-        try {
-          const preds = await api.getPredictions(matchId, venueId, 0);
-          const unanswered = (preds || []).filter(
-            (p: any) => p.category === "pre_match" && !p.userAnswer && p.status === "open"
-          );
-          if (unanswered.length > 0) {
-            setPreMatchPredictions(unanswered);
-            setPhase("prematch");
-          } else {
+        // Check for unanswered pre-match questions (only if match hasn't started yet)
+        const isPreMatch = !match.status || match.status === "upcoming" || match.currentPhase === "pre_match";
+        if (isPreMatch) {
+          try {
+            const preds = await api.getPredictions(matchId, venueId, 0);
+            const unanswered = (preds || []).filter(
+              (p: any) => p.category === "pre_match" && !p.userAnswer && p.status === "open"
+            );
+            if (unanswered.length > 0) {
+              setPreMatchPredictions(unanswered);
+              setPhase("prematch");
+            } else {
+              setPhase("live");
+            }
+          } catch {
             setPhase("live");
           }
-        } catch {
+        } else {
+          // Match already live — skip pre-match questions, go straight to live dashboard
           setPhase("live");
         }
       } catch {
@@ -107,13 +125,52 @@ export default function MatchDashboard() {
     }
 
     socket.on("newPrediction", (data: any) => {
-      if (data.category !== "pre_match") {
-        setPredictions((prev) => [...prev, data]);
+      if (data.matchId === matchId) {
+        loadLiveData();
+      }
+    });
+
+    socket.on("predictionsLocked", (data: any) => {
+      if (data.matchId === matchId) {
+        loadLiveData();
       }
     });
 
     socket.on("scoreUpdate", (data: any) => {
-      setMatchData((prev: any) => ({ ...prev, ...data }));
+      if (data.matchId === matchId) {
+        setMatchData((prev: any) => ({
+          ...prev,
+          scoreData: data.scoreData || prev?.scoreData,
+          currentInnings: data.innings ?? prev?.currentInnings,
+          currentOver: data.over ?? prev?.currentOver,
+        }));
+      }
+    });
+
+    socket.on("inningsBreak", (data: any) => {
+      if (data.matchId === matchId) {
+        setMatchData((prev: any) => ({
+          ...prev,
+          currentInnings: 2,
+          scoreData: {
+            ...prev?.scoreData,
+            target: data.target,
+            innings1: {
+              ...prev?.scoreData?.innings1,
+              score: data.team1Score,
+              wickets: data.team1Wickets,
+            },
+          },
+        }));
+        loadLiveData();
+      }
+    });
+
+    socket.on("predictionResolved", (data: any) => {
+      if (data.matchId === matchId) {
+        // Re-fetch to get updated userAnswer with pointsEarned and isCorrect
+        loadLiveData();
+      }
     });
 
     socket.on("predictionResult", (data: any) => {
@@ -143,6 +200,30 @@ export default function MatchDashboard() {
         if (p.userAnswer?.selectedOption) answered[p.id] = p.userAnswer.selectedOption;
       });
       setSelectedAnswers(answered);
+
+      // Fetch participant stats (points, streak) and rank
+      try {
+        const [matchState, lb] = await Promise.all([
+          api.getMatchState(matchId, venueId),
+          api.getMatchLeaderboard(matchId, venueId),
+        ]);
+        if (matchState.participant) {
+          dispatch({
+            type: "UPDATE_PARTICIPANT",
+            data: {
+              totalPoints: matchState.participant.totalPoints || 0,
+              currentStreak: matchState.participant.currentStreak || 0,
+              currentRound: matchState.participant.currentRound || 1,
+            },
+          });
+        }
+        const myIndex = lb.leaderboard.findIndex(
+          (e: any) => e.userId === gameState.user?.id
+        );
+        setUserRank(myIndex >= 0 ? myIndex + 1 : null);
+      } catch {
+        // Stats fetch failed — keep existing values
+      }
     } catch {
       // Use placeholder data
     }
@@ -332,58 +413,131 @@ export default function MatchDashboard() {
       <Header
         rightContent={
           <>
-            <div className="flex flex-col items-end">
-              <span className="font-label text-[10px] text-slate-400 uppercase tracking-tighter">Live Player</span>
-              <span className="font-bold text-sm">Virat K.</span>
-            </div>
-            <div className="w-10 h-10 rounded-full border-2 border-primary-container p-0.5 overflow-hidden bg-surface-container-highest">
+            <Link href="/profile" className="w-10 h-10 rounded-full border-2 border-primary-container p-0.5 overflow-hidden bg-surface-container-highest">
               <div className="w-full h-full flex items-center justify-center rounded-full">
                 <MaterialIcon icon="person" className="text-primary-container" />
               </div>
-            </div>
+            </Link>
           </>
         }
       />
 
       <main className="pt-24 pb-32 px-4 min-h-screen space-y-6 max-w-2xl mx-auto">
         {/* Scoreboard Hero Section */}
-        <section className="relative overflow-hidden rounded-xl bg-surface-container-low p-6 shadow-2xl">
-          <div className="absolute top-0 right-0 p-3">
-            <div className="flex items-center gap-2 bg-error-container/20 px-3 py-1 rounded-full border border-error/30">
-              <span className="w-2 h-2 rounded-full bg-error animate-pulse"></span>
-              <span className="font-label text-[10px] font-bold text-error uppercase tracking-widest">Live</span>
-            </div>
-          </div>
-          <div className="flex flex-col items-center justify-center space-y-4">
-            <div className="flex items-center justify-between w-full">
-              <div className="flex flex-col items-start">
-                <span className="font-label text-xs text-on-surface-variant font-semibold">
-                  {matchData?.team1Short || "IND"}
+        {(() => {
+          const sd = matchData?.scoreData || {};
+          const currInn = sd.currentInnings || matchData?.currentInnings || 1;
+          const innings1 = sd.innings1;
+          const innings2 = sd.innings2;
+
+          // Determine batting/bowling teams — batting always left, bowling always right
+          const battingFirstShort = sd.battingFirstShort || matchData?.team1Short || "T1";
+          const bowlingFirstShort = battingFirstShort === (matchData?.team1Short || "T1")
+            ? (matchData?.team2Short || "T2") : (matchData?.team1Short || "T1");
+          const battingTeam = currInn === 1 ? battingFirstShort : bowlingFirstShort;
+          const bowlingTeam = currInn === 1 ? bowlingFirstShort : battingFirstShort;
+          const battingImg = battingTeam === matchData?.team1Short ? sd.team1Img : sd.team2Img;
+          const bowlingImg = bowlingTeam === matchData?.team1Short ? sd.team1Img : sd.team2Img;
+
+          const activeInnings = currInn === 1 ? innings1 : innings2;
+          const score = activeInnings?.score ?? 0;
+          const wickets = activeInnings?.wickets ?? 0;
+          const overs = activeInnings?.overs ?? sd.currentOver ?? 0;
+
+          const crr = overs > 0 ? (score / overs).toFixed(2) : "0.00";
+          const target = innings1 && currInn === 2 ? innings1.score + 1 : null;
+          const runsNeeded = target ? target - (innings2?.score || 0) : null;
+          const rrr = target && overs < 20
+            ? (((runsNeeded || 0) / (20 - overs))).toFixed(2)
+            : null;
+
+          return (
+            <section className="relative overflow-hidden rounded-xl bg-surface-container-low p-5 border border-white/5">
+              {/* Series & Live badge */}
+              <div className="flex items-center justify-between mb-3">
+                <span className="font-label text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-widest">
+                  {sd.series || `${matchData?.team1Short || "T1"} vs ${matchData?.team2Short || "T2"}`}
                 </span>
-                <h1 className="font-headline text-5xl font-black text-primary-container tracking-tighter">
-                  {matchData?.score || "142/4"}
-                </h1>
+                <div className="flex items-center gap-2 bg-error-container/20 px-3 py-1 rounded-full border border-error/30">
+                  <span className="w-2 h-2 rounded-full bg-error animate-pulse"></span>
+                  <span className="font-label text-[10px] font-bold text-error uppercase tracking-widest">Live</span>
+                </div>
               </div>
-              <div className="text-right">
-                <span className="font-label text-xs text-on-surface-variant font-semibold">OVERS</span>
-                <h2 className="font-headline text-3xl font-bold text-on-surface">
-                  {matchData?.overs || "15.2"}
-                </h2>
+
+              {/* Score Display */}
+              <div className="flex items-center justify-between">
+                {/* Batting Team — LEFT */}
+                <div className="flex items-center gap-3">
+                  {battingImg && (
+                    <img src={battingImg} alt={battingTeam} className="w-8 h-8 rounded-full bg-surface-container-highest" />
+                  )}
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-headline text-lg font-bold text-on-surface">{battingTeam}</span>
+                      <span className="font-label text-[10px] font-bold bg-primary-container/20 text-primary-container px-1.5 py-0.5 rounded uppercase tracking-wider">BAT</span>
+                    </div>
+                    <div className="flex items-baseline gap-1">
+                      <span className="font-headline text-2xl font-black text-primary-container">{score}/{wickets}</span>
+                      <span className="font-body text-sm text-on-surface-variant">({overs} ov)</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* VS / Target */}
+                <div className="text-center">
+                  {target ? (
+                    <div>
+                      <div className="font-label text-[10px] text-on-surface-variant uppercase tracking-widest">Need</div>
+                      <div className="font-headline text-lg font-black text-secondary-container">{runsNeeded}</div>
+                      <div className="font-label text-[10px] text-on-surface-variant/60">off {(20 - overs) > 0 ? Math.ceil((20 - overs) * 6) : 0} balls</div>
+                    </div>
+                  ) : (
+                    <div className="font-headline font-bold text-sm text-on-surface-variant/40">VS</div>
+                  )}
+                </div>
+
+                {/* Bowling Team — RIGHT */}
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <span className="font-headline text-lg font-bold text-on-surface-variant">{bowlingTeam}</span>
+                      <span className="font-label text-[10px] font-bold bg-secondary-container/20 text-secondary-container px-1.5 py-0.5 rounded uppercase tracking-wider">BOWL</span>
+                    </div>
+                    {innings1 && currInn === 2 && (
+                      <div className="font-body text-sm text-on-surface-variant">
+                        {innings1.score}/{innings1.wickets} ({innings1.overs} ov)
+                      </div>
+                    )}
+                    {currInn === 1 && (
+                      <div className="font-label text-xs text-on-surface-variant/50">Yet to bat</div>
+                    )}
+                  </div>
+                  {bowlingImg && (
+                    <img src={bowlingImg} alt={bowlingTeam} className="w-8 h-8 rounded-full bg-surface-container-highest" />
+                  )}
+                </div>
               </div>
-            </div>
-            <div className="w-full bg-surface-container-highest/30 h-1 rounded-full overflow-hidden">
-              <div className="bg-gradient-to-r from-secondary-container to-primary-container h-full w-[76%]"></div>
-            </div>
-            <div className="flex justify-between w-full text-[10px] font-label font-bold text-on-surface-variant tracking-widest">
-              <span>CRR: {matchData?.crr || "9.26"}</span>
-              <span>RRR: {matchData?.rrr || "11.45"}</span>
-            </div>
-          </div>
-        </section>
+
+              {/* CRR / RRR */}
+              <div className="flex items-center justify-between mt-3 text-[11px]">
+                <span className="font-label font-bold text-on-surface-variant/60 uppercase tracking-widest">
+                  CRR: <span className="text-on-surface font-bold">{crr}</span>
+                </span>
+                {rrr && (
+                  <span className="font-label font-bold text-on-surface-variant/60 uppercase tracking-widest">
+                    RRR: <span className="text-secondary-container font-bold">{rrr}</span>
+                  </span>
+                )}
+              </div>
+            </section>
+          );
+        })()}
 
         {/* Predict Tabs */}
         {(() => {
-          const openPreds = predictions.filter((p: any) => p.status === "open" && !selectedAnswers[p.id] && !p.userAnswer?.selectedOption);
+          const unanswered = predictions.filter((p: any) => p.status === "open" && !selectedAnswers[p.id] && !p.userAnswer?.selectedOption);
+          const openPreds = unanswered.filter((p: any) => !p.expiresAt || new Date(p.expiresAt).getTime() > now);
+          const missedPreds = unanswered.filter((p: any) => p.expiresAt && new Date(p.expiresAt).getTime() <= now);
           const answeredPreds = predictions.filter((p: any) => selectedAnswers[p.id] || p.userAnswer?.selectedOption);
 
           const getCategoryLabel = (pred: any) => {
@@ -397,27 +551,15 @@ export default function MatchDashboard() {
 
           return (
             <>
-              <div className="flex items-center border-b border-white/5">
-                {(["predict", "leaderboard", "rewards"] as const).map((tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={`flex-1 py-3 font-label text-xs font-bold uppercase tracking-widest ${
-                      activeTab === tab
-                        ? "text-primary-container border-b-2 border-primary-container"
-                        : "text-on-surface-variant"
-                    }`}
-                  >
-                    {tab === "predict" ? `Predict${openPreds.length > 0 ? ` (${openPreds.length})` : ""}` : tab.charAt(0).toUpperCase() + tab.slice(1)}
-                  </button>
-                ))}
-              </div>
-
-              {activeTab === "predict" && (
-                <div className="space-y-4">
+              <div className="space-y-4">
                   {/* Open unanswered predictions */}
-                  {openPreds.map((pred: any) => (
-                    <section key={pred.id} className={`prediction-card rounded-xl p-5 relative overflow-hidden ${pred.category === "hot_take" ? "border-l-4 border-l-amber-500" : ""}`}>
+                  {openPreds.map((pred: any) => {
+                    const expiresAt = pred.expiresAt ? new Date(pred.expiresAt).getTime() : null;
+                    const timeLeft = expiresAt ? Math.max(0, Math.ceil((expiresAt - now) / 1000)) : null;
+                    const isExpired = timeLeft !== null && timeLeft <= 0;
+
+                    return (
+                    <section key={pred.id} className={`prediction-card rounded-xl p-5 relative overflow-hidden ${pred.category === "hot_take" ? "border-l-4 border-l-amber-500" : ""} ${isExpired ? "opacity-50" : ""}`}>
                       <div className="flex justify-between items-start mb-3">
                         <div className="flex flex-col">
                           <span className="font-label text-[10px] font-black text-amber-500 uppercase tracking-widest">
@@ -425,6 +567,17 @@ export default function MatchDashboard() {
                           </span>
                           <h3 className="font-headline text-lg font-bold">{pred.question}</h3>
                         </div>
+                        {timeLeft !== null && (
+                          <span className={`font-label text-[10px] font-bold px-2 py-1 rounded-full ${
+                            isExpired
+                              ? "bg-error/20 text-error"
+                              : timeLeft <= 15
+                              ? "bg-error/20 text-error animate-pulse"
+                              : "bg-primary-container/20 text-primary-container"
+                          }`}>
+                            {isExpired ? "Locked" : `${timeLeft}s`}
+                          </span>
+                        )}
                       </div>
                       <div className="space-y-2 mb-4">
                         {(pred.options || []).map((opt: any, i: number) => {
@@ -432,8 +585,13 @@ export default function MatchDashboard() {
                           return (
                             <button
                               key={i}
-                              onClick={() => handleOptionSelect(pred.id, optKey)}
-                              className="option-button w-full p-3 rounded-lg flex justify-between items-center transition-all duration-200 text-on-surface hover:bg-surface-container active:scale-[0.98]"
+                              onClick={() => !isExpired && handleOptionSelect(pred.id, optKey)}
+                              disabled={isExpired}
+                              className={`option-button w-full p-3 rounded-lg flex justify-between items-center transition-all duration-200 ${
+                                isExpired
+                                  ? "text-on-surface/40 cursor-not-allowed"
+                                  : "text-on-surface hover:bg-surface-container active:scale-[0.98]"
+                              }`}
                             >
                               <span className="font-body text-sm font-medium">{opt.label}</span>
                               <span className="font-label text-xs font-bold text-primary-container">{opt.points} pts</span>
@@ -452,7 +610,8 @@ export default function MatchDashboard() {
                         </button>
                       </div>
                     </section>
-                  ))}
+                    );
+                  })}
 
                   {/* All caught up */}
                   {openPreds.length === 0 && (
@@ -466,97 +625,106 @@ export default function MatchDashboard() {
                   )}
 
                   {/* My Picks */}
-                  {answeredPreds.length > 0 && (
+                  {(answeredPreds.length > 0 || missedPreds.length > 0) && (() => {
+                    const allPicks = [...answeredPreds, ...missedPreds];
+                    const visiblePicks = showAllPicks ? allPicks : allPicks.slice(0, 5);
+                    const hasMore = allPicks.length > 5;
+                    return (
                     <div className="mt-2">
-                      <div className="flex justify-between items-center mb-3 px-1">
-                        <span className="font-label text-sm font-bold text-on-surface-variant">My Picks ({answeredPreds.length})</span>
-                      </div>
-                      <div className="space-y-2">
-                        {answeredPreds.map((pred: any) => {
-                          const selectedKey = selectedAnswers[pred.id] || pred.userAnswer?.selectedOption;
-                          const selectedLabel = getOptionLabel(pred, selectedKey);
-                          const isClosed = pred.status === "closed";
-                          const isCorrect = pred.userAnswer?.isCorrect;
-                          const pointsEarned = pred.userAnswer?.pointsEarned;
-                          const correctAnswerLabel = isClosed && isCorrect === false && pred.correctAnswer
-                            ? getOptionLabel(pred, pred.correctAnswer)
-                            : null;
+                      <button
+                        onClick={() => setPicksExpanded(!picksExpanded)}
+                        className="flex justify-between items-center w-full mb-3 px-1"
+                      >
+                        <span className="font-label text-sm font-bold text-on-surface-variant">My Picks ({allPicks.length})</span>
+                        <MaterialIcon
+                          icon={picksExpanded ? "expand_less" : "expand_more"}
+                          className="text-on-surface-variant text-xl"
+                        />
+                      </button>
+                      {picksExpanded && (
+                        <>
+                          <div className="space-y-2">
+                            {visiblePicks.map((pred: any) => {
+                              const selectedKey = selectedAnswers[pred.id] || pred.userAnswer?.selectedOption;
+                              const isMissed = !selectedKey;
+                              const selectedLabel = isMissed ? null : getOptionLabel(pred, selectedKey);
+                              const isClosed = pred.status === "resolved";
+                              const isCorrect = isClosed && !isMissed ? (selectedKey === pred.correctOption) : undefined;
+                              const pointsEarned = pred.userAnswer?.pointsEarned || (isCorrect ? (pred.options?.find((o: any) => (o.key || o.label) === selectedKey)?.points || 10) : 0);
+                              const correctAnswerLabel = isClosed && !isCorrect && pred.correctOption
+                                ? getOptionLabel(pred, pred.correctOption)
+                                : null;
 
-                          let statusText = "Pending";
-                          let statusColor = "text-amber-400";
-                          let cardBg = "bg-surface-container-low";
-                          if (isClosed && isCorrect === true) {
-                            statusText = `+${pointsEarned || 0} pts`;
-                            statusColor = "text-primary-container";
-                            cardBg = "bg-primary-container/10";
-                          } else if (isClosed && isCorrect === false) {
-                            statusText = "Wrong";
-                            statusColor = "text-error";
-                            cardBg = "bg-error/5";
-                          }
+                              let statusText = "Pending";
+                              let statusColor = "text-amber-400";
+                              let cardBg = "bg-surface-container-low";
+                              if (isMissed) {
+                                statusText = "Missed";
+                                statusColor = "text-on-surface-variant/50";
+                                cardBg = "bg-surface-container-low/50";
+                              } else if (isClosed && isCorrect === true) {
+                                statusText = `+${pointsEarned || 0} pts`;
+                                statusColor = "text-primary-container";
+                                cardBg = "bg-primary-container/10";
+                              } else if (isClosed && isCorrect === false) {
+                                statusText = "Wrong";
+                                statusColor = "text-error";
+                                cardBg = "bg-error/5";
+                              }
 
-                          return (
-                            <div key={pred.id} className={`${cardBg} rounded-xl p-4 border border-white/5`}>
-                              <div className="flex justify-between items-start mb-1">
-                                <span className="font-label text-[10px] text-on-surface-variant uppercase tracking-widest">
-                                  {getCategoryLabel(pred)}
-                                </span>
-                                <span className={`font-label text-xs font-bold ${statusColor}`}>{statusText}</span>
-                              </div>
-                              <p className="font-body text-sm font-medium text-on-surface mb-2">{pred.question}</p>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className={`font-label text-xs px-3 py-1 rounded-full font-bold ${
-                                  isClosed && isCorrect === false
-                                    ? "bg-error/20 text-error"
-                                    : isClosed && isCorrect === true
-                                    ? "bg-primary-container/20 text-primary-container"
-                                    : "bg-surface-container-highest text-on-surface-variant"
-                                }`}>
-                                  Your pick: {selectedLabel}
-                                </span>
-                                {correctAnswerLabel && (
-                                  <span className="font-label text-xs text-on-surface-variant">
-                                    Answer: {correctAnswerLabel}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                              return (
+                                <div key={pred.id} className={`${cardBg} rounded-xl p-4 border border-white/5`}>
+                                  <div className="flex justify-between items-start mb-1">
+                                    <span className="font-label text-[10px] text-on-surface-variant uppercase tracking-widest">
+                                      {getCategoryLabel(pred)}
+                                    </span>
+                                    <span className={`font-label text-xs font-bold ${statusColor}`}>{statusText}</span>
+                                  </div>
+                                  <p className="font-body text-sm font-medium text-on-surface mb-2">{pred.question}</p>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    {isMissed ? (
+                                      <span className="font-label text-xs px-3 py-1 rounded-full font-bold bg-surface-container-highest/50 text-on-surface-variant/50">
+                                        Not answered
+                                      </span>
+                                    ) : (
+                                      <span className={`font-label text-xs px-3 py-1 rounded-full font-bold ${
+                                        isClosed && isCorrect === false
+                                          ? "bg-error/20 text-error"
+                                          : isClosed && isCorrect === true
+                                          ? "bg-primary-container/20 text-primary-container"
+                                          : "bg-surface-container-highest text-on-surface-variant"
+                                      }`}>
+                                        Your pick: {selectedLabel}
+                                      </span>
+                                    )}
+                                    {correctAnswerLabel && (
+                                      <span className="font-label text-xs text-on-surface-variant">
+                                        Answer: {correctAnswerLabel}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {hasMore && (
+                            <button
+                              onClick={() => setShowAllPicks(!showAllPicks)}
+                              className="w-full py-3 text-center font-label text-xs font-bold text-primary-container uppercase tracking-widest hover:text-primary-container/80 transition-colors"
+                            >
+                              {showAllPicks ? "Show less" : `See more (${allPicks.length - 5} more)`}
+                            </button>
+                          )}
+                        </>
+                      )}
                     </div>
-                  )}
+                    );
+                  })()}
                 </div>
-              )}
             </>
           );
         })()}
 
-        {/* Quick Stats */}
-        <section className="grid grid-cols-2 gap-4">
-          <div className="bg-surface-container-low p-5 rounded-xl flex items-center gap-4">
-            <div className="w-12 h-12 bg-surface-container-highest rounded-lg flex items-center justify-center">
-              <MaterialIcon icon="trending_up" className="text-secondary-container" />
-            </div>
-            <div>
-              <span className="block font-label text-[10px] text-on-surface-variant font-bold uppercase tracking-widest">
-                Win Prob
-              </span>
-              <span className="block font-headline text-xl font-bold">68%</span>
-            </div>
-          </div>
-          <div className="bg-surface-container-low p-5 rounded-xl flex items-center gap-4">
-            <div className="w-12 h-12 bg-surface-container-highest rounded-lg flex items-center justify-center">
-              <MaterialIcon icon="account_balance_wallet" className="text-primary-container" />
-            </div>
-            <div>
-              <span className="block font-label text-[10px] text-on-surface-variant font-bold uppercase tracking-widest">
-                Pool Size
-              </span>
-              <span className="block font-headline text-xl font-bold">2.4k</span>
-            </div>
-          </div>
-        </section>
       </main>
 
       {/* Footer Stats Bar */}
@@ -565,21 +733,21 @@ export default function MatchDashboard() {
           <div className="flex items-center gap-2">
             <MaterialIcon icon="stars" className="text-primary-container text-sm" />
             <span className="font-label text-xs font-bold uppercase tracking-tighter">
-              Points: <span className="text-on-surface">1250</span>
+              Points: <span className="text-on-surface">{gameState.totalPoints}</span>
             </span>
           </div>
           <div className="w-[1px] h-4 bg-white/10"></div>
           <div className="flex items-center gap-2">
             <MaterialIcon icon="leaderboard" className="text-secondary-container text-sm" />
             <span className="font-label text-xs font-bold uppercase tracking-tighter">
-              Rank: <span className="text-on-surface">#42</span>
+              Rank: <span className="text-on-surface">{userRank ? `#${userRank}` : "--"}</span>
             </span>
           </div>
           <div className="w-[1px] h-4 bg-white/10"></div>
           <div className="flex items-center gap-2">
             <MaterialIcon icon="local_fire_department" filled className="text-error text-sm" />
             <span className="font-label text-xs font-bold uppercase tracking-tighter">
-              Streak: <span className="text-on-surface">5</span>
+              Streak: <span className="text-on-surface">{gameState.currentStreak}</span>
             </span>
           </div>
         </div>
@@ -607,3 +775,4 @@ function getPointsLabel(options: { points: number }[]): string {
   if (points.length === 1) return `${points[0]} points if correct`;
   return `${Math.min(...points)}-${Math.max(...points)} points based on pick`;
 }
+

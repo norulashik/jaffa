@@ -148,6 +148,7 @@ export async function resolvePrediction(
 
     io.to(`venue:${venueId}:${prediction.matchId}`).emit("predictionPulse", {
       predictionId: prediction.id,
+      matchId: prediction.matchId,
       question: prediction.question,
       correctOption,
       correctLabel: prediction.options.find((o) => o.key === correctOption)?.label || correctOption,
@@ -155,6 +156,13 @@ export async function resolvePrediction(
       correctCount: venueCorrect,
       correctPercentage: venueTotal > 0 ? Math.round((venueCorrect / venueTotal) * 100) : 0,
       pulse: generatePulseMessage(venueCorrect, venueTotal, prediction.question),
+    });
+
+    // Emit predictionResolved so match page updates status
+    io.to(`venue:${venueId}:${prediction.matchId}`).emit("predictionResolved", {
+      matchId: prediction.matchId,
+      predictionId: prediction.id,
+      correctOption,
     });
 
     // Emit updated leaderboard
