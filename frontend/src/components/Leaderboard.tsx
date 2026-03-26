@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { api } from "@/lib/api";
 import { IoFlame, IoTrophy } from "react-icons/io5";
@@ -13,21 +13,44 @@ interface LeaderboardProps {
   userId?: string;
 }
 
+const PHASE_NAMES: Record<number, string> = {
+  1: "Powerplay", 2: "Middle Overs", 3: "Death Overs",
+  4: "Powerplay", 5: "Middle Overs", 6: "Death Overs",
+};
+const PHASE_INNINGS: Record<number, number> = { 1: 1, 2: 1, 3: 1, 4: 2, 5: 2, 6: 2 };
+
 export default function Leaderboard({ matchId, venueId, currentRound, userId }: LeaderboardProps) {
   const [view, setView] = useState<"round" | "match">("round");
+  const [selectedRound, setSelectedRound] = useState(currentRound);
   const [roundData, setRoundData] = useState<any[]>([]);
   const [matchData, setMatchData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const tabsRef = useRef<HTMLDivElement>(null);
+
+  // Sync selectedRound with currentRound when it changes
+  useEffect(() => {
+    setSelectedRound(currentRound);
+  }, [currentRound]);
+
+  // Auto-scroll active tab into view
+  useEffect(() => {
+    if (tabsRef.current && view === "round") {
+      const activeTab = tabsRef.current.querySelector("[data-active='true']");
+      if (activeTab) {
+        activeTab.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+      }
+    }
+  }, [selectedRound, view]);
 
   useEffect(() => {
     loadLeaderboard();
-  }, [matchId, venueId, currentRound, view]);
+  }, [matchId, venueId, selectedRound, view]);
 
   const loadLeaderboard = async () => {
     setLoading(true);
     try {
       if (view === "round") {
-        const data = await api.getRoundLeaderboard(matchId, venueId, currentRound);
+        const data = await api.getRoundLeaderboard(matchId, venueId, selectedRound);
         setRoundData(data.leaderboard);
       } else {
         const data = await api.getMatchLeaderboard(matchId, venueId);
@@ -41,23 +64,29 @@ export default function Leaderboard({ matchId, venueId, currentRound, userId }: 
 
   const data = view === "round" ? roundData : matchData;
 
+  const rounds = Array.from({ length: Math.max(currentRound, 1) }, (_, i) => i + 1);
+
   return (
     <div className="p-4">
-      {/* Toggle */}
-      <div className="flex bg-slate-900 rounded-xl p-1 mb-4">
-        <button
-          onClick={() => setView("round")}
-          className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
-            view === "round"
-              ? "bg-orange-500 text-white"
-              : "text-slate-400 hover:text-white"
-          }`}
-        >
-          Round {currentRound}
-        </button>
+      {/* Scrollable Tabs */}
+      <div className="flex bg-slate-900 rounded-xl p-1 mb-4 overflow-x-auto no-scrollbar" ref={tabsRef}>
+        {rounds.map((r) => (
+          <button
+            key={r}
+            data-active={view === "round" && selectedRound === r}
+            onClick={() => { setView("round"); setSelectedRound(r); }}
+            className={`flex-shrink-0 px-3 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
+              view === "round" && selectedRound === r
+                ? "bg-orange-500 text-white"
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            {PHASE_INNINGS[r] ? `Inn ${PHASE_INNINGS[r]}` : ""} {PHASE_NAMES[r] || `R${r}`}
+          </button>
+        ))}
         <button
           onClick={() => setView("match")}
-          className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+          className={`flex-shrink-0 px-3 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
             view === "match"
               ? "bg-orange-500 text-white"
               : "text-slate-400 hover:text-white"

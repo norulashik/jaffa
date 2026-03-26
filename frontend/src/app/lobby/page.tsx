@@ -65,6 +65,12 @@ export default function HomeLiveMatches() {
     return () => clearInterval(interval);
   }, []);
 
+  // Auto-refresh match list every 15s
+  useEffect(() => {
+    const interval = setInterval(() => loadMatches(), 15000);
+    return () => clearInterval(interval);
+  }, []);
+
   const handleJoin = (match: Match) => {
     // Show match code modal
     setCodeModal({ match, code: "", error: "", validating: false });

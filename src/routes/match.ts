@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
-import { Match, MatchParticipant, Prediction, UserPrediction } from "../models";
+import { Match, MatchParticipant, Prediction, MatchCode } from "../models";
 import { authenticateUser, AuthRequest } from "../middleware/auth";
-import { fetchUpcomingFixtures, fetchSportsmonkLiveScores } from "../services/sportsmonkApi";
+import { fetchUpcomingFixtures, fetchSportsmonkLiveScores, fetchTeamData } from "../services/sportsmonkApi";
 import { generatePreMatchPredictions } from "../services/predictionEngine";
 
 const router = Router();
@@ -33,12 +33,10 @@ router.get("/", async (_req: Request, res: Response): Promise<void> => {
       // Deduplicate by fixture id
       .filter((f, i, arr) => arr.findIndex((x) => x.id === f.id) === i)
       .map((f) => {
-        const lt = f.localteam?.data || f.localteam || {};
-        const vt = f.visitorteam?.data || f.visitorteam || {};
-        const localTeam = lt.name || `Team ${f.localteam_id}`;
-        const visitorTeam = vt.name || `Team ${f.visitorteam_id}`;
-        const localCode = lt.code || localTeam.slice(0, 3).toUpperCase();
-        const visitorCode = vt.code || visitorTeam.slice(0, 3).toUpperCase();
+        const localTeam = f.localteam?.data?.name || `Team ${f.localteam_id}`;
+        const visitorTeam = f.visitorteam?.data?.name || `Team ${f.visitorteam_id}`;
+        const localCode = f.localteam?.data?.code || localTeam.slice(0, 3).toUpperCase();
+        const visitorCode = f.visitorteam?.data?.code || visitorTeam.slice(0, 3).toUpperCase();
 
         const runs = f.runs?.data || (Array.isArray(f.runs) ? f.runs : []);
         const inn1 = runs.find((r: any) => r.inning === 1);
@@ -55,8 +53,8 @@ router.get("/", async (_req: Request, res: Response): Promise<void> => {
           team2: visitorTeam,
           team1Short: localCode,
           team2Short: visitorCode,
-          team1Img: lt.image_path || null,
-          team2Img: vt.image_path || null,
+          team1Img: f.localteam?.data?.image_path || null,
+          team2Img: f.visitorteam?.data?.image_path || null,
           startTime: f.starting_at,
           status,
           note: f.note || null,
@@ -68,11 +66,15 @@ router.get("/", async (_req: Request, res: Response): Promise<void> => {
       })
       .filter((m) => m.status !== "completed");
 
-    // 4. Merge and sort by date (earliest first)
+    // 4. Merge and sort by startTime ascending (nearest first)
     const allMatches = [
       ...dbMatches.map((m) => ({ ...m.toJSON(), source: "local" })),
       ...sportsmonkMatches,
-    ].sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+    ].sort((a, b) => {
+      const timeA = a.startTime ? new Date(a.startTime).getTime() : 0;
+      const timeB = b.startTime ? new Date(b.startTime).getTime() : 0;
+      return timeA - timeB;
+    });
 
     res.json(allMatches);
   } catch (error) {
@@ -93,6 +95,7 @@ router.post("/import/:fixtureId", async (req: Request, res: Response): Promise<v
       return;
     }
 
+    // Fetch fixture details from Sportsmonk
     const API_BASE = "https://cricket.sportmonks.com/api/v2.0";
     const API_TOKEN = process.env.SPORTSMONK_API_KEY || "";
 
@@ -105,32 +108,30 @@ router.post("/import/:fixtureId", async (req: Request, res: Response): Promise<v
       return;
     }
 
-    const [team1Res, team2Res] = await Promise.all([
-      fetch(`${API_BASE}/teams/${fixture.localteam_id}?api_token=${API_TOKEN}`),
-      fetch(`${API_BASE}/teams/${fixture.visitorteam_id}?api_token=${API_TOKEN}`),
+    // Get team names (uses cached team data)
+    const [team1, team2] = await Promise.all([
+      fetchTeamData(fixture.localteam_id),
+      fetchTeamData(fixture.visitorteam_id),
     ]);
-    const team1Data: any = await team1Res.json();
-    const team2Data: any = await team2Res.json();
-    const team1 = team1Data.data;
-    const team2 = team2Data.data;
 
     const match = await Match.create({
       externalId: fixtureId,
-      team1: team1?.name || `Team ${fixture.localteam_id}`,
-      team2: team2?.name || `Team ${fixture.visitorteam_id}`,
-      team1Short: team1?.code || "T1",
-      team2Short: team2?.code || "T2",
+      team1: team1.name,
+      team2: team2.name,
+      team1Short: team1.code || "T1",
+      team2Short: team2.code || "T2",
       team1Players: [],
       team2Players: [],
       startTime: new Date(fixture.starting_at),
       status: fixture.status === "Finished" ? "completed" : fixture.status === "NS" ? "upcoming" : "live",
       scoreData: {
         venue: fixture.venue_id,
-        team1Img: team1?.image_path || "",
-        team2Img: team2?.image_path || "",
+        team1Img: team1.image_path || "",
+        team2Img: team2.image_path || "",
       },
     });
 
+    // Generate pre-match predictions
     const preMatchQuestions = generatePreMatchPredictions(
       match.id, match.team1, match.team2,
       match.team1Short, match.team2Short,
@@ -164,11 +165,11 @@ router.get("/:matchId", async (req: Request, res: Response): Promise<void> => {
   }
 });
 
-// Join a match at a venue (venueId optional for local testing)
+// Join a match at a venue
 router.post("/:matchId/join", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const matchId = req.params.matchId as string;
-    const venueId = req.body.venueId || "local-testing";
+    const { venueId, matchCode } = req.body;
     const userId = req.userId!;
 
     const match = await Match.findByPk(matchId);
@@ -177,12 +178,28 @@ router.post("/:matchId/join", authenticateUser, async (req: AuthRequest, res: Re
       return;
     }
 
+    // Check if user already joined (no code needed for re-entry)
     const existing = await MatchParticipant.findOne({
       where: { userId, matchId, venueId },
     });
 
     if (existing) {
       res.json({ participant: existing, message: "Already joined" });
+      return;
+    }
+
+    // Validate match code for new joins
+    if (!matchCode) {
+      res.status(403).json({ error: "Match code is required to join" });
+      return;
+    }
+
+    const validCode = await MatchCode.findOne({
+      where: { venueId, matchId, code: matchCode, isActive: true },
+    });
+
+    if (!validCode) {
+      res.status(403).json({ error: "Invalid match code" });
       return;
     }
 
@@ -197,12 +214,7 @@ router.post("/:matchId/join", authenticateUser, async (req: AuthRequest, res: Re
     io.to(`venue:${venueId}:${matchId}`).emit("playerCount", { count: playerCount });
 
     res.status(201).json({ participant });
-  } catch (error: any) {
-    if (error?.name === "SequelizeUniqueConstraintError") {
-      const existing = await MatchParticipant.findOne({ where: { userId: req.userId!, matchId: req.params.matchId as string, venueId: req.body.venueId } });
-      res.json({ participant: existing, message: "Already joined" });
-      return;
-    }
+  } catch (error) {
     console.error("Join match error:", error);
     res.status(500).json({ error: "Failed to join match" });
   }
@@ -212,7 +224,7 @@ router.post("/:matchId/join", authenticateUser, async (req: AuthRequest, res: Re
 router.get("/:matchId/state", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const matchId = req.params.matchId as string;
-    const venueId = (req.query.venueId as string) || "local-testing";
+    const venueId = req.query.venueId as string;
     const userId = req.userId!;
 
     const match = await Match.findByPk(matchId);
@@ -230,21 +242,11 @@ router.get("/:matchId/state", authenticateUser, async (req: AuthRequest, res: Re
       order: [["createdAt", "ASC"]],
     });
 
-    const userAnswers = await UserPrediction.findAll({
-      where: { userId, matchId },
-      attributes: ["predictionId"],
-    });
-    const answeredIds = new Set(userAnswers.map((a) => a.predictionId));
-    const openWithAnswerStatus = openPredictions.map((p) => ({
-      ...p.toJSON(),
-      userAnswered: answeredIds.has(p.id),
-    }));
-
     const playerCount = await MatchParticipant.count({
       where: { matchId, venueId },
     });
 
-    res.json({ match, participant, openPredictions: openWithAnswerStatus, playerCount });
+    res.json({ match, participant, openPredictions, playerCount });
   } catch (error) {
     console.error("Get match state error:", error);
     res.status(500).json({ error: "Failed to get match state" });

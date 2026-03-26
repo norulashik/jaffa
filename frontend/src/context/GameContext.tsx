@@ -119,7 +119,13 @@ export function GameProvider({ children }: { children: ReactNode }) {
           }
           return Promise.reject();
         })
-        .then((user) => dispatch({ type: "SET_USER", user, token }))
+        .then((user) => {
+          dispatch({ type: "SET_USER", user, token });
+          const savedVenueId = localStorage.getItem("jaffa_venue_id");
+          const savedMatchId = localStorage.getItem("jaffa_match_id");
+          if (savedVenueId) dispatch({ type: "SET_VENUE", venueId: savedVenueId, venueName: localStorage.getItem("jaffa_venue_name") || "" });
+          if (savedMatchId) dispatch({ type: "SET_MATCH", matchId: savedMatchId });
+        })
         .catch(() => {
           clearTimeout(timeout);
           localStorage.removeItem("jaffa_token");
@@ -127,6 +133,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
         });
     } else {
       dispatch({ type: "SET_LOADING", isLoading: false });
+      const savedVenueId = localStorage.getItem("jaffa_venue_id");
+      const savedMatchId = localStorage.getItem("jaffa_match_id");
+      if (savedVenueId) dispatch({ type: "SET_VENUE", venueId: savedVenueId, venueName: localStorage.getItem("jaffa_venue_name") || "" });
+      if (savedMatchId) dispatch({ type: "SET_MATCH", matchId: savedMatchId });
     }
   }, []);
 

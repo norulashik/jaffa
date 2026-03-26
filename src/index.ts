@@ -1,8 +1,6 @@
 import express from "express";
 import cors from "cors";
 import http from "http";
-import path from "path";
-import fs from "fs";
 import { Server as SocketIOServer } from "socket.io";
 import dotenv from "dotenv";
 import { sequelize } from "./models";
@@ -13,8 +11,9 @@ import predictionRoutes from "./routes/prediction";
 import leaderboardRoutes from "./routes/leaderboard";
 import rewardRoutes from "./routes/reward";
 import adminRoutes from "./routes/admin";
+import ownerRoutes from "./routes/owner";
 import { setupSocketHandlers } from "./socket/handlers";
-import { pollSportsmonkUpdates, fetchUpcomingFixtures, fetchSportsmonkLiveScores } from "./services/sportsmonkApi";
+import { pollSportsmonkUpdates } from "./services/sportsmonkApi";
 
 dotenv.config();
 
@@ -23,14 +22,13 @@ const server = http.createServer(app);
 
 const io = new SocketIOServer(server, {
   cors: {
-    origin: true,
+    origin: process.env.CORS_ORIGIN || "http://localhost:3001",
     methods: ["GET", "POST"],
-    credentials: true,
   },
 });
 
 // Middleware
-app.use(cors({ origin: true, credentials: true }));
+app.use(cors({ origin: process.env.CORS_ORIGIN || "http://localhost:3001" }));
 app.use(express.json());
 
 // Make io accessible in routes
@@ -44,6 +42,7 @@ app.use("/api/predictions", predictionRoutes);
 app.use("/api/leaderboard", leaderboardRoutes);
 app.use("/api/rewards", rewardRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/owner", ownerRoutes);
 
 // Health check
 app.get("/api/health", (_req, res) => {
@@ -175,36 +174,20 @@ ${upcoming.map((f: any) =>
   }
 });
 
-// Serve Next.js production build (for single-port ngrok setup)
-const frontendBuildPath = path.join(__dirname, "../frontend/out");
-app.use(express.static(frontendBuildPath));
-// All non-API routes fall through to the frontend
-app.use((req, res, next) => {
-  if (req.path.startsWith("/api") || req.path.startsWith("/socket.io")) {
-    return next();
-  }
-  // Check for page-specific HTML file (e.g. /admin -> admin.html)
-  const cleanPath = req.path.replace(/\/$/, "").replace(/^\//, "");
-  if (cleanPath) {
-    const pageFile = path.join(frontendBuildPath, `${cleanPath}.html`);
-    if (fs.existsSync(pageFile)) {
-      return res.sendFile(pageFile);
-    }
-  }
-  res.sendFile(path.join(frontendBuildPath, "index.html"));
-});
-
 // Socket.IO
 setupSocketHandlers(io);
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 5000;
 
 async function start() {
   try {
     await sequelize.authenticate();
     console.log("Database connected");
 
-    await sequelize.sync();
+    // Use force:false to create missing tables without touching existing ones.
+    // This avoids SQLite's simulate-ALTER issues (FK constraints, duplicate data).
+    // To apply schema changes in dev: delete jaffa.db and restart.
+    await sequelize.sync({ force: false });
     console.log("Database synced");
 
     server.listen(PORT, () => {
@@ -220,21 +203,6 @@ async function start() {
         }
       }, POLL_INTERVAL);
       console.log(`Sportsmonk live polling enabled (every ${POLL_INTERVAL / 1000}s)`);
-
-      // Pre-warm cache with retries (DNS can be flaky)
-      const warmCache = async (attempt = 1) => {
-        try {
-          const f = await fetchUpcomingFixtures();
-          console.log(`[Sportsmonk] Cache warmed: ${f.length} upcoming fixtures`);
-          await fetchSportsmonkLiveScores();
-        } catch {
-          if (attempt < 5) {
-            console.log(`[Sportsmonk] Cache warm attempt ${attempt} failed, retrying in 10s...`);
-            setTimeout(() => warmCache(attempt + 1), 10000);
-          }
-        }
-      };
-      warmCache();
     });
   } catch (error) {
     console.error("Failed to start server:", error);

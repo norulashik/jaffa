@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import MaterialIcon from "@/components/MaterialIcon";
 
-export default function SplashScreen() {
+function SplashScreenInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -100,5 +100,13 @@ export default function SplashScreen() {
         </button>
       </div>
     </main>
+  );
+}
+
+export default function SplashScreen() {
+  return (
+    <Suspense>
+      <SplashScreenInner />
+    </Suspense>
   );
 }

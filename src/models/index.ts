@@ -6,6 +6,7 @@ import Prediction from "./Prediction";
 import UserPrediction from "./UserPrediction";
 import MatchParticipant from "./MatchParticipant";
 import Reward from "./Reward";
+import MatchCode from "./MatchCode";
 import OTP from "./OTP";
 
 // Associations
@@ -38,6 +39,10 @@ MatchParticipant.belongsTo(Venue, { foreignKey: "venueId", as: "venue" });
 Venue.hasMany(Reward, { foreignKey: "venueId", as: "rewards" });
 Reward.belongsTo(Venue, { foreignKey: "venueId", as: "venue" });
 
+// Venue has many MatchCodes
+Venue.hasMany(MatchCode, { foreignKey: "venueId", as: "matchCodes" });
+MatchCode.belongsTo(Venue, { foreignKey: "venueId", as: "venue" });
+
 // Prediction has many UserPredictions
 Prediction.hasMany(UserPrediction, { foreignKey: "predictionId", as: "userPredictions" });
 UserPrediction.belongsTo(Prediction, { foreignKey: "predictionId", as: "prediction" });
@@ -51,5 +56,6 @@ export {
   UserPrediction,
   MatchParticipant,
   Reward,
+  MatchCode,
   OTP,
 };

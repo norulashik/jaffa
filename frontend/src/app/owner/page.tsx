@@ -64,6 +64,12 @@ export default function OwnerPortal() {
       loadStats();
       loadVenues();
       loadMatches();
+      const interval = setInterval(() => {
+        loadStats();
+        loadVenues();
+        loadMatches();
+      }, 15000);
+      return () => clearInterval(interval);
     }
   }, [isLoggedIn, token]);
 

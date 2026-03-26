@@ -90,17 +90,14 @@ export async function resolvePrediction(
       correctCount++;
 
       // Update participant points
+      const roundField = `round${prediction.round}Points` as string;
       const updateData: Record<string, unknown> = {
         totalPoints: participant.totalPoints + result.totalPoints,
+        [roundField]: ((participant as unknown as Record<string, number>)[roundField] || 0) + result.totalPoints,
         currentStreak: result.newStreak,
         bestStreak: Math.max(participant.bestStreak, result.newStreak),
         correctPredictions: participant.correctPredictions + 1,
       };
-      // Only update round-specific points for rounds 1-6 (round 0 = match-only points like rivalry calls)
-      if (prediction.round >= 1 && prediction.round <= 6) {
-        const roundField = `round${prediction.round}Points` as string;
-        updateData[roundField] = ((participant as unknown as Record<string, number>)[roundField] || 0) + result.totalPoints;
-      }
 
       await participant.update(updateData as Partial<MatchParticipant>);
 
@@ -120,14 +117,13 @@ export async function resolvePrediction(
 
       if (result.totalPoints < 0) {
         // All-In penalty: deduct points but floor at 0
+        const roundField = `round${prediction.round}Points` as string;
         const newTotal = Math.max(0, participant.totalPoints + result.totalPoints);
-        updateData.totalPoints = newTotal;
+        const currentRoundPts = (participant as unknown as Record<string, number>)[roundField] || 0;
+        const newRoundPts = Math.max(0, currentRoundPts + result.totalPoints);
 
-        if (prediction.round >= 1 && prediction.round <= 6) {
-          const roundField = `round${prediction.round}Points` as string;
-          const currentRoundPts = (participant as unknown as Record<string, number>)[roundField] || 0;
-          updateData[roundField] = Math.max(0, currentRoundPts + result.totalPoints);
-        }
+        updateData.totalPoints = newTotal;
+        updateData[roundField] = newRoundPts;
 
         // Emit hype moment for failed All-In
         const { User } = await import("../models");
@@ -152,6 +148,7 @@ export async function resolvePrediction(
 
     io.to(`venue:${venueId}:${prediction.matchId}`).emit("predictionPulse", {
       predictionId: prediction.id,
+      matchId: prediction.matchId,
       question: prediction.question,
       correctOption,
       correctLabel: prediction.options.find((o) => o.key === correctOption)?.label || correctOption,
@@ -159,6 +156,13 @@ export async function resolvePrediction(
       correctCount: venueCorrect,
       correctPercentage: venueTotal > 0 ? Math.round((venueCorrect / venueTotal) * 100) : 0,
       pulse: generatePulseMessage(venueCorrect, venueTotal, prediction.question),
+    });
+
+    // Emit predictionResolved so match page updates status
+    io.to(`venue:${venueId}:${prediction.matchId}`).emit("predictionResolved", {
+      matchId: prediction.matchId,
+      predictionId: prediction.id,
+      correctOption,
     });
 
     // Emit updated leaderboard

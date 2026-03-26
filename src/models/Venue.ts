@@ -4,6 +4,7 @@ import sequelize from "../config/database";
 interface VenueAttributes {
   id: string;
   name: string;
+  slug: string;
   ownerPhone: string;
   ownerName: string;
   password: string;
@@ -15,16 +16,18 @@ interface VenueAttributes {
     roundReward: { top1: string; top2: string; top3: string };
     grandPrize: { top1: string; top2: string; top3: string };
   };
+  approvalStatus: "pending" | "approved" | "rejected";
   isActive: boolean;
   createdAt?: Date;
   updatedAt?: Date;
 }
 
-interface VenueCreationAttributes extends Optional<VenueAttributes, "id" | "logoUrl" | "isActive" | "radiusMeters"> {}
+interface VenueCreationAttributes extends Optional<VenueAttributes, "id" | "slug" | "logoUrl" | "isActive" | "radiusMeters" | "approvalStatus"> {}
 
 class Venue extends Model<VenueAttributes, VenueCreationAttributes> implements VenueAttributes {
   public id!: string;
   public name!: string;
+  public slug!: string;
   public ownerPhone!: string;
   public ownerName!: string;
   public password!: string;
@@ -33,6 +36,7 @@ class Venue extends Model<VenueAttributes, VenueCreationAttributes> implements V
   public radiusMeters!: number;
   public logoUrl!: string;
   public rewardConfig!: VenueAttributes["rewardConfig"];
+  public approvalStatus!: "pending" | "approved" | "rejected";
   public isActive!: boolean;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -48,6 +52,11 @@ Venue.init(
     name: {
       type: DataTypes.STRING(100),
       allowNull: false,
+    },
+    slug: {
+      type: DataTypes.STRING(120),
+      allowNull: true,
+      unique: true,
     },
     ownerPhone: {
       type: DataTypes.STRING(15),
@@ -92,6 +101,11 @@ Venue.init(
           top3: "25% off total bill",
         },
       },
+    },
+    approvalStatus: {
+      type: DataTypes.STRING(20),
+      allowNull: false,
+      defaultValue: "pending",
     },
     isActive: {
       type: DataTypes.BOOLEAN,

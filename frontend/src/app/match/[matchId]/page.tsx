@@ -79,16 +79,19 @@ export default function MatchDashboard() {
         // Load match data
         const match = await api.getMatch(matchId);
         setMatchData(match);
+        localStorage.setItem("jaffa_match_id", matchId);
+        dispatch({ type: "SET_MATCH", matchId });
 
-        // Join the match (pass match code if available)
-        // Note: "already joined" returns 200 (not an error), so catch = real failure
-        try {
-          const matchCode = localStorage.getItem("jaffa_match_code") || undefined;
-          await api.joinMatch(matchId, venueId, matchCode);
-          localStorage.removeItem("jaffa_match_code");
-        } catch (err: any) {
-          console.error("Join match failed:", err.message);
-          localStorage.removeItem("jaffa_match_code");
+        // Join the match only if we have a match code (first time join)
+        const matchCode = localStorage.getItem("jaffa_match_code") || undefined;
+        if (matchCode) {
+          try {
+            await api.joinMatch(matchId, venueId, matchCode);
+            localStorage.removeItem("jaffa_match_code");
+          } catch (err: any) {
+            console.error("Join match failed:", err.message);
+            localStorage.removeItem("jaffa_match_code");
+          }
         }
 
         // Check for unanswered pre-match questions (only if match hasn't started yet)
@@ -188,7 +191,11 @@ export default function MatchDashboard() {
       }
     });
 
+    // Polling fallback every 10s in case socket events are missed
+    const pollInterval = setInterval(() => loadLiveData(), 10000);
+
     return () => {
+      clearInterval(pollInterval);
       disconnectSocket();
     };
   }, [phase, matchId]);
@@ -541,6 +548,22 @@ export default function MatchDashboard() {
           );
         })()}
 
+        {(() => {
+          const sd = matchData?.scoreData || {};
+          const currentOver = sd.currentOver || matchData?.currentOver || 0;
+          const nextOver = currentOver + 1;
+          if (currentOver > 0 && nextOver <= 20) {
+            return (
+              <div className="text-center py-2">
+                <p className="font-body text-sm text-primary-container font-medium">
+                  Make predictions for Over {nextOver} before this over ends!
+                </p>
+              </div>
+            );
+          }
+          return null;
+        })()}
+
         {/* Predict Tabs */}
         {(() => {
           const unanswered = predictions.filter((p: any) => p.status === "open" && !selectedAnswers[p.id] && !p.userAnswer?.selectedOption);
@@ -634,7 +657,7 @@ export default function MatchDashboard() {
 
                   {/* My Picks */}
                   {(answeredPreds.length > 0 || missedPreds.length > 0) && (() => {
-                    const allPicks = [...answeredPreds, ...missedPreds];
+                    const allPicks = [...answeredPreds, ...missedPreds].reverse();
                     const visiblePicks = showAllPicks ? allPicks : allPicks.slice(0, 5);
                     const hasMore = allPicks.length > 5;
                     return (

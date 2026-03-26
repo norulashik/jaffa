@@ -5,6 +5,17 @@ import { Venue } from "../models";
 
 const router = Router();
 
+// Generate URL-friendly slug from venue name
+function generateSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .substring(0, 80);
+}
+
 // Register venue
 router.post("/register", async (req: Request, res: Response): Promise<void> => {
   try {
@@ -21,10 +32,18 @@ router.post("/register", async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    // Generate unique slug
+    let slug = generateSlug(name);
+    const slugExists = await Venue.findOne({ where: { slug } });
+    if (slugExists) {
+      slug = `${slug}-${Math.floor(1000 + Math.random() * 9000)}`;
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const venue = await Venue.create({
       name,
+      slug,
       ownerPhone,
       ownerName,
       password: hashedPassword,
@@ -34,19 +53,13 @@ router.post("/register", async (req: Request, res: Response): Promise<void> => {
       rewardConfig: rewardConfig || undefined,
     });
 
-    const token = jwt.sign(
-      { venueId: venue.id, type: "venue" },
-      process.env.JWT_SECRET || "dev-secret",
-      { expiresIn: "90d" }
-    );
-
     res.status(201).json({
-      token,
+      message: "Registration submitted. Your venue will be reviewed and approved shortly.",
       venue: {
         id: venue.id,
         name: venue.name,
-        ownerName: venue.ownerName,
-        rewardConfig: venue.rewardConfig,
+        slug: venue.slug,
+        approvalStatus: "pending",
       },
     });
   } catch (error) {
@@ -72,6 +85,20 @@ router.post("/login", async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    if (venue.approvalStatus !== "approved") {
+      res.status(403).json({
+        error: venue.approvalStatus === "pending"
+          ? "Your venue registration is pending approval"
+          : "Your venue registration was rejected",
+      });
+      return;
+    }
+
+    if (!venue.isActive) {
+      res.status(403).json({ error: "Your venue has been deactivated" });
+      return;
+    }
+
     const token = jwt.sign(
       { venueId: venue.id, type: "venue" },
       process.env.JWT_SECRET || "dev-secret",
@@ -83,6 +110,7 @@ router.post("/login", async (req: Request, res: Response): Promise<void> => {
       venue: {
         id: venue.id,
         name: venue.name,
+        slug: venue.slug,
         ownerName: venue.ownerName,
         rewardConfig: venue.rewardConfig,
       },
@@ -112,6 +140,29 @@ router.put("/rewards", async (req: Request, res: Response): Promise<void> => {
   } catch (error) {
     console.error("Update rewards error:", error);
     res.status(500).json({ error: "Failed to update rewards" });
+  }
+});
+
+// Get venue by slug (public)
+router.get("/by-slug/:slug", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const slug = req.params.slug as string;
+    const venue = await Venue.findOne({ where: { slug } });
+    if (!venue || !venue.isActive || venue.approvalStatus !== "approved") {
+      res.status(404).json({ error: "Venue not found" });
+      return;
+    }
+
+    res.json({
+      id: venue.id,
+      name: venue.name,
+      slug: venue.slug,
+      logoUrl: venue.logoUrl,
+      rewardConfig: venue.rewardConfig,
+    });
+  } catch (error) {
+    console.error("Get venue by slug error:", error);
+    res.status(500).json({ error: "Failed to get venue" });
   }
 });
 

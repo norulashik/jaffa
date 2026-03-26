@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
 import MaterialIcon from "@/components/MaterialIcon";
@@ -8,7 +9,16 @@ import { useGame } from "@/context/GameContext";
 
 export default function LeaderboardPage() {
   const { state } = useGame();
-  const { matchId, venueId, currentRound, user } = state;
+  const { currentRound, user } = state;
+
+  // Use context values with localStorage fallback
+  const [matchId, setMatchId] = useState(state.matchId);
+  const [venueId, setVenueId] = useState(state.venueId);
+
+  useEffect(() => {
+    if (!matchId) setMatchId(localStorage.getItem("jaffa_match_id"));
+    if (!venueId) setVenueId(localStorage.getItem("jaffa_venue_id"));
+  }, [state.matchId, state.venueId]);
 
   return (
     <div className="bg-background text-on-surface font-body min-h-screen overflow-x-hidden">

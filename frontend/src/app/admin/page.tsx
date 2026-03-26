@@ -70,6 +70,12 @@ export default function AdminDashboard() {
       loadStats();
       loadRewards();
       loadMatches();
+      const interval = setInterval(() => {
+        loadStats();
+        loadRewards();
+        loadMatches();
+      }, 15000);
+      return () => clearInterval(interval);
     }
   }, [isLoggedIn, token]);
 

@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import path from "path";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -14,6 +15,10 @@ const nextConfig: NextConfig = {
         hostname: "lh3.googleusercontent.com",
       },
     ],
+  },
+  turbopack: {
+    // Force Turbopack to treat the frontend folder as the workspace root
+    root: path.join(__dirname),
   },
 };
 

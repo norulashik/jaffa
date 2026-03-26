@@ -7,6 +7,7 @@ interface MatchParticipantAttributes {
   matchId: string;
   venueId: string;
   totalPoints: number;
+  round0Points: number;
   round1Points: number;
   round2Points: number;
   round3Points: number;
@@ -25,7 +26,7 @@ interface MatchParticipantAttributes {
   updatedAt?: Date;
 }
 
-interface MatchParticipantCreationAttributes extends Optional<MatchParticipantAttributes, "id" | "totalPoints" | "round1Points" | "round2Points" | "round3Points" | "round4Points" | "round5Points" | "round6Points" | "currentStreak" | "bestStreak" | "boostsUsedRound" | "currentRound" | "allInUsed" | "totalPredictions" | "correctPredictions" | "joinedAt"> {}
+interface MatchParticipantCreationAttributes extends Optional<MatchParticipantAttributes, "id" | "totalPoints" | "round0Points" | "round1Points" | "round2Points" | "round3Points" | "round4Points" | "round5Points" | "round6Points" | "currentStreak" | "bestStreak" | "boostsUsedRound" | "currentRound" | "allInUsed" | "totalPredictions" | "correctPredictions" | "joinedAt"> {}
 
 class MatchParticipant extends Model<MatchParticipantAttributes, MatchParticipantCreationAttributes> implements MatchParticipantAttributes {
   public id!: string;
@@ -33,6 +34,7 @@ class MatchParticipant extends Model<MatchParticipantAttributes, MatchParticipan
   public matchId!: string;
   public venueId!: string;
   public totalPoints!: number;
+  public round0Points!: number;
   public round1Points!: number;
   public round2Points!: number;
   public round3Points!: number;
@@ -77,6 +79,7 @@ MatchParticipant.init(
       type: DataTypes.INTEGER,
       defaultValue: 0,
     },
+    round0Points: { type: DataTypes.INTEGER, defaultValue: 0 },
     round1Points: { type: DataTypes.INTEGER, defaultValue: 0 },
     round2Points: { type: DataTypes.INTEGER, defaultValue: 0 },
     round3Points: { type: DataTypes.INTEGER, defaultValue: 0 },
@@ -123,6 +126,7 @@ MatchParticipant.init(
     indexes: [
       { unique: true, fields: ["userId", "matchId", "venueId"] },
       { fields: ["matchId", "venueId", "totalPoints"] },
+      { fields: ["matchId", "venueId", "round0Points"] },
       { fields: ["matchId", "venueId", "round1Points"] },
       { fields: ["matchId", "venueId", "round2Points"] },
       { fields: ["matchId", "venueId", "round3Points"] },
