@@ -11,6 +11,7 @@ import predictionRoutes from "./routes/prediction";
 import leaderboardRoutes from "./routes/leaderboard";
 import rewardRoutes from "./routes/reward";
 import adminRoutes from "./routes/admin";
+import ownerRoutes from "./routes/owner";
 import { setupSocketHandlers } from "./socket/handlers";
 import { pollSportsmonkUpdates } from "./services/sportsmonkApi";
 
@@ -41,6 +42,7 @@ app.use("/api/predictions", predictionRoutes);
 app.use("/api/leaderboard", leaderboardRoutes);
 app.use("/api/rewards", rewardRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/owner", ownerRoutes);
 
 // Health check
 app.get("/api/health", (_req, res) => {

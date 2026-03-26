@@ -146,34 +146,34 @@ export default function TVDisplay() {
 
   if (!venueId || !matchId) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+      <div className="min-h-screen bg-surface flex items-center justify-center">
         <div className="text-center">
-          <h1 className="text-6xl font-black text-orange-500 mb-4">JAFFA</h1>
-          <p className="text-slate-400 text-xl">TV Display</p>
-          <p className="text-slate-600 mt-4">Add ?v=VENUE_ID&m=MATCH_ID to the URL</p>
+          <h1 className="text-6xl font-black text-primary-container mb-4">JAFFA</h1>
+          <p className="text-on-surface-variant text-xl">TV Display</p>
+          <p className="text-outline-variant mt-4">Add ?v=VENUE_ID&m=MATCH_ID to the URL</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-8 overflow-hidden">
+    <div className="min-h-screen bg-gradient-to-br from-surface via-surface-container-low to-surface p-8 overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-4">
-          <h1 className="text-5xl font-black text-orange-500">JAFFA</h1>
+          <h1 className="text-5xl font-black text-primary-container">JAFFA</h1>
           {match && (
             <div className="flex items-center gap-3 ml-4">
-              <MdSportsCricket className="text-2xl text-slate-400" />
-              <span className="text-2xl font-bold text-white">
+              <MdSportsCricket className="text-2xl text-on-surface-variant" />
+              <span className="text-2xl font-bold text-on-surface">
                 {match.team1Short} vs {match.team2Short}
               </span>
             </div>
           )}
         </div>
         <div className="text-right">
-          <div className="text-lg text-slate-400">{playerCount} players</div>
-          <div className="text-sm text-orange-400">
+          <div className="text-lg text-on-surface-variant">{playerCount} players</div>
+          <div className="text-sm text-primary-container">
             {displayMode === "round" ? `Round ${currentRound}` : displayMode === "match" ? "Overall" : ""}
           </div>
         </div>
@@ -190,10 +190,10 @@ export default function TVDisplay() {
             exit={{ opacity: 0, y: -20 }}
           >
             <div className="text-center mb-6">
-              <h2 className="text-3xl font-bold text-white">
+              <h2 className="text-3xl font-bold text-on-surface">
                 Round {currentRound} Leaderboard
               </h2>
-              <p className="text-slate-400">Top performers this round</p>
+              <p className="text-on-surface-variant">Top performers this round</p>
             </div>
             <TVLeaderboard entries={roundLeaderboard} pointsKey="points" />
           </motion.div>
@@ -208,8 +208,8 @@ export default function TVDisplay() {
             exit={{ opacity: 0, y: -20 }}
           >
             <div className="text-center mb-6">
-              <h2 className="text-3xl font-bold text-white">Match Leaderboard</h2>
-              <p className="text-slate-400">Overall standings</p>
+              <h2 className="text-3xl font-bold text-on-surface">Match Leaderboard</h2>
+              <p className="text-on-surface-variant">Overall standings</p>
             </div>
             <TVLeaderboard entries={matchLeaderboard} pointsKey="totalPoints" />
           </motion.div>
@@ -225,11 +225,11 @@ export default function TVDisplay() {
             className="flex items-center justify-center h-[60vh]"
           >
             <div className="text-center max-w-3xl">
-              <div className="text-xl text-slate-400 mb-4">{pulseData.question}</div>
-              <div className="text-4xl font-black text-orange-500 mb-6">
+              <div className="text-xl text-on-surface-variant mb-4">{pulseData.question}</div>
+              <div className="text-4xl font-black text-primary-container mb-6">
                 {pulseData.correctLabel}
               </div>
-              <div className="text-2xl font-bold text-white">
+              <div className="text-2xl font-bold text-on-surface">
                 {pulseData.pulse}
               </div>
             </div>
@@ -254,7 +254,7 @@ export default function TVDisplay() {
                   >
                     <IoRocket className="text-8xl text-purple-400 mx-auto mb-6" />
                   </motion.div>
-                  <p className="text-5xl font-black text-white mb-4">ALL IN!</p>
+                  <p className="text-5xl font-black text-on-surface mb-4">ALL IN!</p>
                   <p className="text-2xl text-purple-300">
                     {hypeData.playerName} is going all in!
                   </p>
@@ -273,7 +273,7 @@ export default function TVDisplay() {
                   <p className="text-2xl text-red-300">
                     {hypeData.playerName} lost {hypeData.pointsLost} points
                   </p>
-                  <p className="text-xl text-slate-400 mt-2">That&apos;s gotta hurt.</p>
+                  <p className="text-xl text-on-surface-variant mt-2">That&apos;s gotta hurt.</p>
                 </>
               )}
 
@@ -285,7 +285,7 @@ export default function TVDisplay() {
                   >
                     <IoFlame className="text-8xl text-yellow-400 mx-auto mb-6" />
                   </motion.div>
-                  <p className="text-5xl font-black text-white mb-4">
+                  <p className="text-5xl font-black text-on-surface mb-4">
                     {hypeData.streak} STREAK!
                   </p>
                   <p className="text-2xl text-yellow-300">
@@ -302,7 +302,7 @@ export default function TVDisplay() {
                   >
                     <IoTrophy className="text-8xl text-yellow-400 mx-auto mb-6" />
                   </motion.div>
-                  <p className="text-4xl font-black text-white mb-6">
+                  <p className="text-4xl font-black text-on-surface mb-6">
                     {hypeData.isGrandPrize ? "MATCH CHAMPION!" : `ROUND ${hypeData.round} WINNERS!`}
                   </p>
                   <div className="space-y-4">
@@ -317,12 +317,12 @@ export default function TVDisplay() {
                         <span className={`text-3xl font-black ${
                           w.position === 1 ? "text-yellow-400" :
                           w.position === 2 ? "text-slate-300" :
-                          "text-orange-400"
+                          "text-primary-container"
                         }`}>
                           #{w.position}
                         </span>
-                        <span className="text-2xl font-bold text-white">{w.displayName}</span>
-                        <span className="text-xl text-slate-400">{w.points} pts</span>
+                        <span className="text-2xl font-bold text-on-surface">{w.displayName}</span>
+                        <span className="text-xl text-on-surface-variant">{w.points} pts</span>
                         <span className="text-lg text-green-400">{w.reward}</span>
                       </motion.div>
                     ))}
@@ -335,11 +335,11 @@ export default function TVDisplay() {
       </AnimatePresence>
 
       {/* Footer */}
-      <div className="fixed bottom-0 left-0 right-0 bg-slate-900/80 backdrop-blur px-8 py-4 flex items-center justify-between">
-        <p className="text-slate-400">
-          Scan the QR code to join! <span className="text-orange-400 font-bold">JAFFA</span>
+      <div className="fixed bottom-0 left-0 right-0 bg-surface-container-low/80 backdrop-blur px-8 py-4 flex items-center justify-between">
+        <p className="text-on-surface-variant">
+          Scan the QR code to join! <span className="text-primary-container font-bold">JAFFA</span>
         </p>
-        <p className="text-slate-500 text-sm">Predict. Play. Win.</p>
+        <p className="text-outline text-sm">Predict. Play. Win.</p>
       </div>
     </div>
   );
@@ -366,16 +366,16 @@ function TVLeaderboard({
             index === 0
               ? "bg-gradient-to-r from-yellow-600/20 to-orange-600/20 border border-yellow-500/30"
               : index <= 2
-              ? "bg-slate-800/60 border border-slate-700"
-              : "bg-slate-900/40"
+              ? "bg-surface-container-high/60 border border-white/10"
+              : "bg-surface-container-low/40"
           }`}
         >
           {/* Rank */}
           <div className={`text-3xl font-black w-12 text-center ${
             index === 0 ? "text-yellow-400" :
             index === 1 ? "text-slate-300" :
-            index === 2 ? "text-orange-400" :
-            "text-slate-600"
+            index === 2 ? "text-primary-container" :
+            "text-outline-variant"
           }`}>
             {entry.rank}
           </div>
@@ -392,7 +392,7 @@ function TVLeaderboard({
           {/* Name + streak */}
           <div className="flex-1">
             <div className="flex items-center gap-2">
-              <span className="text-xl font-bold text-white">{entry.displayName}</span>
+              <span className="text-xl font-bold text-on-surface">{entry.displayName}</span>
               {entry.currentStreak >= 3 && (
                 <span className="flex items-center gap-1 text-yellow-400 text-sm">
                   <IoFlame /> {entry.currentStreak}
@@ -404,19 +404,19 @@ function TVLeaderboard({
           {/* Points */}
           <div className="text-right">
             <span className={`text-2xl font-black ${
-              index === 0 ? "text-yellow-400" : "text-white"
+              index === 0 ? "text-yellow-400" : "text-on-surface"
             }`}>
               {(entry as any)[pointsKey]}
             </span>
-            <span className="text-sm text-slate-500 ml-1">pts</span>
+            <span className="text-sm text-outline ml-1">pts</span>
           </div>
         </motion.div>
       ))}
 
       {top10.length === 0 && (
         <div className="text-center py-20">
-          <p className="text-2xl text-slate-500">Waiting for players...</p>
-          <p className="text-slate-600 mt-2">Scan the QR code to join!</p>
+          <p className="text-2xl text-outline">Waiting for players...</p>
+          <p className="text-outline-variant mt-2">Scan the QR code to join!</p>
         </div>
       )}
     </div>

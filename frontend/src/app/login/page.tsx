@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import MaterialIcon from "@/components/MaterialIcon";
 import { api } from "@/lib/api";
+import { cafeUrl } from "@/lib/navigation";
 
 export default function LoginOTP() {
   const router = useRouter();
@@ -89,7 +90,7 @@ export default function LoginOTP() {
       if (result.token) {
         localStorage.setItem("jaffa_token", result.token);
         localStorage.setItem("jaffa_user", JSON.stringify(result.user));
-        router.push("/lobby");
+        router.push(cafeUrl("/lobby"));
       }
     } catch (err: any) {
       setError(err.message || "Invalid OTP");

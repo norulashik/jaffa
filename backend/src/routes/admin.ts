@@ -1,5 +1,5 @@
-import { Router, Response } from "express";
-import { Match, Prediction, MatchParticipant, Venue, User, Reward } from "../models";
+import { Router, Request, Response } from "express";
+import { Match, Prediction, MatchParticipant, Venue, User, Reward, MatchCode } from "../models";
 import { authenticateVenue, AuthRequest } from "../middleware/auth";
 import {
   generatePreMatchPredictions,
@@ -552,6 +552,104 @@ router.post("/cricket/poll", async (req: any, res: Response): Promise<void> => {
   } catch (error) {
     console.error("Poll error:", error);
     res.status(500).json({ error: "Failed to poll" });
+  }
+});
+
+// ── Match Code Management ──────────────────────────────────────────
+
+// Generate match code for a match at this venue
+router.post("/match-code", authenticateVenue, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const venueId = req.venueId!;
+    const { matchId } = req.body;
+
+    if (!matchId) {
+      res.status(400).json({ error: "matchId is required" });
+      return;
+    }
+
+    // Deactivate any previous codes for this venue+match
+    await MatchCode.update(
+      { isActive: false },
+      { where: { venueId, matchId } }
+    );
+
+    // Generate random 4-digit code
+    const code = String(Math.floor(1000 + Math.random() * 9000));
+
+    const matchCode = await MatchCode.create({
+      venueId,
+      matchId,
+      code,
+    });
+
+    res.status(201).json({ matchCode: { id: matchCode.id, code: matchCode.code, matchId, isActive: true } });
+  } catch (error) {
+    console.error("Generate match code error:", error);
+    res.status(500).json({ error: "Failed to generate code" });
+  }
+});
+
+// Get active match code for a match at this venue
+router.get("/match-code/:matchId", authenticateVenue, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const venueId = req.venueId!;
+    const matchId = req.params.matchId as string;
+
+    const matchCode = await MatchCode.findOne({
+      where: { venueId, matchId, isActive: true },
+      order: [["createdAt", "DESC"]],
+    });
+
+    if (!matchCode) {
+      res.json({ matchCode: null });
+      return;
+    }
+
+    res.json({ matchCode: { id: matchCode.id, code: matchCode.code, matchId, isActive: true } });
+  } catch (error) {
+    console.error("Get match code error:", error);
+    res.status(500).json({ error: "Failed to get code" });
+  }
+});
+
+// Validate a match code (called by user join flow)
+router.post("/validate-code", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { venueId, matchId, code } = req.body;
+
+    if (!venueId || !matchId || !code) {
+      res.status(400).json({ valid: false, error: "Missing fields" });
+      return;
+    }
+
+    const matchCode = await MatchCode.findOne({
+      where: { venueId, matchId, code, isActive: true },
+    });
+
+    res.json({ valid: !!matchCode });
+  } catch (error) {
+    console.error("Validate code error:", error);
+    res.status(500).json({ valid: false, error: "Validation failed" });
+  }
+});
+
+// Get players for a match at this venue
+router.get("/venue/players/:matchId", authenticateVenue, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const venueId = req.venueId!;
+    const matchId = req.params.matchId as string;
+
+    const participants = await MatchParticipant.findAll({
+      where: { matchId, venueId },
+      include: [{ model: User, as: "user", attributes: ["displayName", "phone"] }],
+      order: [["totalPoints", "DESC"]],
+    });
+
+    res.json({ count: participants.length, players: participants });
+  } catch (error) {
+    console.error("Get venue players error:", error);
+    res.status(500).json({ error: "Failed to get players" });
   }
 });
 

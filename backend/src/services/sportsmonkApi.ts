@@ -7,6 +7,73 @@ const API_BASE = "https://cricket.sportmonks.com/api/v2.0";
 // Read at call time, not module load time, so dotenv has loaded
 const getApiToken = () => process.env.SPORTSMONK_API_KEY || "";
 
+// ── Team cache ─────────────────────────────────────────────────────
+interface CachedTeam {
+  name: string;
+  code: string;
+  image_path: string | null;
+}
+
+const teamCache: Map<number, CachedTeam> = new Map();
+
+export async function fetchTeamData(teamId: number): Promise<CachedTeam> {
+  if (teamCache.has(teamId)) return teamCache.get(teamId)!;
+
+  try {
+    const url = `${API_BASE}/teams/${teamId}?api_token=${getApiToken()}`;
+    const res = await fetch(url);
+    const data: any = await res.json();
+    const team: CachedTeam = {
+      name: data.data?.name || `Team ${teamId}`,
+      code: data.data?.code || `T${teamId}`,
+      image_path: data.data?.image_path || null,
+    };
+    teamCache.set(teamId, team);
+    return team;
+  } catch (error) {
+    console.error(`[Sportsmonk] Failed to fetch team ${teamId}:`, error);
+    return { name: `Team ${teamId}`, code: `T${teamId}`, image_path: null };
+  }
+}
+
+// Enrich fixtures with team data when includes fail
+export async function enrichFixturesWithTeams(fixtures: any[]): Promise<void> {
+  const missingTeamIds = new Set<number>();
+
+  for (const f of fixtures) {
+    if (!f.localteam?.data?.name && f.localteam_id) {
+      missingTeamIds.add(f.localteam_id);
+    }
+    if (!f.visitorteam?.data?.name && f.visitorteam_id) {
+      missingTeamIds.add(f.visitorteam_id);
+    }
+  }
+
+  if (missingTeamIds.size === 0) return;
+
+  console.log(`[Sportsmonk] Enriching ${missingTeamIds.size} missing teams: [${[...missingTeamIds].join(', ')}]`);
+
+  const teamEntries = await Promise.all(
+    [...missingTeamIds].map(async (id) => [id, await fetchTeamData(id)] as const)
+  );
+  const teamMap = new Map(teamEntries);
+
+  for (const f of fixtures) {
+    if (!f.localteam?.data?.name && f.localteam_id) {
+      const team = teamMap.get(f.localteam_id);
+      if (team) {
+        f.localteam = { data: { name: team.name, code: team.code, image_path: team.image_path } };
+      }
+    }
+    if (!f.visitorteam?.data?.name && f.visitorteam_id) {
+      const team = teamMap.get(f.visitorteam_id);
+      if (team) {
+        f.visitorteam = { data: { name: team.name, code: team.code, image_path: team.image_path } };
+      }
+    }
+  }
+}
+
 interface BallData {
   ball: number;
   scoreboard: string; // S1 = innings 1, S2 = innings 2
@@ -73,24 +140,47 @@ async function fetchFixtureWithBalls(fixtureId: number): Promise<any> {
 // Fetch live scores
 export async function fetchSportsmonkLiveScores(): Promise<any[]> {
   try {
-    const url = `${API_BASE}/livescores?api_token=${getApiToken()}&include=balls,runs`;
+    const url = `${API_BASE}/livescores?api_token=${getApiToken()}&include=balls,runs,localteam,visitorteam`;
     const res = await fetch(url);
     const data: any = await res.json();
-    return data.data || [];
+    const fixtures = data.data || [];
+    await enrichFixturesWithTeams(fixtures);
+    return fixtures;
   } catch (error) {
     console.error("Sportsmonk livescores error:", error);
     return [];
   }
 }
 
+// Helper: fetch all pages from a paginated SportsMonk endpoint
+async function fetchAllPages(baseUrl: string): Promise<any[]> {
+  const allFixtures: any[] = [];
+  let page = 1;
+
+  while (true) {
+    const separator = baseUrl.includes("?") ? "&" : "?";
+    const url = `${baseUrl}${separator}page=${page}`;
+    const res = await fetch(url);
+    const data: any = await res.json();
+    const fixtures = data.data || [];
+    allFixtures.push(...fixtures);
+
+    const totalPages = data.meta?.pagination?.total_pages || 1;
+    if (page >= totalPages) break;
+    page++;
+  }
+
+  return allFixtures;
+}
+
 // Fetch today's fixtures
 export async function fetchTodayFixtures(): Promise<any[]> {
   try {
     const today = new Date().toISOString().split("T")[0];
-    const url = `${API_BASE}/fixtures?filter[starts_between]=${today},${today}&api_token=${getApiToken()}&include=runs,localteam,visitorteam`;
-    const res = await fetch(url);
-    const data: any = await res.json();
-    return data.data || [];
+    const baseUrl = `${API_BASE}/fixtures?filter[starts_between]=${today},${today}&api_token=${getApiToken()}&include=runs,localteam,visitorteam`;
+    const fixtures = await fetchAllPages(baseUrl);
+    await enrichFixturesWithTeams(fixtures);
+    return fixtures;
   } catch (error) {
     console.error("Sportsmonk fixtures error:", error);
     return [];
@@ -102,12 +192,12 @@ export async function fetchUpcomingFixtures(): Promise<any[]> {
   try {
     const today = new Date().toISOString().split("T")[0];
     const futureDate = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
-    const url = `${API_BASE}/fixtures?filter[starts_between]=${today},${futureDate}&api_token=${getApiToken()}&include=localteam,visitorteam,runs`;
+    const baseUrl = `${API_BASE}/fixtures?filter[starts_between]=${today},${futureDate}&api_token=${getApiToken()}&include=localteam,visitorteam,runs`;
     console.log(`[Sportsmonk] Fetching upcoming: ${today} to ${futureDate}`);
-    const res = await fetch(url);
-    const data: any = await res.json();
-    console.log(`[Sportsmonk] Upcoming fixtures found: ${(data.data || []).length}`);
-    return data.data || [];
+    const fixtures = await fetchAllPages(baseUrl);
+    console.log(`[Sportsmonk] Upcoming fixtures found: ${fixtures.length} (all pages)`);
+    await enrichFixturesWithTeams(fixtures);
+    return fixtures;
   } catch (error) {
     console.error("Sportsmonk upcoming fixtures error:", error);
     return [];

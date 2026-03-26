@@ -6,6 +6,7 @@ import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
 import MaterialIcon from "@/components/MaterialIcon";
 import { api } from "@/lib/api";
+import { cafeUrl } from "@/lib/navigation";
 
 interface Match {
   id: string;
@@ -29,10 +30,13 @@ export default function HomeLiveMatches() {
   const [matches, setMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Match code modal state
+  const [codeModal, setCodeModal] = useState<{ match: Match; code: string; error: string; validating: boolean } | null>(null);
+
   useEffect(() => {
     const token = localStorage.getItem("jaffa_token");
     if (!token) {
-      router.push("/login");
+      router.push(cafeUrl("/login"));
       return;
     }
     loadMatches();
@@ -61,21 +65,54 @@ export default function HomeLiveMatches() {
     return () => clearInterval(interval);
   }, []);
 
-  const handleJoin = async (match: Match) => {
-    // If it's a Sportsmonk match (not yet in DB), auto-import first
-    if (match.id.startsWith("sportsmonk_")) {
-      const fixtureId = match.id.replace("sportsmonk_", "");
-      setImporting(match.id);
-      try {
-        const result = await api.importMatch(fixtureId);
-        router.push(`/match/${result.match.id}`);
-      } catch {
-        alert("Failed to load match. Please try again.");
-      } finally {
+  const handleJoin = (match: Match) => {
+    // Show match code modal
+    setCodeModal({ match, code: "", error: "", validating: false });
+  };
+
+  const handleCodeSubmit = async () => {
+    if (!codeModal || codeModal.code.length !== 4) return;
+    const { match, code } = codeModal;
+    setCodeModal({ ...codeModal, validating: true, error: "" });
+
+    try {
+      const venueId = localStorage.getItem("jaffa_venue_id") || "";
+
+      if (!venueId) {
+        setCodeModal({ ...codeModal, validating: false, error: "Please scan your cafe's QR code first." });
+        return;
+      }
+
+      // Validate the code first
+      const validation = await api.validateMatchCode(venueId, match.id, code);
+      if (!validation.valid) {
+        setCodeModal({ ...codeModal, validating: false, error: "Invalid code. Please try again." });
+        return;
+      }
+
+      // If it's a Sportsmonk match, auto-import first
+      let matchId = match.id;
+      if (match.id.startsWith("sportsmonk_")) {
+        const fixtureId = match.id.replace("sportsmonk_", "");
+        setImporting(match.id);
+        try {
+          const result = await api.importMatch(fixtureId);
+          matchId = result.match.id;
+        } catch {
+          setCodeModal({ ...codeModal, validating: false, error: "Failed to load match." });
+          setImporting(null);
+          return;
+        }
         setImporting(null);
       }
-    } else {
-      router.push(`/match/${match.id}`);
+
+      // Store the code for later use in the match join (clear any stale code first)
+      localStorage.removeItem("jaffa_match_code");
+      localStorage.setItem("jaffa_match_code", code);
+      setCodeModal(null);
+      router.push(cafeUrl(`/match/${matchId}`));
+    } catch (err: any) {
+      setCodeModal({ ...codeModal, validating: false, error: err.message || "Something went wrong." });
     }
   };
 
@@ -266,6 +303,53 @@ export default function HomeLiveMatches() {
           );
         })}
       </main>
+
+      {/* Match Code Modal */}
+      {codeModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+          <div className="bg-surface-container-low rounded-2xl p-6 w-full max-w-sm border border-white/10 shadow-2xl">
+            <h3 className="font-headline text-xl font-bold text-center mb-1">Enter Match Code</h3>
+            <p className="text-outline text-xs text-center mb-6">
+              Get the 4-digit code from your cafe to join
+            </p>
+
+            <div className="flex items-center gap-2 mb-4">
+              <input
+                type="text"
+                inputMode="numeric"
+                value={codeModal.code}
+                onChange={(e) =>
+                  setCodeModal({ ...codeModal, code: e.target.value.replace(/\D/g, "").slice(0, 4), error: "" })
+                }
+                placeholder="0000"
+                maxLength={4}
+                autoFocus
+                className="flex-1 bg-surface-container-high text-on-surface text-center text-3xl font-black tracking-[0.4em] px-4 py-4 rounded-xl outline-none focus:ring-2 focus:ring-primary-container"
+              />
+            </div>
+
+            {codeModal.error && (
+              <p className="text-red-400 text-xs text-center mb-3">{codeModal.error}</p>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setCodeModal(null)}
+                className="flex-1 bg-surface-container-high text-on-surface-variant font-label font-bold py-3 rounded-xl"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCodeSubmit}
+                disabled={codeModal.code.length !== 4 || codeModal.validating}
+                className="flex-1 bg-primary-container text-on-primary-container font-headline font-bold py-3 rounded-xl disabled:opacity-50 shadow-[0_4px_20px_rgba(0,255,171,0.3)]"
+              >
+                {codeModal.validating ? "Checking..." : "Join"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <BottomNav />
     </div>

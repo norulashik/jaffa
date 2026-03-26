@@ -58,7 +58,11 @@ export default function MatchDashboard() {
   const [now, setNow] = useState(Date.now());
   const { state: gameState, dispatch } = useGame();
 
-  const venueId = typeof window !== "undefined" ? localStorage.getItem("jaffa_venue_id") || "" : "";
+  const [venueId, setVenueId] = useState("");
+
+  useEffect(() => {
+    setVenueId(localStorage.getItem("jaffa_venue_id") || "");
+  }, []);
 
   // Tick every second for countdown timers
   useEffect(() => {
@@ -68,7 +72,7 @@ export default function MatchDashboard() {
 
   // Phase 1: Join match and load pre-match predictions
   useEffect(() => {
-    if (!matchId) return;
+    if (!matchId || !venueId) return;
 
     const initMatch = async () => {
       try {
@@ -76,11 +80,15 @@ export default function MatchDashboard() {
         const match = await api.getMatch(matchId);
         setMatchData(match);
 
-        // Join the match
+        // Join the match (pass match code if available)
+        // Note: "already joined" returns 200 (not an error), so catch = real failure
         try {
-          await api.joinMatch(matchId, venueId);
-        } catch {
-          // Already joined — that's fine
+          const matchCode = localStorage.getItem("jaffa_match_code") || undefined;
+          await api.joinMatch(matchId, venueId, matchCode);
+          localStorage.removeItem("jaffa_match_code");
+        } catch (err: any) {
+          console.error("Join match failed:", err.message);
+          localStorage.removeItem("jaffa_match_code");
         }
 
         // Check for unanswered pre-match questions (only if match hasn't started yet)
@@ -111,7 +119,7 @@ export default function MatchDashboard() {
     };
 
     initMatch();
-  }, [matchId]);
+  }, [matchId, venueId]);
 
   // Phase 3: Connect socket when entering live phase
   useEffect(() => {

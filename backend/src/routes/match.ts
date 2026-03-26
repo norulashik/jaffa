@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
-import { Match, MatchParticipant, Prediction } from "../models";
+import { Match, MatchParticipant, Prediction, MatchCode } from "../models";
 import { authenticateUser, AuthRequest } from "../middleware/auth";
-import { fetchUpcomingFixtures, fetchSportsmonkLiveScores } from "../services/sportsmonkApi";
+import { fetchUpcomingFixtures, fetchSportsmonkLiveScores, fetchTeamData } from "../services/sportsmonkApi";
 import { generatePreMatchPredictions } from "../services/predictionEngine";
 
 const router = Router();
@@ -66,11 +66,15 @@ router.get("/", async (_req: Request, res: Response): Promise<void> => {
       })
       .filter((m) => m.status !== "completed");
 
-    // 4. Merge: DB matches first (they have game state), then Sportsmonk-only
+    // 4. Merge and sort by startTime ascending (nearest first)
     const allMatches = [
       ...dbMatches.map((m) => ({ ...m.toJSON(), source: "local" })),
       ...sportsmonkMatches,
-    ];
+    ].sort((a, b) => {
+      const timeA = a.startTime ? new Date(a.startTime).getTime() : 0;
+      const timeB = b.startTime ? new Date(b.startTime).getTime() : 0;
+      return timeA - timeB;
+    });
 
     res.json(allMatches);
   } catch (error) {
@@ -104,30 +108,26 @@ router.post("/import/:fixtureId", async (req: Request, res: Response): Promise<v
       return;
     }
 
-    // Get team names
-    const [team1Res, team2Res] = await Promise.all([
-      fetch(`${API_BASE}/teams/${fixture.localteam_id}?api_token=${API_TOKEN}`),
-      fetch(`${API_BASE}/teams/${fixture.visitorteam_id}?api_token=${API_TOKEN}`),
+    // Get team names (uses cached team data)
+    const [team1, team2] = await Promise.all([
+      fetchTeamData(fixture.localteam_id),
+      fetchTeamData(fixture.visitorteam_id),
     ]);
-    const team1Data: any = await team1Res.json();
-    const team2Data: any = await team2Res.json();
-    const team1 = team1Data.data;
-    const team2 = team2Data.data;
 
     const match = await Match.create({
       externalId: fixtureId,
-      team1: team1?.name || `Team ${fixture.localteam_id}`,
-      team2: team2?.name || `Team ${fixture.visitorteam_id}`,
-      team1Short: team1?.code || "T1",
-      team2Short: team2?.code || "T2",
+      team1: team1.name,
+      team2: team2.name,
+      team1Short: team1.code || "T1",
+      team2Short: team2.code || "T2",
       team1Players: [],
       team2Players: [],
       startTime: new Date(fixture.starting_at),
       status: fixture.status === "Finished" ? "completed" : fixture.status === "NS" ? "upcoming" : "live",
       scoreData: {
         venue: fixture.venue_id,
-        team1Img: team1?.image_path || "",
-        team2Img: team2?.image_path || "",
+        team1Img: team1.image_path || "",
+        team2Img: team2.image_path || "",
       },
     });
 
@@ -169,7 +169,7 @@ router.get("/:matchId", async (req: Request, res: Response): Promise<void> => {
 router.post("/:matchId/join", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const matchId = req.params.matchId as string;
-    const { venueId } = req.body;
+    const { venueId, matchCode } = req.body;
     const userId = req.userId!;
 
     const match = await Match.findByPk(matchId);
@@ -178,12 +178,28 @@ router.post("/:matchId/join", authenticateUser, async (req: AuthRequest, res: Re
       return;
     }
 
+    // Check if user already joined (no code needed for re-entry)
     const existing = await MatchParticipant.findOne({
       where: { userId, matchId, venueId },
     });
 
     if (existing) {
       res.json({ participant: existing, message: "Already joined" });
+      return;
+    }
+
+    // Validate match code for new joins
+    if (!matchCode) {
+      res.status(403).json({ error: "Match code is required to join" });
+      return;
+    }
+
+    const validCode = await MatchCode.findOne({
+      where: { venueId, matchId, code: matchCode, isActive: true },
+    });
+
+    if (!validCode) {
+      res.status(403).json({ error: "Invalid match code" });
       return;
     }
 

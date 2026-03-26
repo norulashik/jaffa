@@ -60,10 +60,10 @@ export const api = {
   getMatch: (matchId: string) => request<any>(`/matches/${matchId}`),
   importMatch: (fixtureId: string) => request<{ match: any }>(`/matches/import/${fixtureId}`, { method: "POST" }),
 
-  joinMatch: (matchId: string, venueId: string, latitude?: number, longitude?: number) =>
+  joinMatch: (matchId: string, venueId: string, matchCode?: string, latitude?: number, longitude?: number) =>
     request<{ participant: any }>(`/matches/${matchId}/join`, {
       method: "POST",
-      body: JSON.stringify({ venueId, latitude, longitude }),
+      body: JSON.stringify({ venueId, matchCode, latitude, longitude }),
     }),
 
   getMatchState: (matchId: string, venueId: string) =>
@@ -97,4 +97,29 @@ export const api = {
   // Rewards
   getMyRewards: (matchId?: string) =>
     request<any[]>(`/rewards/my${matchId ? `?matchId=${matchId}` : ""}`),
+
+  // Venue (public)
+  getVenueBySlug: (slug: string) =>
+    request<{ id: string; name: string; slug: string; logoUrl?: string; rewardConfig: any }>(
+      `/venues/by-slug/${slug}`
+    ),
+
+  // Admin — Match Codes
+  generateMatchCode: (matchId: string) =>
+    request<{ code: string; matchCode: any }>("/admin/match-code", {
+      method: "POST",
+      body: JSON.stringify({ matchId }),
+    }),
+
+  getMatchCode: (matchId: string) =>
+    request<{ matchCode: any }>(`/admin/match-code/${matchId}`),
+
+  validateMatchCode: (venueId: string, matchId: string, code: string) =>
+    request<{ valid: boolean }>("/admin/validate-code", {
+      method: "POST",
+      body: JSON.stringify({ venueId, matchId, code }),
+    }),
+
+  getVenuePlayers: (matchId: string) =>
+    request<{ players: any[]; count: number }>(`/admin/venue/players/${matchId}`),
 };

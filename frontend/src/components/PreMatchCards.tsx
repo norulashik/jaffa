@@ -41,7 +41,8 @@ export default function PreMatchCards({ match, venueId, onComplete }: PreMatchCa
   // Join match first, then load predictions
   useEffect(() => {
     if (match?.id && venueId && state.user && !joinedMatch) {
-      api.joinMatch(match.id, venueId)
+      const matchCode = localStorage.getItem("jaffa_match_code") || undefined;
+      api.joinMatch(match.id, venueId, matchCode)
         .then(() => {
           setJoinedMatch(true);
         })
