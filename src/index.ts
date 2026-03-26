@@ -14,7 +14,7 @@ import leaderboardRoutes from "./routes/leaderboard";
 import rewardRoutes from "./routes/reward";
 import adminRoutes from "./routes/admin";
 import { setupSocketHandlers } from "./socket/handlers";
-import { pollSportsmonkUpdates } from "./services/sportsmonkApi";
+import { pollSportsmonkUpdates, fetchUpcomingFixtures, fetchSportsmonkLiveScores } from "./services/sportsmonkApi";
 
 dotenv.config();
 
@@ -220,6 +220,21 @@ async function start() {
         }
       }, POLL_INTERVAL);
       console.log(`Sportsmonk live polling enabled (every ${POLL_INTERVAL / 1000}s)`);
+
+      // Pre-warm cache with retries (DNS can be flaky)
+      const warmCache = async (attempt = 1) => {
+        try {
+          const f = await fetchUpcomingFixtures();
+          console.log(`[Sportsmonk] Cache warmed: ${f.length} upcoming fixtures`);
+          await fetchSportsmonkLiveScores();
+        } catch {
+          if (attempt < 5) {
+            console.log(`[Sportsmonk] Cache warm attempt ${attempt} failed, retrying in 10s...`);
+            setTimeout(() => warmCache(attempt + 1), 10000);
+          }
+        }
+      };
+      warmCache();
     });
   } catch (error) {
     console.error("Failed to start server:", error);

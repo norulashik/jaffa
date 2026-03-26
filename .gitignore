@@ -6,3 +6,4 @@ dist/
 .env.local
 /tmp/
 *.log
+.sportsmonk-cache.json

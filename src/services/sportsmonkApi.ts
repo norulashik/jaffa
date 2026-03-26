@@ -4,7 +4,7 @@ import { resolvePrediction, generateRoundRewards } from "./pointsEngine";
 import { Server as SocketIOServer } from "socket.io";
 
 const API_BASE = "https://cricket.sportmonks.com/api/v2.0";
-const API_TOKEN = process.env.SPORTSMONK_API_KEY || "";
+const getApiToken = () => process.env.SPORTSMONK_API_KEY || "";
 
 interface BallData {
   ball: number;
@@ -46,7 +46,7 @@ interface OverStats {
 // Fetch fixture with runs only (fast — for score updates)
 async function fetchFixtureWithRuns(fixtureId: number): Promise<any> {
   try {
-    const url = `${API_BASE}/fixtures/${fixtureId}?api_token=${API_TOKEN}&include=runs`;
+    const url = `${API_BASE}/fixtures/${fixtureId}?api_token=${getApiToken()}&include=runs`;
     const res = await fetch(url);
     const data: any = await res.json();
     return data.data || null;
@@ -59,7 +59,7 @@ async function fetchFixtureWithRuns(fixtureId: number): Promise<any> {
 // Fetch fixture with ball-by-ball data (slow — only for prediction resolution)
 async function fetchFixtureWithBalls(fixtureId: number): Promise<any> {
   try {
-    const url = `${API_BASE}/fixtures/${fixtureId}?api_token=${API_TOKEN}&include=balls,runs`;
+    const url = `${API_BASE}/fixtures/${fixtureId}?api_token=${getApiToken()}&include=balls,runs`;
     const res = await fetch(url);
     const data: any = await res.json();
     return data.data || null;
@@ -69,30 +69,95 @@ async function fetchFixtureWithBalls(fixtureId: number): Promise<any> {
   }
 }
 
+// Cache with file persistence — survives server restarts and DNS failures
+import * as fs from "fs";
+import * as path from "path";
+
+const cache: Record<string, { data: any[]; timestamp: number }> = {};
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes for fresh fetch
+const CACHE_FILE = path.join(process.cwd(), ".sportsmonk-cache.json");
+
+// Load persisted cache on startup
+try {
+  if (fs.existsSync(CACHE_FILE)) {
+    const saved = JSON.parse(fs.readFileSync(CACHE_FILE, "utf-8"));
+    Object.assign(cache, saved);
+    console.log("[Sportsmonk] Loaded persisted cache from disk");
+  }
+} catch { /* ignore */ }
+
+function getCached(key: string): any[] | null {
+  const entry = cache[key];
+  if (entry && Date.now() - entry.timestamp < CACHE_TTL_MS) {
+    return entry.data;
+  }
+  return null;
+}
+
+function getStaleCache(key: string): any[] | null {
+  const entry = cache[key];
+  return entry?.data?.length ? entry.data : null;
+}
+
+function setCache(key: string, data: any[]): void {
+  cache[key] = { data, timestamp: Date.now() };
+  // Persist to disk so cache survives restarts
+  try { fs.writeFileSync(CACHE_FILE, JSON.stringify(cache)); } catch { /* ignore */ }
+}
+
 // Fetch live scores
 export async function fetchSportsmonkLiveScores(): Promise<any[]> {
+  const cached = getCached("live");
+  if (cached) return cached;
   try {
-    const url = `${API_BASE}/livescores?api_token=${API_TOKEN}&include=balls,runs`;
+    const url = `${API_BASE}/livescores?api_token=${getApiToken()}&include=balls,runs`;
     const res = await fetch(url);
     const data: any = await res.json();
-    return data.data || [];
+    const result = data.data || [];
+    setCache("live", result);
+    return result;
   } catch (error) {
     console.error("Sportsmonk livescores error:", error);
-    return [];
+    return getStaleCache("live") || [];
   }
 }
 
 // Fetch today's fixtures
 export async function fetchTodayFixtures(): Promise<any[]> {
+  const cached = getCached("today");
+  if (cached) return cached;
   try {
     const today = new Date().toISOString().split("T")[0];
-    const url = `${API_BASE}/fixtures?filter[starts_between]=${today},${today}&api_token=${API_TOKEN}&include=runs,localteam,visitorteam`;
+    const url = `${API_BASE}/fixtures?filter[starts_between]=${today},${today}&api_token=${getApiToken()}&include=runs,localteam,visitorteam`;
     const res = await fetch(url);
     const data: any = await res.json();
-    return data.data || [];
+    const result = data.data || [];
+    setCache("today", result);
+    return result;
   } catch (error) {
     console.error("Sportsmonk fixtures error:", error);
-    return [];
+    return getStaleCache("today") || [];
+  }
+}
+
+// Fetch upcoming fixtures (next 30 days)
+export async function fetchUpcomingFixtures(): Promise<any[]> {
+  const cached = getCached("upcoming");
+  if (cached) return cached;
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    const futureDate = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
+    const url = `${API_BASE}/fixtures?filter[starts_between]=${today},${futureDate}&api_token=${getApiToken()}&include=localteam,visitorteam,runs`;
+    console.log(`[Sportsmonk] Fetching upcoming: ${today} to ${futureDate}`);
+    const res = await fetch(url);
+    const data: any = await res.json();
+    const result = data.data || [];
+    console.log(`[Sportsmonk] Upcoming fixtures found: ${result.length}`);
+    setCache("upcoming", result);
+    return result;
+  } catch (error) {
+    console.error("Sportsmonk upcoming fixtures error:", error);
+    return getStaleCache("upcoming") || [];
   }
 }
 
@@ -179,6 +244,10 @@ function getCurrentOver(balls: BallData[], innings: string): number {
 
 // Track last processed over per match to avoid duplicate processing
 const lastProcessedOver: Map<string, { innings: number; over: number }> = new Map();
+
+// Track retry count for completed matches to avoid infinite retry loops
+const completionRetries: Map<string, number> = new Map();
+const MAX_COMPLETION_RETRIES = 10;
 
 // Prevent concurrent poll execution
 let isPolling = false;
@@ -438,12 +507,16 @@ async function _pollSportsmonkUpdates(io: SocketIOServer): Promise<void> {
         lastProcessedOver.delete(match.id);
         const { cleanupMatchData } = await import("./predictionEngine");
         cleanupMatchData(match.id);
+        completionRetries.delete(match.id);
 
         console.log(`[Sportsmonk] Match ${match.id} ended — all predictions resolved, memory cleaned`);
       } else {
         // Match already completed — retry resolving any still-open predictions (e.g., MOTM set later by Sportsmonk)
+        const retries = completionRetries.get(match.id) || 0;
         const stillOpen = await Prediction.count({ where: { matchId: match.id, status: "open" } });
-        if (stillOpen > 0) {
+        if (stillOpen > 0 && retries < MAX_COMPLETION_RETRIES) {
+          completionRetries.set(match.id, retries + 1);
+          console.log(`[Sportsmonk] Retry ${retries + 1}/${MAX_COMPLETION_RETRIES} for ${stillOpen} open predictions`);
           try {
             const fullFixture = await fetchFixtureWithBalls(fixtureId);
             const allBalls: BallData[] = fullFixture?.balls?.data || [];
@@ -531,20 +604,21 @@ async function _pollSportsmonkUpdates(io: SocketIOServer): Promise<void> {
     const inningsChanged = currentInnings > lastProcessed.innings;
     if (overAdvanced || inningsChanged || matchJustEnded) {
       try {
-        const completedOver = currentInnings > lastProcessed.innings
-          ? lastProcessed.over // last over of previous innings
-          : currentOver; // currentOver = Math.floor(rawOvers) = number of completed overs
+        // Handle over skips: if we jump from over 1 to over 3, process overs 2 AND 3
+        const startOver = inningsChanged ? lastProcessed.over : lastProcessed.over + 1;
+        const endOver = inningsChanged ? lastProcessed.over : currentOver;
 
-        if (completedOver > 0) {
-          console.log(`[Sportsmonk] Over ${completedOver} completed — fetching ball-by-ball data...`);
+        // Fetch ball-by-ball data once for all missed overs
+        const fixtureWithBalls = await fetchFixtureWithBalls(fixtureId);
+        const balls: BallData[] = fixtureWithBalls?.balls?.data || [];
 
-          // Slow fetch: get ball-by-ball data only when an over completes
-          const fixtureWithBalls = await fetchFixtureWithBalls(fixtureId);
-          const balls: BallData[] = fixtureWithBalls?.balls?.data || [];
+        for (let completedOver = startOver; completedOver <= endOver; completedOver++) {
+          if (completedOver <= 0) continue;
 
-          const prevInningsStr = currentInnings > lastProcessed.innings ? "S1" : currentInningsStr;
-          const overStats = computeOverStats(balls, completedOver, prevInningsStr);
+          const resolveInningsStr = inningsChanged && completedOver === lastProcessed.over ? "S1" : currentInningsStr;
+          console.log(`[Sportsmonk] Over ${completedOver} completed — resolving...`);
 
+          const overStats = computeOverStats(balls, completedOver, resolveInningsStr);
           console.log(`[Sportsmonk] Over ${completedOver}: ${overStats.runs} runs, ${overStats.wickets} wkts, ${overStats.sixes} sixes`);
 
           // Resolve predictions for the completed over (both open and locked)
@@ -558,71 +632,73 @@ async function _pollSportsmonkUpdates(io: SocketIOServer): Promise<void> {
               await resolvePrediction(pred, correctOption, io);
             }
           }
+        }
 
-          // Update match state
-          const newPhase = getPhase(currentInnings, currentOver);
-          await match.update({
-            currentOver,
-            currentInnings,
-            currentPhase: newPhase as any,
+        // Update match state (once, after all overs processed)
+        const newPhase = getPhase(currentInnings, currentOver);
+        await match.update({
+          currentOver,
+          currentInnings,
+          currentPhase: newPhase as any,
+        });
+
+        // Check round change
+        const prevInningsStr = currentInnings > lastProcessed.innings ? "S1" : currentInningsStr;
+        const prevRound = getCurrentRound(
+          prevInningsStr === "S1" ? 1 : 2,
+          lastProcessed.over > 0 ? lastProcessed.over : 1
+        );
+        const newRound = getCurrentRound(currentInnings, currentOver);
+
+        if (newRound !== prevRound && prevRound > 0) {
+          const venues = await MatchParticipant.findAll({
+            where: { matchId: match.id },
+            attributes: ["venueId"],
+            group: ["venueId"],
           });
-
-          // Check round change
-          const prevRound = getCurrentRound(
-            prevInningsStr === "S1" ? 1 : 2,
-            completedOver
-          );
-          const newRound = getCurrentRound(currentInnings, currentOver);
-
-          if (newRound !== prevRound && prevRound > 0) {
-            const venues = await MatchParticipant.findAll({
-              where: { matchId: match.id },
-              attributes: ["venueId"],
-              group: ["venueId"],
-            });
-            for (const v of venues) {
-              await MatchParticipant.update(
-                { boostsUsedRound: 0, currentRound: newRound },
-                { where: { matchId: match.id, venueId: v.venueId } }
-              );
-              await generateRoundRewards(match.id, v.venueId, prevRound, io);
-            }
-
-            const hotTake = generateHotTake(match.id, newRound, match.team1Short, match.team2Short);
-            if (hotTake) {
-              await Prediction.create(hotTake as any);
-              io.to(`match:${match.id}`).emit("newPrediction", { matchId: match.id, type: "hot_take", round: newRound });
-            }
+          for (const v of venues) {
+            await MatchParticipant.update(
+              { boostsUsedRound: 0, currentRound: newRound },
+              { where: { matchId: match.id, venueId: v.venueId } }
+            );
+            await generateRoundRewards(match.id, v.venueId, prevRound, io);
           }
 
-          // Generate predictions for the next over — only if match is still in progress
-          const nextOver = currentOver + 1;
-          const matchStillLive = fixture.status !== "Finished"
-            && !(currentInnings > lastProcessed.innings) // don't generate if innings just changed (break handles it)
-            && nextOver <= 20;
+          const hotTake = generateHotTake(match.id, newRound, match.team1Short, match.team2Short);
+          if (hotTake) {
+            await Prediction.create(hotTake as any);
+            io.to(`match:${match.id}`).emit("newPrediction", { matchId: match.id, type: "hot_take", round: newRound });
+          }
+        }
 
-          if (matchStillLive) {
-            // Dedup guard: don't generate if predictions for this over already exist
-            const existingPreds = await Prediction.count({
-              where: { matchId: match.id, overNumber: nextOver, category: "per_over" },
-            });
-            if (existingPreds > 0) {
-              console.log(`[Sportsmonk] Over ${nextOver} predictions already exist — skipping`);
-            } else {
-              const nextBatsman = overStats.currentBatsman;
-              const nextRound = getCurrentRound(currentInnings, nextOver);
-              const newPreds = generatePerOverPredictions(match.id, nextOver, nextRound, nextBatsman);
-              for (const p of newPreds) {
-                await Prediction.create(p as any);
-              }
-              io.to(`match:${match.id}`).emit("newPrediction", {
-                matchId: match.id,
-                type: "per_over",
-                overNumber: nextOver,
-                round: nextRound,
-              });
-              console.log(`[Sportsmonk] Over ${nextOver} predictions generated`);
+        // Generate predictions for the next over — only if match is still in progress
+        const nextOver = currentOver + 1;
+        const matchStillLive = fixture.status !== "Finished"
+          && !(currentInnings > lastProcessed.innings)
+          && nextOver <= 20;
+
+        if (matchStillLive) {
+          const existingPreds = await Prediction.count({
+            where: { matchId: match.id, overNumber: nextOver, category: "per_over" },
+          });
+          if (existingPreds > 0) {
+            console.log(`[Sportsmonk] Over ${nextOver} predictions already exist — skipping`);
+          } else {
+            // Use stats from the last completed over for batsman info
+            const lastOverStats = computeOverStats(balls, endOver, currentInningsStr);
+            const nextBatsman = lastOverStats.currentBatsman;
+            const nextRound = getCurrentRound(currentInnings, nextOver);
+            const newPreds = generatePerOverPredictions(match.id, nextOver, nextRound, nextBatsman);
+            for (const p of newPreds) {
+              await Prediction.create(p as any);
             }
+            io.to(`match:${match.id}`).emit("newPrediction", {
+              matchId: match.id,
+              type: "per_over",
+              overNumber: nextOver,
+              round: nextRound,
+            });
+            console.log(`[Sportsmonk] Over ${nextOver} predictions generated`);
           }
         }
       } catch (overErr) {
@@ -757,8 +833,8 @@ async function resolvePreMatchPrediction(
     // Fetch player name from Sportsmonk
     try {
       const API_BASE = "https://cricket.sportmonks.com/api/v2.0";
-      const API_TOKEN = process.env.SPORTSMONK_API_KEY || "";
-      const playerRes = await fetch(`${API_BASE}/players/${motmId}?api_token=${API_TOKEN}`);
+      const localToken = process.env.SPORTSMONK_API_KEY || "";
+      const playerRes = await fetch(`${API_BASE}/players/${motmId}?api_token=${localToken}`);
       const playerData: any = await playerRes.json();
       const playerName = playerData?.data?.fullname || "";
 
@@ -956,7 +1032,7 @@ async function resolveEndOfMatchPrediction(
       const batsmanId = lastBall.batsman_id;
       if (batsmanId) {
         try {
-          const playerRes = await fetch(`${API_BASE}/players/${batsmanId}?api_token=${API_TOKEN}`);
+          const playerRes = await fetch(`${API_BASE}/players/${batsmanId}?api_token=${getApiToken()}`);
           const playerData: any = await playerRes.json();
           const playerName = playerData?.data?.fullname || "";
           if (playerName) {

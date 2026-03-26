@@ -1,0 +1,131 @@
+============================================================
+ JAFFA - Installation Requirements & Setup Commands
+============================================================
+
+This is a Node.js/TypeScript project. Dependencies are managed
+via npm (not pip). This file lists everything needed to run
+the project.
+
+============================================================
+ PREREQUISITES (install manually)
+============================================================
+
+1. Node.js v18+ (v20+ recommended for Next.js 16)
+   Download: https://nodejs.org/
+   npm comes bundled with Node.js.
+
+2. PostgreSQL (for production database)
+   Download: https://www.postgresql.org/download/
+   Note: SQLite is used for local dev (no install needed).
+
+============================================================
+ INSTALLATION COMMANDS
+============================================================
+
+# Step 1: Install root dependencies (from jaffa/ directory)
+npm install
+
+# Step 2: Install backend dependencies
+cd backend
+npm install
+cd ..
+
+# Step 3: Install frontend dependencies
+cd frontend
+npm install
+cd ..
+
+# Step 4: Set up environment variables
+cp .env.example .env
+# Then edit .env with your values (see ENV VARIABLES section below)
+
+# Step 5: Sync database schema
+npm run db:sync
+
+# Step 6: Seed initial data (optional)
+npm run seed
+
+============================================================
+ RUNNING THE PROJECT
+============================================================
+
+# Start backend (from jaffa/ root):
+npm run dev
+
+# Start frontend (from jaffa/frontend/):
+cd frontend
+npm run dev
+
+# Start both at once (from jaffa/backend/):
+cd backend
+npm run dev:all
+
+============================================================
+ ENVIRONMENT VARIABLES (.env)
+============================================================
+
+PORT=3001
+DATABASE_URL=postgres://user:password@localhost:5432/jaffa
+JWT_SECRET=your-super-secret-jwt-key
+OTP_SERVICE=mock
+CRICKET_API_URL=https://api.cricapi.com/v1
+CRICKET_API_KEY=your-cricket-api-key
+CORS_ORIGIN=http://localhost:3000
+
+============================================================
+ ROOT DEPENDENCIES (jaffa/package.json)
+============================================================
+
+-- Production --
+bcryptjs            ^3.0.2       Password hashing
+cors                ^2.8.5       CORS middleware
+dotenv              ^16.5.0      Environment variable loader
+express             ^5.1.0       Web framework
+jsonwebtoken        ^9.0.2       JWT authentication tokens
+pg                  ^8.16.0      PostgreSQL client
+sequelize           ^6.37.7      ORM (Object-Relational Mapping)
+socket.io           ^4.8.3       Real-time WebSocket server
+sqlite3             ^6.0.1       SQLite database driver (dev)
+uuid                ^11.1.0      UUID generation
+
+-- Dev --
+@types/bcryptjs     ^3.0.0       TypeScript types
+@types/cors         ^2.8.19      TypeScript types
+@types/express      ^5.0.0       TypeScript types
+@types/jsonwebtoken ^9.0.10      TypeScript types
+@types/node         ^25.5.0      TypeScript types
+@types/uuid         ^11.0.0      TypeScript types
+nodemon             ^3.1.10      Auto-restart dev server
+ts-node             ^10.9.2      Run TypeScript directly
+typescript          ^5.9.3       TypeScript compiler
+
+============================================================
+ BACKEND DEPENDENCIES (jaffa/backend/package.json)
+============================================================
+
+Same as root, plus:
+
+-- Dev --
+concurrently        ^9.2.1       Run multiple npm commands
+
+============================================================
+ FRONTEND DEPENDENCIES (jaffa/frontend/package.json)
+============================================================
+
+-- Production --
+framer-motion       ^12.38.0     Animation library
+next                ^16.2.0      React meta-framework (SSR/SSG)
+react               ^19.2.4      UI component library
+react-dom           ^19.2.4      React DOM rendering
+react-icons         ^5.6.0       Icon component library
+socket.io-client    ^4.8.3       WebSocket client
+
+-- Dev --
+@tailwindcss/postcss ^4.2.2      Tailwind CSS PostCSS plugin
+@types/node         ^25.5.0      TypeScript types
+@types/react        ^19.2.14     TypeScript types
+@types/react-dom    ^19.2.3      TypeScript types
+autoprefixer        ^10.4.27     CSS vendor prefixes
+postcss             ^8.5.8       CSS post-processor
+tailwindcss         ^4.2.2       Utility-first CSS framework
+typescript          ^5.9.3       TypeScript compiler

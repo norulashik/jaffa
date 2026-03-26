@@ -11,11 +11,17 @@ interface Match {
   id: string;
   team1: string;
   team2: string;
+  team1Short?: string;
+  team2Short?: string;
+  team1Img?: string;
+  team2Img?: string;
   status: string;
   venue?: string;
   score?: string;
   overs?: string;
-  date?: string;
+  startTime?: string;
+  note?: string;
+  source?: string;
 }
 
 export default function HomeLiveMatches() {
@@ -40,6 +46,36 @@ export default function HomeLiveMatches() {
       // Silently fail - show empty state
     } finally {
       setLoading(false);
+    }
+  };
+
+  const liveMatches = matches.filter((m) => m.status === "live");
+  const upcomingMatches = matches.filter((m) => m.status === "upcoming");
+
+  const [now, setNow] = useState(Date.now());
+  const [importing, setImporting] = useState<string | null>(null);
+
+  // Update clock every 30s so buttons switch from "Notify Me" to "Join Match" on time
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleJoin = async (match: Match) => {
+    // If it's a Sportsmonk match (not yet in DB), auto-import first
+    if (match.id.startsWith("sportsmonk_")) {
+      const fixtureId = match.id.replace("sportsmonk_", "");
+      setImporting(match.id);
+      try {
+        const result = await api.importMatch(fixtureId);
+        router.push(`/match/${result.match.id}`);
+      } catch {
+        alert("Failed to load match. Please try again.");
+      } finally {
+        setImporting(null);
+      }
+    } else {
+      router.push(`/match/${match.id}`);
     }
   };
 
@@ -79,75 +115,19 @@ export default function HomeLiveMatches() {
           </div>
         </section>
 
-        {/* LIVE Match Card (Featured) */}
-        {matches.length > 0 ? (
-          matches.map((match) => (
-            <div key={match.id} className="relative group">
-              <div className="absolute -inset-0.5 bg-gradient-to-r from-primary-container to-secondary-container rounded-xl blur opacity-20 group-hover:opacity-40 transition duration-1000"></div>
-              <div className="relative bg-surface-container-low neon-border rounded-xl overflow-hidden p-6">
-                {/* Status Row */}
-                <div className="flex justify-between items-center mb-8">
-                  <div className="flex items-center gap-2 bg-primary-container/10 px-3 py-1 rounded-full border border-primary-container/20">
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-container opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-primary-container"></span>
-                    </span>
-                    <span className="font-label text-[10px] font-bold text-primary-container uppercase tracking-widest">
-                      {match.status === "live" ? "LIVE" : match.status?.toUpperCase()}
-                    </span>
-                  </div>
-                  <span className="font-label text-[10px] text-on-surface-variant uppercase tracking-widest bg-surface-container-highest px-2 py-1 rounded">
-                    {match.venue || "Venue TBD"}
-                  </span>
-                </div>
-                {/* Matchup */}
-                <div className="flex justify-between items-center mb-8 px-4">
-                  <div className="flex flex-col items-center gap-3">
-                    <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center p-2 shadow-inner">
-                      <span className="font-headline font-bold text-sm text-primary-container">{match.team1?.slice(0, 3)}</span>
-                    </div>
-                    <span className="font-headline font-bold text-xl tracking-wider">{match.team1?.slice(0, 3)?.toUpperCase()}</span>
-                  </div>
-                  <div className="flex flex-col items-center">
-                    <span className="font-headline font-black text-4xl text-outline-variant italic opacity-50">VS</span>
-                    {match.score && (
-                      <div className="mt-2 text-center">
-                        <div className="text-primary-container font-headline font-bold text-lg leading-tight glow-text">
-                          {match.score}
-                        </div>
-                        {match.overs && (
-                          <div className="text-[10px] text-outline font-label uppercase">{match.overs} Overs</div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex flex-col items-center gap-3">
-                    <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center p-2 shadow-inner">
-                      <span className="font-headline font-bold text-sm text-secondary-container">{match.team2?.slice(0, 3)}</span>
-                    </div>
-                    <span className="font-headline font-bold text-xl tracking-wider">{match.team2?.slice(0, 3)?.toUpperCase()}</span>
-                  </div>
-                </div>
-                {/* Footer Action */}
-                <div className="flex items-center gap-4">
-                  <button
-                    onClick={() => router.push(`/match/${match.id}`)}
-                    className="flex-1 bg-primary-container text-on-primary-container font-headline font-bold py-3 rounded-xl scale-95 active:scale-90 transition-all shadow-[0_4px_20px_rgba(0,255,171,0.4)] uppercase tracking-tight"
-                  >
-                    Join Now
-                  </button>
-                  <button className="w-12 h-12 bg-surface-container-highest rounded-xl flex items-center justify-center text-on-surface-variant hover:text-primary-container transition-colors">
-                    <MaterialIcon icon="share" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))
-        ) : (
-          /* Demo/Placeholder Match Card when no API data */
-          <div className="relative group">
+        {/* Loading State */}
+        {loading && (
+          <div className="flex justify-center py-12">
+            <div className="w-8 h-8 border-2 border-primary-container border-t-transparent rounded-full animate-spin"></div>
+          </div>
+        )}
+
+        {/* Live Matches */}
+        {!loading && liveMatches.length > 0 && liveMatches.map((match) => (
+          <div key={match.id} className="relative group">
             <div className="absolute -inset-0.5 bg-gradient-to-r from-primary-container to-secondary-container rounded-xl blur opacity-20 group-hover:opacity-40 transition duration-1000"></div>
             <div className="relative bg-surface-container-low neon-border rounded-xl overflow-hidden p-6">
+              {/* Status Row */}
               <div className="flex justify-between items-center mb-8">
                 <div className="flex items-center gap-2 bg-primary-container/10 px-3 py-1 rounded-full border border-primary-container/20">
                   <span className="relative flex h-2 w-2">
@@ -156,34 +136,52 @@ export default function HomeLiveMatches() {
                   </span>
                   <span className="font-label text-[10px] font-bold text-primary-container uppercase tracking-widest">LIVE</span>
                 </div>
-                <span className="font-label text-[10px] text-on-surface-variant uppercase tracking-widest bg-surface-container-highest px-2 py-1 rounded">
-                  The Coffee Bean
-                </span>
+                {match.note && (
+                  <span className="font-label text-[10px] text-on-surface-variant uppercase tracking-widest bg-surface-container-highest px-2 py-1 rounded">
+                    {match.note}
+                  </span>
+                )}
               </div>
+              {/* Matchup */}
               <div className="flex justify-between items-center mb-8 px-4">
                 <div className="flex flex-col items-center gap-3">
-                  <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center p-2 shadow-inner">
-                    <span className="font-headline font-bold text-lg text-primary-container">IND</span>
+                  <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center p-2 shadow-inner overflow-hidden">
+                    {match.team1Img ? (
+                      <img src={match.team1Img} alt={match.team1Short || match.team1} className="w-full h-full object-contain" />
+                    ) : (
+                      <span className="font-headline font-bold text-sm text-primary-container">{match.team1Short || match.team1?.slice(0, 3)}</span>
+                    )}
                   </div>
-                  <span className="font-headline font-bold text-xl tracking-wider">IND</span>
+                  <span className="font-headline font-bold text-xl tracking-wider">{(match.team1Short || match.team1?.slice(0, 3))?.toUpperCase()}</span>
                 </div>
                 <div className="flex flex-col items-center">
                   <span className="font-headline font-black text-4xl text-outline-variant italic opacity-50">VS</span>
-                  <div className="mt-2 text-center">
-                    <div className="text-primary-container font-headline font-bold text-lg leading-tight glow-text">142/3</div>
-                    <div className="text-[10px] text-outline font-label uppercase">16.4 Overs</div>
-                  </div>
+                  {match.score && (
+                    <div className="mt-2 text-center">
+                      <div className="text-primary-container font-headline font-bold text-lg leading-tight glow-text">{match.score}</div>
+                      {match.overs && <div className="text-[10px] text-outline font-label uppercase">{match.overs} Overs</div>}
+                    </div>
+                  )}
                 </div>
                 <div className="flex flex-col items-center gap-3">
-                  <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center p-2 shadow-inner">
-                    <span className="font-headline font-bold text-lg text-secondary-container">AUS</span>
+                  <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center p-2 shadow-inner overflow-hidden">
+                    {match.team2Img ? (
+                      <img src={match.team2Img} alt={match.team2Short || match.team2} className="w-full h-full object-contain" />
+                    ) : (
+                      <span className="font-headline font-bold text-sm text-secondary-container">{match.team2Short || match.team2?.slice(0, 3)}</span>
+                    )}
                   </div>
-                  <span className="font-headline font-bold text-xl tracking-wider">AUS</span>
+                  <span className="font-headline font-bold text-xl tracking-wider">{(match.team2Short || match.team2?.slice(0, 3))?.toUpperCase()}</span>
                 </div>
               </div>
+              {/* Footer Action */}
               <div className="flex items-center gap-4">
-                <button className="flex-1 bg-primary-container text-on-primary-container font-headline font-bold py-3 rounded-xl scale-95 active:scale-90 transition-all shadow-[0_4px_20px_rgba(0,255,171,0.4)] uppercase tracking-tight">
-                  Join Now
+                <button
+                  onClick={() => handleJoin(match)}
+                  disabled={importing === match.id}
+                  className="flex-1 bg-primary-container text-on-primary-container font-headline font-bold py-3 rounded-xl scale-95 active:scale-90 transition-all shadow-[0_4px_20px_rgba(0,255,171,0.4)] uppercase tracking-tight disabled:opacity-50"
+                >
+                  {importing === match.id ? "Loading..." : "Join Now"}
                 </button>
                 <button className="w-12 h-12 bg-surface-container-highest rounded-xl flex items-center justify-center text-on-surface-variant hover:text-primary-container transition-colors">
                   <MaterialIcon icon="share" />
@@ -191,80 +189,82 @@ export default function HomeLiveMatches() {
               </div>
             </div>
           </div>
+        ))}
+
+        {/* No live matches message */}
+        {!loading && liveMatches.length === 0 && (
+          <div className="bg-surface-container-low rounded-xl p-8 text-center border border-white/5">
+            <MaterialIcon icon="sports_cricket" className="text-4xl text-outline-variant mb-3" />
+            <p className="font-headline font-bold text-lg text-on-surface-variant">No Live Matches</p>
+            <p className="font-label text-xs text-outline mt-1">Check back when a match is being played</p>
+          </div>
         )}
 
         {/* Upcoming Matches Title */}
-        <h3 className="font-headline text-lg font-bold text-on-surface-variant mt-8 mb-4 border-l-4 border-secondary-container pl-3">
-          Upcoming Battles
-        </h3>
+        {upcomingMatches.length > 0 && (
+          <h3 className="font-headline text-lg font-bold text-on-surface-variant mt-8 mb-4 border-l-4 border-secondary-container pl-3">
+            Upcoming Battles
+          </h3>
+        )}
 
-        {/* Match Card 2 (Standard) */}
-        <div className="bg-surface-container-low rounded-xl p-5 border border-white/5 hover:border-white/10 transition-all group">
-          <div className="flex justify-between items-start mb-6">
-            <div className="flex flex-col">
-              <span className="font-label text-[10px] text-outline uppercase tracking-widest">
-                T20 Series • Starts in 2h
-              </span>
-              <span className="font-label text-[10px] text-secondary-fixed-dim mt-1">
-                Melbourne Cricket Ground
-              </span>
-            </div>
-            <div className="bg-surface-container-highest px-3 py-1 rounded-full">
-              <span className="font-label text-[10px] font-bold text-on-surface">MAY 24</span>
-            </div>
-          </div>
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center p-1.5 border border-white/10">
-                <span className="font-headline font-bold text-xs text-primary-container">ENG</span>
-              </div>
-              <span className="font-headline font-bold text-lg">ENG</span>
-            </div>
-            <div className="h-[1px] flex-1 mx-4 bg-gradient-to-r from-transparent via-outline-variant to-transparent opacity-30"></div>
-            <div className="flex items-center gap-4">
-              <span className="font-headline font-bold text-lg">RSA</span>
-              <div className="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center p-1.5 border border-white/10">
-                <span className="font-headline font-bold text-xs text-secondary-container">RSA</span>
-              </div>
-            </div>
-          </div>
-          <button className="w-full bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-label text-xs font-bold py-2.5 rounded-lg transition-colors border border-white/5 uppercase tracking-widest">
-            View Odds
-          </button>
-        </div>
+        {/* Upcoming Match Cards */}
+        {upcomingMatches.map((match) => {
+          const startDate = match.startTime ? new Date(match.startTime) : null;
+          const timeStr = startDate ? startDate.toLocaleString("en-IN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
 
-        {/* Match Card 3 (Standard) */}
-        <div className="bg-surface-container-low rounded-xl p-5 border border-white/5 hover:border-white/10 transition-all group">
-          <div className="flex justify-between items-start mb-6">
-            <div className="flex flex-col">
-              <span className="font-label text-[10px] text-outline uppercase tracking-widest">
-                World Cup Qualifiers
-              </span>
-              <span className="font-label text-[10px] text-secondary-fixed-dim mt-1">Eden Gardens</span>
-            </div>
-            <div className="bg-surface-container-highest px-3 py-1 rounded-full">
-              <span className="font-label text-[10px] font-bold text-on-surface">MAY 25</span>
-            </div>
-          </div>
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center p-1.5 border border-white/10">
-                <span className="font-headline font-bold text-xs text-primary-container">NZL</span>
+          return (
+            <div key={match.id} className="bg-surface-container-low rounded-xl p-5 border border-white/5 hover:border-white/10 transition-all group">
+              <div className="flex justify-between items-start mb-6">
+                <div className="flex flex-col">
+                  <span className="font-label text-[10px] text-outline uppercase tracking-widest">
+                    {match.note || "Upcoming"}
+                  </span>
+                </div>
+                {startDate && (
+                  <div className="bg-surface-container-highest px-3 py-1 rounded-full">
+                    <span className="font-label text-[10px] font-bold text-on-surface">{timeStr}</span>
+                  </div>
+                )}
               </div>
-              <span className="font-headline font-bold text-lg">NZL</span>
-            </div>
-            <div className="h-[1px] flex-1 mx-4 bg-gradient-to-r from-transparent via-outline-variant to-transparent opacity-30"></div>
-            <div className="flex items-center gap-4">
-              <span className="font-headline font-bold text-lg">PAK</span>
-              <div className="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center p-1.5 border border-white/10">
-                <span className="font-headline font-bold text-xs text-secondary-container">PAK</span>
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center p-1.5 border border-white/10 overflow-hidden">
+                    {match.team1Img ? (
+                      <img src={match.team1Img} alt={match.team1Short || match.team1} className="w-full h-full object-contain" />
+                    ) : (
+                      <span className="font-headline font-bold text-xs text-primary-container">{match.team1Short || match.team1?.slice(0, 3)}</span>
+                    )}
+                  </div>
+                  <span className="font-headline font-bold text-lg">{(match.team1Short || match.team1?.slice(0, 3))?.toUpperCase()}</span>
+                </div>
+                <div className="h-[1px] flex-1 mx-4 bg-gradient-to-r from-transparent via-outline-variant to-transparent opacity-30"></div>
+                <div className="flex items-center gap-4">
+                  <span className="font-headline font-bold text-lg">{(match.team2Short || match.team2?.slice(0, 3))?.toUpperCase()}</span>
+                  <div className="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center p-1.5 border border-white/10 overflow-hidden">
+                    {match.team2Img ? (
+                      <img src={match.team2Img} alt={match.team2Short || match.team2} className="w-full h-full object-contain" />
+                    ) : (
+                      <span className="font-headline font-bold text-xs text-secondary-container">{match.team2Short || match.team2?.slice(0, 3)}</span>
+                    )}
+                  </div>
+                </div>
               </div>
+              {startDate && (startDate.getTime() - now) <= 30 * 60 * 1000 ? (
+                <button
+                  onClick={() => handleJoin(match)}
+                  disabled={importing === match.id}
+                  className="w-full bg-primary-container text-on-primary-container font-headline font-bold py-3 rounded-xl scale-95 active:scale-90 transition-all shadow-[0_4px_20px_rgba(0,255,171,0.4)] uppercase tracking-tight disabled:opacity-50"
+                >
+                  {importing === match.id ? "Loading..." : "Join Match"}
+                </button>
+              ) : (
+                <button className="w-full bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-label text-xs font-bold py-2.5 rounded-lg transition-colors border border-white/5 uppercase tracking-widest">
+                  Notify Me
+                </button>
+              )}
             </div>
-          </div>
-          <button className="w-full bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-label text-xs font-bold py-2.5 rounded-lg transition-colors border border-white/5 uppercase tracking-widest">
-            View Odds
-          </button>
-        </div>
+          );
+        })}
       </main>
 
       <BottomNav />

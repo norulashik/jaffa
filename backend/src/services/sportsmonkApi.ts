@@ -4,7 +4,8 @@ import { resolvePrediction, generateRoundRewards } from "./pointsEngine";
 import { Server as SocketIOServer } from "socket.io";
 
 const API_BASE = "https://cricket.sportmonks.com/api/v2.0";
-const API_TOKEN = process.env.SPORTSMONK_API_KEY || "";
+// Read at call time, not module load time, so dotenv has loaded
+const getApiToken = () => process.env.SPORTSMONK_API_KEY || "";
 
 interface BallData {
   ball: number;
@@ -46,7 +47,7 @@ interface OverStats {
 // Fetch fixture with runs only (fast — for score updates)
 async function fetchFixtureWithRuns(fixtureId: number): Promise<any> {
   try {
-    const url = `${API_BASE}/fixtures/${fixtureId}?api_token=${API_TOKEN}&include=runs`;
+    const url = `${API_BASE}/fixtures/${fixtureId}?api_token=${getApiToken()}&include=runs`;
     const res = await fetch(url);
     const data: any = await res.json();
     return data.data || null;
@@ -59,7 +60,7 @@ async function fetchFixtureWithRuns(fixtureId: number): Promise<any> {
 // Fetch fixture with ball-by-ball data (slow — only for prediction resolution)
 async function fetchFixtureWithBalls(fixtureId: number): Promise<any> {
   try {
-    const url = `${API_BASE}/fixtures/${fixtureId}?api_token=${API_TOKEN}&include=balls,runs`;
+    const url = `${API_BASE}/fixtures/${fixtureId}?api_token=${getApiToken()}&include=balls,runs`;
     const res = await fetch(url);
     const data: any = await res.json();
     return data.data || null;
@@ -72,7 +73,7 @@ async function fetchFixtureWithBalls(fixtureId: number): Promise<any> {
 // Fetch live scores
 export async function fetchSportsmonkLiveScores(): Promise<any[]> {
   try {
-    const url = `${API_BASE}/livescores?api_token=${API_TOKEN}&include=balls,runs`;
+    const url = `${API_BASE}/livescores?api_token=${getApiToken()}&include=balls,runs`;
     const res = await fetch(url);
     const data: any = await res.json();
     return data.data || [];
@@ -86,12 +87,29 @@ export async function fetchSportsmonkLiveScores(): Promise<any[]> {
 export async function fetchTodayFixtures(): Promise<any[]> {
   try {
     const today = new Date().toISOString().split("T")[0];
-    const url = `${API_BASE}/fixtures?filter[starts_between]=${today},${today}&api_token=${API_TOKEN}&include=runs,localteam,visitorteam`;
+    const url = `${API_BASE}/fixtures?filter[starts_between]=${today},${today}&api_token=${getApiToken()}&include=runs,localteam,visitorteam`;
     const res = await fetch(url);
     const data: any = await res.json();
     return data.data || [];
   } catch (error) {
     console.error("Sportsmonk fixtures error:", error);
+    return [];
+  }
+}
+
+// Fetch upcoming fixtures (next 30 days)
+export async function fetchUpcomingFixtures(): Promise<any[]> {
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    const futureDate = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
+    const url = `${API_BASE}/fixtures?filter[starts_between]=${today},${futureDate}&api_token=${getApiToken()}&include=localteam,visitorteam,runs`;
+    console.log(`[Sportsmonk] Fetching upcoming: ${today} to ${futureDate}`);
+    const res = await fetch(url);
+    const data: any = await res.json();
+    console.log(`[Sportsmonk] Upcoming fixtures found: ${(data.data || []).length}`);
+    return data.data || [];
+  } catch (error) {
+    console.error("Sportsmonk upcoming fixtures error:", error);
     return [];
   }
 }

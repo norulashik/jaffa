@@ -8,7 +8,7 @@ const router = Router();
 router.get("/:matchId", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const matchId = req.params.matchId as string;
-    const venueId = req.query.venueId as string;
+    const venueId = (req.query.venueId as string) || "local-testing";
     const round = req.query.round as string | undefined;
     const status = req.query.status as string | undefined;
     const userId = req.userId!;
@@ -44,7 +44,8 @@ router.get("/:matchId", authenticateUser, async (req: AuthRequest, res: Response
 router.post("/:predictionId/answer", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const predictionId = req.params.predictionId as string;
-    const { selectedOption, boostType, venueId } = req.body;
+    const { selectedOption, boostType } = req.body;
+    const venueId = req.body.venueId || "local-testing";
     const userId = req.userId!;
 
     const prediction = await Prediction.findByPk(predictionId);
@@ -139,7 +140,7 @@ router.post("/:predictionId/answer", authenticateUser, async (req: AuthRequest, 
 router.get("/:matchId/my-predictions", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const matchId = req.params.matchId as string;
-    const venueId = req.query.venueId as string;
+    const venueId = (req.query.venueId as string) || "local-testing";
     const userId = req.userId!;
 
     const userPredictions = await UserPrediction.findAll({

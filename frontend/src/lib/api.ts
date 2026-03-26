@@ -58,6 +58,7 @@ export const api = {
   // Matches
   getMatches: () => request<any[]>("/matches"),
   getMatch: (matchId: string) => request<any>(`/matches/${matchId}`),
+  importMatch: (fixtureId: string) => request<{ match: any }>(`/matches/import/${fixtureId}`, { method: "POST" }),
 
   joinMatch: (matchId: string, venueId: string, latitude?: number, longitude?: number) =>
     request<{ participant: any }>(`/matches/${matchId}/join`, {
