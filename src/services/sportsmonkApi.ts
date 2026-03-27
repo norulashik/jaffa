@@ -1,6 +1,10 @@
 import { Match, Prediction, MatchParticipant } from "../models";
 import { generatePerOverPredictions, generateHotTake, generateRivalryCalls, getCurrentRound } from "./predictionEngine";
-import { resolvePrediction, generateRoundRewards } from "./pointsEngine";
+import {
+  resolvePrediction,
+  generateRoundRewards,
+  recomputeParticipantScores,
+} from "./pointsEngine";
 import { Server as SocketIOServer } from "socket.io";
 
 const API_BASE = "https://cricket.sportmonks.com/api/v2.0";
@@ -109,6 +113,11 @@ interface OverStats {
   lastBallWicket: boolean;
   firstBallBoundary: boolean;
   currentBatsman: string;
+  overKey: number | null;
+  totalBalls: number;
+  legalBalls: number;
+  indexingMode: "zero_based" | "one_based" | "unknown";
+  isReliable: boolean;
 }
 
 // Fetch fixture with runs only (fast — for score updates)
@@ -135,6 +144,95 @@ async function fetchFixtureWithBalls(fixtureId: number): Promise<any> {
     console.error("Sportsmonk fetch (balls) error:", error);
     return null;
   }
+}
+
+function getBallOverKey(ball: number): number | null {
+  if (!Number.isFinite(ball)) return null;
+  return Math.floor(ball);
+}
+
+function detectOverIndexing(
+  balls: BallData[],
+  innings: string
+): "zero_based" | "one_based" | "unknown" {
+  const overKeys = new Set<number>();
+
+  for (const ball of balls) {
+    if (ball.scoreboard !== innings) continue;
+    const overKey = getBallOverKey(ball.ball);
+    if (overKey !== null) {
+      overKeys.add(overKey);
+    }
+  }
+
+  if (overKeys.has(0)) return "zero_based";
+  if (overKeys.has(1)) return "one_based";
+  return "unknown";
+}
+
+function getOverBalls(
+  balls: BallData[],
+  overNumber: number,
+  innings: string
+): {
+  overKey: number | null;
+  overBalls: BallData[];
+  legalBalls: BallData[];
+  indexingMode: "zero_based" | "one_based" | "unknown";
+} {
+  const inningsBalls = balls.filter((b) => b.scoreboard === innings);
+  const indexingMode = detectOverIndexing(inningsBalls, innings);
+  const preferredOverKey =
+    indexingMode === "zero_based" ? overNumber - 1 : overNumber;
+
+  const candidateKeys = Array.from(
+    new Set(
+      [preferredOverKey, overNumber, overNumber - 1].filter(
+        (key): key is number => Number.isInteger(key) && key >= 0
+      )
+    )
+  );
+
+  const candidates = candidateKeys.map((key) => {
+    const overBalls = inningsBalls.filter((ball) => getBallOverKey(ball.ball) === key);
+    const legalBalls = overBalls.filter((ball) => ball.score.ball);
+    return { key, overBalls, legalBalls };
+  });
+
+  const preferred = candidates.find((candidate) => candidate.key === preferredOverKey);
+  if (preferred && preferred.overBalls.length > 0) {
+    return {
+      overKey: preferred.key,
+      overBalls: preferred.overBalls,
+      legalBalls: preferred.legalBalls,
+      indexingMode,
+    };
+  }
+
+  const bestCandidate = candidates
+    .filter((candidate) => candidate.overBalls.length > 0)
+    .sort((a, b) => {
+      if (b.legalBalls.length !== a.legalBalls.length) {
+        return b.legalBalls.length - a.legalBalls.length;
+      }
+      return b.overBalls.length - a.overBalls.length;
+    })[0];
+
+  if (bestCandidate) {
+    return {
+      overKey: bestCandidate.key,
+      overBalls: bestCandidate.overBalls,
+      legalBalls: bestCandidate.legalBalls,
+      indexingMode,
+    };
+  }
+
+  return {
+    overKey: preferredOverKey ?? null,
+    overBalls: [],
+    legalBalls: [],
+    indexingMode,
+  };
 }
 
 // Fetch live scores
@@ -205,12 +303,17 @@ export async function fetchUpcomingFixtures(): Promise<any[]> {
 }
 
 // Compute over stats from ball-by-ball data
-function computeOverStats(balls: BallData[], overNumber: number, innings: string): OverStats {
-  // Sportsmonk uses 0-indexed overs: over 1 = balls 0.1-0.6, over 2 = balls 1.1-1.6
-  const overPrefix = (overNumber - 1).toString();
-  const overBalls = balls.filter(
-    (b) => b.scoreboard === innings && String(b.ball).split(".")[0] === overPrefix
-  );
+export function computeOverStats(
+  balls: BallData[],
+  overNumber: number,
+  innings: string
+): OverStats {
+  const {
+    overKey,
+    overBalls,
+    legalBalls,
+    indexingMode,
+  } = getOverBalls(balls, overNumber, innings);
 
   let runs = 0;
   let wickets = 0;
@@ -223,8 +326,6 @@ function computeOverStats(balls: BallData[], overNumber: number, innings: string
   let lastBallWicket = false;
   let firstBallBoundary = false;
   let currentBatsman = "";
-
-  const legalBalls = overBalls.filter((b) => b.score.ball); // only legal deliveries
 
   for (let i = 0; i < overBalls.length; i++) {
     const b = overBalls[i];
@@ -272,7 +373,26 @@ function computeOverStats(balls: BallData[], overNumber: number, innings: string
     lastBallWicket,
     firstBallBoundary,
     currentBatsman,
+    overKey,
+    totalBalls: overBalls.length,
+    legalBalls: legalBalls.length,
+    indexingMode,
+    isReliable: overBalls.length > 0 && legalBalls.length > 0,
   };
+}
+
+function logOverResolutionStats(
+  prediction: Prediction,
+  innings: string,
+  stats: OverStats,
+  correctOption: string | null
+): void {
+  console.log(
+    `[Sportsmonk] Resolve check over ${prediction.overNumber} (${prediction.question}) ` +
+      `innings=${innings} overKey=${stats.overKey ?? "none"} indexing=${stats.indexingMode} ` +
+      `balls=${stats.totalBalls} legal=${stats.legalBalls} runs=${stats.runs} ` +
+      `wkts=${stats.wickets} sixes=${stats.sixes} correct=${correctOption ?? "none"}`
+  );
 }
 
 // Get the current over number from ball data
@@ -599,7 +719,14 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
             }
             for (const pred of overToResolvePreds) {
               if (pred.status !== "resolved") {
+                if (!overToResolveStats.isReliable) {
+                  console.warn(
+                    `[Sportsmonk] Skipping over ${overToResolve} resolution for "${pred.question}" due to unreliable ball data`
+                  );
+                  continue;
+                }
                 const correctOption = resolveOverPredictionFromStats(pred, overToResolveStats);
+                logOverResolutionStats(pred, overToResolveInningsStr, overToResolveStats, correctOption);
                 if (correctOption) {
                   await resolvePrediction(pred, correctOption, io);
                 }
@@ -699,7 +826,14 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
             if (overNum > 0) {
               const innings = pred.round <= 3 ? "S1" : "S2";
               const overStats = computeOverStats(allBalls, overNum, innings);
+              if (!overStats.isReliable) {
+                console.warn(
+                  `[Sportsmonk] Skipping end-match over ${overNum} resolution for "${pred.question}" due to unreliable ball data`
+                );
+                continue;
+              }
               const correctOption = resolveOverPredictionFromStats(pred, overStats);
+              logOverResolutionStats(pred, innings, overStats, correctOption);
               if (correctOption) {
                 await resolvePrediction(pred, correctOption, io);
                 console.log(`[Sportsmonk] End-match over ${overNum} resolved: "${pred.question}" → ${correctOption}`);
@@ -955,7 +1089,14 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           }
           for (const pred of overPredictions) {
             if (pred.status === "resolved") continue;
+            if (!overStats.isReliable) {
+              console.warn(
+                `[Sportsmonk] Skipping over ${completedOver} resolution for "${pred.question}" due to unreliable ball data`
+              );
+              continue;
+            }
             const correctOption = resolveOverPredictionFromStats(pred, overStats);
+            logOverResolutionStats(pred, prevInningsStr, overStats, correctOption);
             if (correctOption) {
               await resolvePrediction(pred, correctOption, io);
             } else {
@@ -1175,6 +1316,101 @@ export function resolveOverPredictionFromStats(prediction: Prediction, stats: Ov
   }
 
   return null;
+}
+
+export interface RepairPerOverPredictionsScope {
+  matchId?: string;
+}
+
+export interface RepairPerOverPredictionsSummary {
+  matchesChecked: number;
+  predictionsChecked: number;
+  predictionsCorrected: number;
+  participantsRecomputed: number;
+  userPredictionsRecomputed: number;
+}
+
+export async function repairPerOverPredictions(
+  scope: RepairPerOverPredictionsScope = {}
+): Promise<RepairPerOverPredictionsSummary> {
+  const matchWhere: Record<string, string> = {};
+  if (scope.matchId) matchWhere.id = scope.matchId;
+
+  const matches = await Match.findAll({
+    where: matchWhere,
+    order: [["updatedAt", "DESC"]],
+  });
+
+  let predictionsChecked = 0;
+  let predictionsCorrected = 0;
+  let participantsRecomputed = 0;
+  let userPredictionsRecomputed = 0;
+
+  for (const match of matches) {
+    if (!match.externalId) continue;
+
+    const fixtureId = Number(match.externalId);
+    if (!Number.isFinite(fixtureId)) continue;
+
+    const fullFixture = await fetchFixtureWithBalls(fixtureId);
+    const allBalls: BallData[] = fullFixture?.balls?.data || [];
+    if (allBalls.length === 0) {
+      console.warn(
+        `[Sportsmonk Repair] Skipping match ${match.id} (${match.externalId}) because no ball-by-ball data was returned`
+      );
+      continue;
+    }
+
+    const perOverPredictions = await Prediction.findAll({
+      where: { matchId: match.id, category: "per_over", status: "resolved" },
+      order: [["overNumber", "ASC"], ["createdAt", "ASC"]],
+    });
+
+    let correctedThisMatch = 0;
+
+    for (const pred of perOverPredictions) {
+      const overNumber = pred.overNumber || 0;
+      if (overNumber <= 0) continue;
+
+      predictionsChecked += 1;
+
+      const innings = pred.round <= 3 ? "S1" : "S2";
+      const overStats = computeOverStats(allBalls, overNumber, innings);
+      if (!overStats.isReliable) {
+        console.warn(
+          `[Sportsmonk Repair] Skipping "${pred.question}" due to unreliable ball data (match=${match.id}, innings=${innings}, over=${overNumber})`
+        );
+        continue;
+      }
+
+      const expectedCorrectOption = resolveOverPredictionFromStats(pred, overStats);
+      logOverResolutionStats(pred, innings, overStats, expectedCorrectOption);
+
+      if (expectedCorrectOption && pred.correctOption !== expectedCorrectOption) {
+        const previousCorrectOption = pred.correctOption;
+        await pred.update({ correctOption: expectedCorrectOption });
+        correctedThisMatch += 1;
+        predictionsCorrected += 1;
+        console.log(
+          `[Sportsmonk Repair] Corrected "${pred.question}" from ${previousCorrectOption ?? "null"} to ${expectedCorrectOption}`
+        );
+      }
+    }
+
+    if (correctedThisMatch > 0) {
+      const scoreSummary = await recomputeParticipantScores({ matchId: match.id });
+      participantsRecomputed += scoreSummary.participantsRecomputed;
+      userPredictionsRecomputed += scoreSummary.userPredictionsRecomputed;
+    }
+  }
+
+  return {
+    matchesChecked: matches.length,
+    predictionsChecked,
+    predictionsCorrected,
+    participantsRecomputed,
+    userPredictionsRecomputed,
+  };
 }
 
 // Resolve pre-match predictions when match finishes
