@@ -39,7 +39,7 @@ export const api = {
   sendOTP: (phone: string) => request("/auth/send-otp", { method: "POST", body: JSON.stringify({ phone }) }),
 
   verifyOTP: (phone: string, code: string, displayName?: string) =>
-    request<{ token: string; user: { id: string; phone: string; displayName: string }; isNewUser: boolean; needsDisplayName?: boolean }>(
+    request<{ token: string; user: { id: string; phone: string; displayName: string; avatarConfig?: any }; isNewUser: boolean; needsDisplayName?: boolean }>(
       "/auth/verify-otp",
       { method: "POST", body: JSON.stringify({ phone, code, displayName }) }
     ),

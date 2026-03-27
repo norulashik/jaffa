@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
 import { Target, HelpCircle } from "lucide-react";
 import { useGame } from "@/context/GameContext";
 import { api } from "@/lib/api";
+import { cafeUrl } from "@/lib/navigation";
 
 const getCategoryLabel = (pred: any) => {
   if (pred.category === "per_over") return `Over ${pred.overNumber || ""}`;
@@ -22,6 +24,7 @@ const getOptionLabel = (pred: any, key: string) =>
 
 export default function MyPicksPage() {
   const { state } = useGame();
+  const router = useRouter();
   const [predictions, setPredictions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -29,6 +32,12 @@ export default function MyPicksPage() {
   const venueId = state.venueId || (typeof window !== "undefined" ? localStorage.getItem("jaffa_venue_id") : null);
 
   useEffect(() => {
+    const token = localStorage.getItem("jaffa_token");
+    if (!token) {
+      router.replace(cafeUrl("/login"));
+      return;
+    }
+
     if (matchId && venueId) {
       loadPredictions();
       const interval = setInterval(loadPredictions, 10000);
@@ -36,7 +45,7 @@ export default function MyPicksPage() {
     } else {
       setLoading(false);
     }
-  }, [matchId, venueId]);
+  }, [matchId, venueId, router]);
 
   const loadPredictions = async () => {
     if (!matchId || !venueId) return;

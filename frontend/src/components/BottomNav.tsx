@@ -1,9 +1,11 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { GiCastle, GiPodiumWinner, GiTrophyCup, GiMeeple } from "react-icons/gi";
+import { cafeUrl } from "@/lib/navigation";
+import { useGame } from "@/context/GameContext";
 
 const navItems = [
   { key: "home", href: "/lobby", icon: GiCastle, label: "Home" },
@@ -13,7 +15,16 @@ const navItems = [
 ];
 
 export default function BottomNav() {
+  const { state } = useGame();
   const pathname = usePathname();
+  const [storedMatchId, setStoredMatchId] = useState<string | null>(null);
+  const normalizedPathname = pathname?.replace(/^\/cafe\/[^/]+/, "") || pathname || "/";
+  const activeMatchId = state.matchId || storedMatchId;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setStoredMatchId(localStorage.getItem("jaffa_match_id"));
+  }, [state.matchId, pathname]);
 
   return (
     <nav
@@ -22,19 +33,23 @@ export default function BottomNav() {
     >
       <div className="flex items-center justify-around px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         {navItems.map((item) => {
+          const href =
+            item.key === "home" && activeMatchId
+              ? `/match/${activeMatchId}`
+              : item.href;
+          const resolvedHref = cafeUrl(href) || href;
           const isActive =
             item.key === "home"
-              ? pathname === "/lobby" ||
-                pathname?.startsWith("/match/") ||
-                pathname === "/"
-              : pathname === item.href || pathname?.startsWith(item.href + "/");
+              ? normalizedPathname?.startsWith("/match/") ||
+                (!activeMatchId && normalizedPathname === "/lobby")
+              : normalizedPathname === item.href || normalizedPathname?.startsWith(item.href + "/");
 
           const Icon = item.icon;
 
           return (
             <Link
               key={item.key}
-              href={item.href}
+              href={resolvedHref}
               className={`flex flex-col items-center justify-center gap-0.5 px-4 py-1.5 rounded-[3px] transition-all ${
                 isActive
                   ? "text-[#ff6341] border-b-[3px] border-[#ff6341]"

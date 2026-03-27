@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from "react";
 import { AvatarConfig } from "@/types/avatar";
+import { SAFE_BOOT } from "@/lib/runtime-flags";
 
 interface User {
   id: string;
@@ -132,47 +133,53 @@ export function GameProvider({ children }: { children: ReactNode }) {
 
   // Restore session on mount
   useEffect(() => {
+    if (SAFE_BOOT) {
+      dispatch({ type: "SET_LOADING", isLoading: false });
+      return;
+    }
+
     const token = localStorage.getItem("jaffa_token");
-    if (token) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5000); // 5s timeout
-
-      fetch(`${process.env.NEXT_PUBLIC_API_URL || "/api"}/auth/me`, {
-        headers: { Authorization: `Bearer ${token}`, "ngrok-skip-browser-warning": "true" },
-        signal: controller.signal,
-      })
-        .then((res) => {
-          clearTimeout(timeout);
-          const contentType = res.headers.get("content-type") || "";
-          if (res.ok && contentType.includes("application/json")) {
-            return res.json();
-          }
-          return Promise.reject();
-        })
-        .then((user) => {
-          dispatch({ type: "SET_USER", user, token });
-          const savedVenueId = localStorage.getItem("jaffa_venue_id");
-          const savedMatchId = localStorage.getItem("jaffa_match_id");
-          if (savedVenueId) dispatch({ type: "SET_VENUE", venueId: savedVenueId, venueName: localStorage.getItem("jaffa_venue_name") || "" });
-          if (savedMatchId) dispatch({ type: "SET_MATCH", matchId: savedMatchId });
-        })
-        .catch(() => {
-          clearTimeout(timeout);
-          localStorage.removeItem("jaffa_token");
-          dispatch({ type: "SET_LOADING", isLoading: false });
-        });
-
-      return () => {
-        clearTimeout(timeout);
-        controller.abort();
-      };
-    } else {
+    if (!token) {
       dispatch({ type: "SET_LOADING", isLoading: false });
       const savedVenueId = localStorage.getItem("jaffa_venue_id");
       const savedMatchId = localStorage.getItem("jaffa_match_id");
       if (savedVenueId) dispatch({ type: "SET_VENUE", venueId: savedVenueId, venueName: localStorage.getItem("jaffa_venue_name") || "" });
       if (savedMatchId) dispatch({ type: "SET_MATCH", matchId: savedMatchId });
+      return;
     }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000); // 5s timeout
+
+    fetch(`${process.env.NEXT_PUBLIC_API_URL || "/api"}/auth/me`, {
+      headers: { Authorization: `Bearer ${token}`, "ngrok-skip-browser-warning": "true" },
+      signal: controller.signal,
+    })
+      .then((res) => {
+        clearTimeout(timeout);
+        const contentType = res.headers.get("content-type") || "";
+        if (res.ok && contentType.includes("application/json")) {
+          return res.json();
+        }
+        return Promise.reject();
+      })
+      .then((user) => {
+        dispatch({ type: "SET_USER", user, token });
+        const savedVenueId = localStorage.getItem("jaffa_venue_id");
+        const savedMatchId = localStorage.getItem("jaffa_match_id");
+        if (savedVenueId) dispatch({ type: "SET_VENUE", venueId: savedVenueId, venueName: localStorage.getItem("jaffa_venue_name") || "" });
+        if (savedMatchId) dispatch({ type: "SET_MATCH", matchId: savedMatchId });
+      })
+      .catch(() => {
+        clearTimeout(timeout);
+        localStorage.removeItem("jaffa_token");
+        dispatch({ type: "SET_LOADING", isLoading: false });
+      });
+
+    return () => {
+      clearTimeout(timeout);
+      controller.abort();
+    };
   }, []);
 
   return (

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -20,6 +20,8 @@ import CorrectAnswerFeedback from "@/components/CorrectAnswerFeedback";
 import { api } from "@/lib/api";
 import { connectSocket, joinVenueMatch, disconnectSocket } from "@/lib/socket";
 import { useGame } from "@/context/GameContext";
+import { toast } from "sonner";
+import { cafeUrl } from "@/lib/navigation";
 
 interface Prediction {
   id: string;
@@ -43,6 +45,7 @@ const QUESTION_LABELS = [
 
 export default function MatchDashboard() {
   const params = useParams();
+  const router = useRouter();
   const matchId = params.matchId as string;
 
   // Phase management
@@ -62,6 +65,12 @@ export default function MatchDashboard() {
   const [feedbackData, setFeedbackData] = useState<any>(null);
   const [matchData, setMatchData] = useState<any>(null);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string>>({});
+  const [draftAnswers, setDraftAnswers] = useState<Record<string, string>>({});
+  const [activeBoost, setActiveBoost] = useState<{
+    predId: string;
+    type: "boost" | "all_in";
+  } | null>(null);
+  const [submittingPredictionId, setSubmittingPredictionId] = useState<string | null>(null);
   const [showAllPicks, setShowAllPicks] = useState(false);
   const [picksExpanded, setPicksExpanded] = useState(true);
   const [userRank, setUserRank] = useState<number | null>(null);
@@ -71,8 +80,14 @@ export default function MatchDashboard() {
   const [venueId, setVenueId] = useState("");
 
   useEffect(() => {
+    const token = localStorage.getItem("jaffa_token");
+    if (!token) {
+      router.replace(cafeUrl("/login"));
+      return;
+    }
+
     setVenueId(localStorage.getItem("jaffa_venue_id") || "");
-  }, []);
+  }, [router]);
 
   // Tick every second for countdown timers
   useEffect(() => {
@@ -99,8 +114,10 @@ export default function MatchDashboard() {
             await api.joinMatch(matchId, venueId, matchCode);
             localStorage.removeItem("jaffa_match_code");
           } catch (err: any) {
-            console.error("Join match failed:", err.message);
             localStorage.removeItem("jaffa_match_code");
+            if (err?.message && err.message !== "Invalid match code") {
+              console.error("Join match failed:", err.message);
+            }
           }
         }
 
@@ -245,6 +262,9 @@ export default function MatchDashboard() {
               totalPoints: matchState.participant.totalPoints || 0,
               currentStreak: matchState.participant.currentStreak || 0,
               currentRound: matchState.participant.currentRound || 1,
+              boostsUsedThisRound: matchState.participant.boostsUsedRound || 0,
+              boostsUsedRound: matchState.participant.boostsUsedRound || 0,
+              allInUsed: Boolean(matchState.participant.allInUsed),
             },
           });
         }
@@ -299,14 +319,62 @@ export default function MatchDashboard() {
   }, [preMatchSubmitting, selectedPreMatchOption, preMatchPredictions, currentCardIndex, venueId]);
 
   // Live: handle option select
-  const handleOptionSelect = async (predictionId: string, optionKey: string) => {
+  const handleOptionSelect = (predictionId: string, optionKey: string) => {
     if (selectedAnswers[predictionId]) return; // already answered
-    setSelectedAnswers((prev) => ({ ...prev, [predictionId]: optionKey }));
+    setDraftAnswers((prev) => ({
+      ...prev,
+      [predictionId]: prev[predictionId] === optionKey ? "" : optionKey,
+    }));
+  };
+
+  const handleToggleBoost = (predictionId: string) => {
+    setActiveBoost((prev) =>
+      prev?.predId === predictionId && prev.type === "boost"
+        ? null
+        : { predId: predictionId, type: "boost" }
+    );
+  };
+
+  const handleToggleAllIn = (predictionId: string) => {
+    setActiveBoost((prev) =>
+      prev?.predId === predictionId && prev.type === "all_in"
+        ? null
+        : { predId: predictionId, type: "all_in" }
+    );
+  };
+
+  const handleSubmitPrediction = async (predictionId: string) => {
+    const selectedOption = draftAnswers[predictionId];
+    if (!selectedOption || !venueId || submittingPredictionId === predictionId) return;
+
+    setSubmittingPredictionId(predictionId);
+    const activeBoostForPrediction =
+      activeBoost && activeBoost.predId === predictionId ? activeBoost : null;
+    const boostType = activeBoostForPrediction?.type;
+
     try {
-      await api.submitPrediction(predictionId, optionKey, venueId);
-    } catch {
-      // Revert on failure
-      setSelectedAnswers((prev) => { const n = { ...prev }; delete n[predictionId]; return n; });
+      await api.submitPrediction(predictionId, selectedOption, venueId, boostType);
+      setSelectedAnswers((prev) => ({ ...prev, [predictionId]: selectedOption }));
+      setDraftAnswers((prev) => {
+        const next = { ...prev };
+        delete next[predictionId];
+        return next;
+      });
+      if (boostType === "boost") {
+        dispatch({ type: "USE_BOOST" });
+      }
+      if (boostType === "all_in") {
+        dispatch({ type: "USE_ALL_IN" });
+      }
+      if (activeBoostForPrediction) {
+        setActiveBoost(null);
+      }
+      toast.success("Prediction locked in!");
+      await loadLiveData();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to submit prediction");
+    } finally {
+      setSubmittingPredictionId(null);
     }
   };
 
@@ -462,7 +530,7 @@ export default function MatchDashboard() {
       {/* TopAppBar */}
       <Header />
 
-      <main className="pt-24 pb-32 px-4 min-h-screen space-y-6 max-w-2xl mx-auto">
+      <main className="pt-24 pb-52 px-4 min-h-screen space-y-6 max-w-2xl mx-auto">
         {/* Scoreboard Hero Section */}
         {(() => {
           const sd = matchData?.scoreData || {};
@@ -642,6 +710,8 @@ export default function MatchDashboard() {
           const openPreds = unanswered.filter((p: any) => !p.expiresAt || new Date(p.expiresAt).getTime() > now);
           const missedPreds = unanswered.filter((p: any) => p.expiresAt && new Date(p.expiresAt).getTime() <= now);
           const answeredPreds = predictions.filter((p: any) => selectedAnswers[p.id] || p.userAnswer?.selectedOption);
+          const boostsRemaining = Math.max(0, 2 - (gameState.boostsUsedThisRound || 0));
+          const allInAvailable = !gameState.allInUsed;
 
           const getCategoryLabel = (pred: any) => {
             if (pred.category === "per_over") return `Over ${pred.overNumber || ""}`;
@@ -660,13 +730,42 @@ export default function MatchDashboard() {
                     const expiresAt = pred.expiresAt ? new Date(pred.expiresAt).getTime() : null;
                     const timeLeft = expiresAt ? Math.max(0, Math.ceil((expiresAt - now) / 1000)) : null;
                     const isExpired = timeLeft !== null && timeLeft <= 0;
+                    const selectedOption = draftAnswers[pred.id] || "";
+                    const isSubmitting = submittingPredictionId === pred.id;
+                    const boostStateForPrediction =
+                      activeBoost && activeBoost.predId === pred.id ? activeBoost : null;
+                    const boostType = boostStateForPrediction?.type ?? null;
+                    const isBoostActive = boostType === "boost";
+                    const isAllInActive = boostType === "all_in";
+                    const hasBoost = isBoostActive || isAllInActive;
+                    const canUseBoost = boostsRemaining > 0;
+                    const canUseAllIn = allInAvailable;
 
                     return (
                     <section
                       key={pred.id}
-                      className={`game-card p-5 relative overflow-hidden ${isExpired ? "opacity-50" : ""}`}
-                      style={pred.category === "hot_take" ? { borderLeft: "4px solid #ffd60a" } : undefined}
+                      className={`game-card p-5 relative overflow-hidden ${isExpired ? "opacity-50" : ""} ${
+                        isAllInActive
+                          ? "!border-[#ffd60a] !shadow-[4px_4px_0_0_#ffd60a]"
+                          : isBoostActive
+                          ? "!border-[#3b9eff] !shadow-[4px_4px_0_0_#3b9eff]"
+                          : ""
+                      }`}
+                      style={pred.category === "hot_take" && !hasBoost ? { borderLeft: "4px solid #ffd60a" } : undefined}
                     >
+                      {hasBoost && (
+                        <div
+                          className={`-mx-5 -mt-5 mb-3 px-5 py-2 text-center text-xs font-black uppercase tracking-wider border-b-2 ${
+                            isAllInActive
+                              ? "bg-[#ffd60a]/10 text-[#ffd60a] border-[#ffd60a]"
+                              : "bg-[#3b9eff]/10 text-[#3b9eff] border-[#3b9eff]"
+                          }`}
+                        >
+                          {isAllInActive
+                            ? "ALL-IN ACTIVE (3x) - Lock in your answer!"
+                            : "BOOST ACTIVE (2x) - Lock in your answer!"}
+                        </div>
+                      )}
                       <div className="flex justify-between items-start mb-3">
                         <div className="flex flex-col gap-1">
                           <span className="info-pill inline-block w-fit text-[#ffd60a]">
@@ -692,31 +791,67 @@ export default function MatchDashboard() {
                       <div className="space-y-2 mb-4">
                         {(pred.options || []).map((opt: any, i: number) => {
                           const optKey = opt.key || opt.label;
+                          const isSelected = selectedOption === optKey;
+                          const multiplier = isAllInActive ? 3 : isBoostActive ? 2 : 1;
                           return (
                             <button
                               key={i}
-                              onClick={() => !isExpired && handleOptionSelect(pred.id, optKey)}
-                              disabled={isExpired}
+                              onClick={() => !isExpired && !isSubmitting && handleOptionSelect(pred.id, optKey)}
+                              disabled={isExpired || isSubmitting}
                               className={`option-btn text-left p-3 flex justify-between items-center ${
-                                isExpired ? "opacity-40 cursor-not-allowed" : ""
+                                isSelected ? "selected" : ""
+                              } ${isExpired ? "opacity-40 cursor-not-allowed" : ""} ${
+                                isSubmitting ? "opacity-80 cursor-wait" : ""
                               }`}
                             >
                               <span className="text-sm font-bold">{opt.label}</span>
-                              <span className="text-xs font-black text-[#ff6341]">{opt.points} pts</span>
+                              <span className={`text-xs font-black ${isSelected ? "text-black" : "text-[#ff6341]"}`}>
+                                {opt.points * multiplier} pts
+                              </span>
                             </button>
                           );
                         })}
                       </div>
-                      <div className="flex gap-2">
-                        <button className="btn-secondary px-3 py-1.5 flex items-center gap-1.5 text-xs">
-                          <Zap className="w-3.5 h-3.5 text-[#ff6341]" />
-                          <span className="text-[10px] font-black tracking-tight">2x BOOST</span>
-                        </button>
-                        <button className="btn-secondary px-3 py-1.5 flex items-center gap-1.5 text-xs">
-                          <Rocket className="w-3.5 h-3.5 text-[#ff6341]" />
-                          <span className="text-[10px] font-black tracking-tight">3x ALL-IN</span>
-                        </button>
+                      <div className="flex gap-2 flex-wrap mb-3">
+                        {canUseBoost && !hasBoost && (
+                          <button
+                            onClick={() => handleToggleBoost(pred.id)}
+                            disabled={isExpired || isSubmitting || !selectedOption}
+                            className="btn-secondary px-3 py-1.5 flex items-center gap-1.5 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Zap className="w-3.5 h-3.5 text-[#ff6341]" />
+                            <span className="text-[10px] font-black tracking-tight">2x BOOST</span>
+                          </button>
+                        )}
+                        {canUseAllIn && !hasBoost && (
+                          <button
+                            onClick={() => handleToggleAllIn(pred.id)}
+                            disabled={isExpired || isSubmitting || !selectedOption}
+                            className="btn-secondary px-3 py-1.5 flex items-center gap-1.5 text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Rocket className="w-3.5 h-3.5 text-[#ff6341]" />
+                            <span className="text-[10px] font-black tracking-tight">3x ALL-IN</span>
+                          </button>
+                        )}
+                        {hasBoost && (
+                          <button
+                            onClick={() => setActiveBoost(null)}
+                            disabled={isSubmitting}
+                            className="text-xs text-white/50 font-bold uppercase hover:text-white/80 transition-colors disabled:opacity-50"
+                          >
+                            Cancel {isAllInActive ? "All-In" : "Boost"}
+                          </button>
+                        )}
                       </div>
+                      {selectedOption && !isExpired && (
+                        <button
+                          onClick={() => handleSubmitPrediction(pred.id)}
+                          disabled={isSubmitting}
+                          className="btn-sticker btn-green w-full py-3 text-sm gap-2"
+                        >
+                          {isSubmitting ? "LOCKING..." : "LOCK IN PREDICTION"}
+                        </button>
+                      )}
                     </section>
                     );
                   })}

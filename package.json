@@ -3,11 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "nodemon --exec ts-node src/index.ts",
+    "dev": "powershell -ExecutionPolicy Bypass -File ./scripts/dev-smart.ps1",
+    "dev:force": "nodemon --exec ts-node src/index.ts",
+    "health:check": "powershell -ExecutionPolicy Bypass -File ./scripts/backend-health-check.ps1",
     "build": "tsc",
     "build:frontend": "cd frontend && npm run build",
     "start": "node dist/index.js",
     "db:sync": "ts-node src/scripts/syncDb.ts",
+    "db:repair-scores": "ts-node src/scripts/repairScores.ts",
     "seed": "ts-node src/scripts/seed.ts"
   },
   "dependencies": {

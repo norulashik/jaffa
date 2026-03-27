@@ -1,10 +1,5 @@
 @import "tailwindcss";
 
-/* Bungee - bold game-style chunky font */
-@import url('https://fonts.googleapis.com/css2?family=Bungee&display=swap');
-/* Barlow for body text - clean, readable, bold options */
-@import url('https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700;800;900&display=swap');
-
 @custom-variant dark (&:is(.dark *));
 
 :root {

@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { User, OTP } from "../models";
 import { Op } from "sequelize";
 import { generateAvatarConfig } from "../utils/avatarGenerator";
+import { authenticateUser, AuthRequest } from "../middleware/auth";
 
 const router = Router();
 
@@ -150,6 +151,40 @@ router.get("/me", async (req: Request, res: Response): Promise<void> => {
     });
   } catch {
     res.status(401).json({ error: "Invalid token" });
+  }
+});
+
+// Update current user's avatar config
+router.put("/avatar", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.userId!;
+    const { avatarConfig } = req.body;
+
+    if (!avatarConfig || typeof avatarConfig !== "object") {
+      res.status(400).json({ error: "Avatar config is required" });
+      return;
+    }
+
+    const user = await User.findByPk(userId);
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    await user.update({ avatarConfig: JSON.stringify(avatarConfig) });
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        phone: user.phone,
+        displayName: user.displayName,
+        avatarConfig,
+      },
+    });
+  } catch (error) {
+    console.error("Update avatar error:", error);
+    res.status(500).json({ error: "Failed to update avatar" });
   }
 });
 

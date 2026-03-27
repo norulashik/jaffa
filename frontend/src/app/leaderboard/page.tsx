@@ -1,23 +1,32 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
 import Leaderboard from "@/components/Leaderboard";
 import { Trophy } from "lucide-react";
 import { useGame } from "@/context/GameContext";
+import { cafeUrl } from "@/lib/navigation";
 
 export default function LeaderboardPage() {
   const { state } = useGame();
+  const router = useRouter();
 
   // Use context values with localStorage fallback
   const [matchId, setMatchId] = useState(state.matchId);
   const [venueId, setVenueId] = useState(state.venueId);
 
   useEffect(() => {
+    const token = localStorage.getItem("jaffa_token");
+    if (!token) {
+      router.replace(cafeUrl("/login"));
+      return;
+    }
+
     if (!matchId) setMatchId(localStorage.getItem("jaffa_match_id"));
     if (!venueId) setVenueId(localStorage.getItem("jaffa_venue_id"));
-  }, [state.matchId, state.venueId]);
+  }, [state.matchId, state.venueId, matchId, venueId, router]);
 
   return (
     <div className="bg-[#0d0d0d] text-white min-h-screen">

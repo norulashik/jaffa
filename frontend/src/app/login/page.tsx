@@ -102,6 +102,9 @@ export default function LoginOTP() {
       if (result.token) {
         localStorage.setItem("jaffa_token", result.token);
         localStorage.setItem("jaffa_user", JSON.stringify(result.user));
+        if (result.user?.avatarConfig) {
+          localStorage.setItem("jaffa_user", JSON.stringify(result.user));
+        }
         router.push(cafeUrl("/lobby"));
       }
     } catch (err: any) {
@@ -163,6 +166,7 @@ export default function LoginOTP() {
               width={180}
               height={70}
               className="w-[180px] h-auto"
+              style={{ height: "auto" }}
               priority
             />
           </div>

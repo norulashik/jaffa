@@ -137,6 +137,7 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
       if (pred.status === "open") await pred.update({ status: "locked" });
     }
     for (const pred of overPredictions) {
+      if (pred.status === "resolved") continue;
       const correctOption = resolveOverPredictionFromStats(pred, overResults as any);
       if (correctOption) {
         await resolvePrediction(pred, correctOption, io);
@@ -251,6 +252,10 @@ router.post("/prediction/:predictionId/resolve", async (req: any, res: Response)
 
     const prediction = await Prediction.findByPk(predictionId);
     if (!prediction) { res.status(404).json({ error: "Prediction not found" }); return; }
+    if (prediction.status === "resolved" && prediction.correctOption === correctOption) {
+      res.json({ message: "Prediction already resolved" });
+      return;
+    }
 
     const io = req.app.get("io");
     await resolvePrediction(prediction, correctOption, io);

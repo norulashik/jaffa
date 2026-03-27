@@ -8,6 +8,7 @@ import BottomNav from "@/components/BottomNav";
 import { Flame, Share2, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cafeUrl } from "@/lib/navigation";
+import { toast } from "sonner";
 
 interface Match {
   id: string;
@@ -75,6 +76,26 @@ export default function HomeLiveMatches() {
   const handleJoin = (match: Match) => {
     // Show match code modal
     setCodeModal({ match, code: "", error: "", validating: false });
+  };
+
+  const handleShare = async (match: Match) => {
+    const shareText = `${match.team1Short || match.team1} vs ${match.team2Short || match.team2} on JAFFA. Join from ${window.location.origin}${cafeUrl("") || ""}`;
+
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: `${match.team1Short || match.team1} vs ${match.team2Short || match.team2}`,
+          text: shareText,
+          url: `${window.location.origin}${cafeUrl("") || ""}`,
+        });
+        return;
+      }
+
+      await navigator.clipboard.writeText(shareText);
+      toast.success("Invite link copied");
+    } catch {
+      toast.error("Could not share this match right now");
+    }
   };
 
   const handleCodeSubmit = async () => {
@@ -243,6 +264,7 @@ export default function HomeLiveMatches() {
                 {importing === match.id ? "LOADING..." : "JOIN NOW"}
               </button>
               <button
+                onClick={() => handleShare(match)}
                 className="w-12 h-12 flex items-center justify-center text-[#6b7280] hover:text-[#ff6341] transition-colors"
                 style={{ border: "2px solid #333", borderRadius: "4px", background: "#1a1a1a" }}
               >
@@ -364,9 +386,18 @@ export default function HomeLiveMatches() {
                   {importing === match.id ? "LOADING..." : "JOIN MATCH"}
                 </button>
               ) : (
-                <button className="w-full btn-gray uppercase tracking-widest text-xs font-bold py-2.5">
-                  NOTIFY ME
-                </button>
+                <div className="space-y-2">
+                  <button
+                    className="w-full btn-gray uppercase tracking-widest text-xs font-bold py-2.5 cursor-not-allowed opacity-60"
+                    disabled
+                    title="Match reminders are not enabled yet"
+                  >
+                    NOTIFY ME SOON
+                  </button>
+                  <p className="text-[10px] text-white/35 uppercase tracking-wider text-center">
+                    Match reminders are coming soon. Join from the lobby when the match goes live.
+                  </p>
+                </div>
               )}
             </motion.div>
           );

@@ -12,7 +12,7 @@ interface UserPredictionAttributes {
   selectedOption: string;
   boostType: BoostType;
   pointsEarned: number;
-  isCorrect?: boolean;
+  isCorrect?: boolean | null;
   answeredAt: Date;
   createdAt?: Date;
   updatedAt?: Date;
@@ -29,7 +29,7 @@ class UserPrediction extends Model<UserPredictionAttributes, UserPredictionCreat
   public selectedOption!: string;
   public boostType!: BoostType;
   public pointsEarned!: number;
-  public isCorrect!: boolean;
+  public isCorrect!: boolean | null;
   public answeredAt!: Date;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;

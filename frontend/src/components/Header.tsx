@@ -6,10 +6,14 @@ import { useRouter } from "next/navigation";
 import { GiCrownCoin, GiAlarmClock } from "react-icons/gi";
 import { useGame } from "@/context/GameContext";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { cafeUrl } from "@/lib/navigation";
 
 export default function Header() {
   const { state } = useGame();
   const router = useRouter();
+  const homeHref = cafeUrl("/lobby") || "/lobby";
+  const myPicksHref = cafeUrl("/my-picks") || "/my-picks";
+  const profileHref = cafeUrl("/profile") || "/profile";
 
   const initial = state.user?.displayName
     ? state.user.displayName.charAt(0).toUpperCase()
@@ -22,11 +26,12 @@ export default function Header() {
     >
       <div className="flex items-center justify-between px-4 py-1">
         {/* Left: Logo */}
-        <Link href="/lobby" className="flex-shrink-0">
+        <Link href={homeHref} className="flex-shrink-0">
           <img
             src="/jaffa-logo.png"
             alt="JAFFA"
             className="h-10 sm:h-12 w-auto object-contain"
+            style={{ width: "auto" }}
           />
         </Link>
 
@@ -45,7 +50,7 @@ export default function Header() {
 
           {/* Notification button */}
           <button
-            onClick={() => router.push("/my-picks")}
+            onClick={() => router.push(myPicksHref)}
             className="relative bg-[#0d0d0d] border-2 border-[#2a2a2a] rounded-[3px] p-2 hover:border-[#ff6341] transition-colors"
             style={{ boxShadow: "2px 2px 0 0 #2a2a2a" }}
           >
@@ -54,7 +59,7 @@ export default function Header() {
 
           {/* Profile button */}
           <button
-            onClick={() => router.push("/profile")}
+            onClick={() => router.push(profileHref)}
             className="border-2 border-[#ff6341] rounded-[3px] overflow-hidden"
             style={{ boxShadow: "2px 2px 0 0 #ff6341" }}
           >

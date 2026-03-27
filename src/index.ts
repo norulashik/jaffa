@@ -180,10 +180,38 @@ setupSocketHandlers(io);
 
 const PORT = process.env.PORT || 5000;
 
+async function ensureMatchParticipantSchema() {
+  const queryInterface = sequelize.getQueryInterface();
+
+  try {
+    const table = await queryInterface.describeTable("match_participants");
+
+    if (!table.round0Points) {
+      await queryInterface.addColumn("match_participants", "round0Points", {
+        type: "INTEGER",
+        allowNull: false,
+        defaultValue: 0,
+      });
+      console.log('Added missing column "match_participants.round0Points"');
+    }
+  } catch (error: any) {
+    const message = String(error?.message || "");
+    if (
+      message.includes("does not exist") ||
+      message.includes("No description found for")
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
+
 async function start() {
   try {
     await sequelize.authenticate();
     console.log("Database connected");
+
+    await ensureMatchParticipantSchema();
 
     // Use force:false to create missing tables without touching existing ones.
     // This avoids SQLite's simulate-ALTER issues (FK constraints, duplicate data).
@@ -191,21 +219,34 @@ async function start() {
     await sequelize.sync({ force: false });
     console.log("Database synced");
 
-    server.listen(PORT, () => {
-      console.log(`JAFFA backend running on port ${PORT}`);
-
-      // Sportsmonk: poll every 5 seconds for live score updates
-      const POLL_INTERVAL = 5 * 1000;
-      setInterval(async () => {
-        try {
-          await pollSportsmonkUpdates(io);
-        } catch (err) {
-          console.error("Sportsmonk poll error:", err);
-        }
-      }, POLL_INTERVAL);
-      console.log(`Sportsmonk live polling enabled (every ${POLL_INTERVAL / 1000}s)`);
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(PORT, () => {
+        server.off("error", reject);
+        resolve();
+      });
     });
+
+    console.log(`JAFFA backend running on port ${PORT}`);
+
+    // Sportsmonk: poll every 5 seconds for live score updates
+    const POLL_INTERVAL = 5 * 1000;
+    setInterval(async () => {
+      try {
+        await pollSportsmonkUpdates(io);
+      } catch (err) {
+        console.error("Sportsmonk poll error:", err);
+      }
+    }, POLL_INTERVAL);
+    console.log(`Sportsmonk live polling enabled (every ${POLL_INTERVAL / 1000}s)`);
   } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "EADDRINUSE") {
+      console.error(`Port ${PORT} is already in use.`);
+      console.error("A JAFFA backend may already be running on http://localhost:5000/api/health");
+      console.error("Reuse the existing backend, or stop it before starting a new one.");
+      process.exit(1);
+    }
+
     console.error("Failed to start server:", error);
     process.exit(1);
   }

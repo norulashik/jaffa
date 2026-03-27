@@ -10,6 +10,8 @@ import AvatarCustomizer from "@/components/AvatarCustomizer";
 import { Settings, HelpCircle, LogOut, ChevronRight, User } from "lucide-react";
 import { api } from "@/lib/api";
 import { AvatarConfig } from "@/types/avatar";
+import { cafeUrl } from "@/lib/navigation";
+import { toast } from "sonner";
 
 export default function ProfilePage() {
   const router = useRouter();
@@ -18,6 +20,12 @@ export default function ProfilePage() {
   const [showCustomizer, setShowCustomizer] = useState(false);
 
   useEffect(() => {
+    const token = localStorage.getItem("jaffa_token");
+    if (!token) {
+      router.replace(cafeUrl("/login"));
+      return;
+    }
+
     const userData = localStorage.getItem("jaffa_user");
     if (userData) {
       const parsed = JSON.parse(userData);
@@ -31,7 +39,7 @@ export default function ProfilePage() {
   const handleLogout = () => {
     localStorage.removeItem("jaffa_token");
     localStorage.removeItem("jaffa_user");
-    router.push("/login");
+    router.push(cafeUrl("/login"));
   };
 
   const handleSaveAvatar = async (config: AvatarConfig) => {
@@ -46,10 +54,23 @@ export default function ProfilePage() {
     // Persist to backend
     try {
       await api.updateAvatar(config);
+      toast.success("Avatar updated");
     } catch {
-      // Silent fail -- local update is enough
+      toast.error("Avatar saved locally, but sync failed");
     }
     setShowCustomizer(false);
+  };
+
+  const handleHelp = async () => {
+    const venueName = localStorage.getItem("jaffa_venue_name") || "your cafe";
+    const message = `Need help with JAFFA? Ask the staff at ${venueName} for support with match codes, rewards, or login issues.`;
+
+    try {
+      await navigator.clipboard.writeText(message);
+      toast.success("Support message copied");
+    } catch {
+      toast(message);
+    }
   };
 
   return (
@@ -100,27 +121,29 @@ export default function ProfilePage() {
 
         {/* Settings */}
         <section className="space-y-3">
-          <motion.div
+          <motion.button
             whileTap={{ scale: 0.98 }}
-            className="game-card flex items-center justify-between cursor-pointer"
+            onClick={() => setShowCustomizer(true)}
+            className="w-full game-card flex items-center justify-between cursor-pointer text-left"
           >
             <div className="flex items-center gap-4">
               <Settings size={20} className="text-[#6b7280]" />
               <span className="font-medium">Settings</span>
             </div>
             <ChevronRight size={20} className="text-[#6b7280]" />
-          </motion.div>
+          </motion.button>
 
-          <motion.div
+          <motion.button
             whileTap={{ scale: 0.98 }}
-            className="game-card flex items-center justify-between cursor-pointer"
+            onClick={handleHelp}
+            className="w-full game-card flex items-center justify-between cursor-pointer text-left"
           >
             <div className="flex items-center gap-4">
               <HelpCircle size={20} className="text-[#6b7280]" />
               <span className="font-medium">Help & Support</span>
             </div>
             <ChevronRight size={20} className="text-[#6b7280]" />
-          </motion.div>
+          </motion.button>
 
           <motion.button
             whileTap={{ scale: 0.98 }}

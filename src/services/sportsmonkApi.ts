@@ -445,7 +445,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
             where: { matchId: match.id, category: "pre_match", status: "open" },
           });
           for (const pred of tossPreds) {
-            if (pred.question.toLowerCase().includes("toss")) {
+            if (pred.status !== "resolved" && pred.question.toLowerCase().includes("toss")) {
               let tossWinnerShort: string | null = null;
               if (fixture.toss_won_team_id === fixture.localteam_id) {
                 tossWinnerShort = match.team1Short;
@@ -954,6 +954,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
             if (pred.status === "open") await pred.update({ status: "locked" });
           }
           for (const pred of overPredictions) {
+            if (pred.status === "resolved") continue;
             const correctOption = resolveOverPredictionFromStats(pred, overStats);
             if (correctOption) {
               await resolvePrediction(pred, correctOption, io);
@@ -966,7 +967,11 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
         const firstWicketPred = await Prediction.findOne({
           where: { matchId: match.id, category: "pre_match", status: "locked" },
         });
-        if (firstWicketPred && firstWicketPred.question.toLowerCase().includes("first wicket")) {
+        if (
+          firstWicketPred &&
+          firstWicketPred.status !== "resolved" &&
+          firstWicketPred.question.toLowerCase().includes("first wicket")
+        ) {
           const wicketBall = balls.find((b: any) => b.score?.is_wicket || b.score?.out || b.batsmanout_id);
           if (wicketBall) {
             const dismissalName = (wicketBall.score?.name || "").toLowerCase();

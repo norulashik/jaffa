@@ -3,10 +3,12 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "next dev --webpack",
+    "dev:turbo": "next dev --turbopack",
+    "build": "next build --webpack",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "typecheck": "powershell -ExecutionPolicy Bypass -Command \"Remove-Item tsconfig.tsbuildinfo -ErrorAction SilentlyContinue; next typegen; tsc --noEmit --incremental false\""
   },
   "dependencies": {
     "@radix-ui/react-accordion": "^1.2.12",

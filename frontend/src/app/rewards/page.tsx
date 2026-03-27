@@ -7,9 +7,13 @@ import BottomNav from "@/components/BottomNav";
 import { Trophy, Star, Gift, Lock, Copy } from "lucide-react";
 import { useGame } from "@/context/GameContext";
 import { api } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { cafeUrl } from "@/lib/navigation";
+import { toast } from "sonner";
 
 export default function RewardsPage() {
   const { state } = useGame();
+  const router = useRouter();
   const [rewards, setRewards] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [revealedCodes, setRevealedCodes] = useState<Set<string>>(new Set());
@@ -17,10 +21,16 @@ export default function RewardsPage() {
   const matchId = state.matchId || (typeof window !== "undefined" ? localStorage.getItem("jaffa_match_id") : null);
 
   useEffect(() => {
+    const token = localStorage.getItem("jaffa_token");
+    if (!token) {
+      router.replace(cafeUrl("/login"));
+      return;
+    }
+
     loadRewards();
     const interval = setInterval(loadRewards, 15000);
     return () => clearInterval(interval);
-  }, [matchId]);
+  }, [matchId, router]);
 
   const loadRewards = async () => {
     try {
@@ -33,8 +43,19 @@ export default function RewardsPage() {
     }
   };
 
-  const handleReveal = (id: string) => {
-    setRevealedCodes((prev) => new Set([...prev, id]));
+  const handleReveal = async (reward: any) => {
+    if (!revealedCodes.has(reward.id)) {
+      setRevealedCodes((prev) => new Set([...prev, reward.id]));
+      toast.success("Reward code revealed");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(reward.code);
+      toast.success("Reward code copied");
+    } catch {
+      toast.error("Could not copy reward code");
+    }
   };
 
   return (
@@ -114,7 +135,7 @@ export default function RewardsPage() {
                     className="text-lg font-bold text-white mb-1"
                     style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
                   >
-                    {reward.prize || "Reward"}
+                    {reward.rewardText || "Reward"}
                   </h3>
                   <p className="text-xs text-[#6b7280] mb-4">
                     Rank #{reward.rank} · {reward.venueName || "Venue"}
@@ -122,7 +143,7 @@ export default function RewardsPage() {
 
                   {isActive && reward.code ? (
                     <button
-                      onClick={() => handleReveal(reward.id)}
+                      onClick={() => handleReveal(reward)}
                       className="w-full btn-sticker btn-orange flex items-center justify-center gap-2 uppercase tracking-[0.2em] text-xs font-black"
                     >
                       {revealedCodes.has(reward.id) ? (

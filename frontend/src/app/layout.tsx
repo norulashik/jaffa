@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Toaster } from "sonner";
 import { GameProvider } from "@/context/GameContext";
+import { SAFE_BOOT } from "@/lib/runtime-flags";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -28,6 +29,8 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const content = SAFE_BOOT ? children : <GameProvider>{children}</GameProvider>;
+
   return (
     <html lang="en" className="dark">
       <head>
@@ -43,24 +46,24 @@ export default function RootLayout({
         />
       </head>
       <body className="bg-[#0d0d0d] text-white antialiased">
-        <GameProvider>
-        {children}
-        </GameProvider>
-        <Toaster
-          position="top-center"
-          toastOptions={{
-            style: {
-              background: '#1a1a1a',
-              border: '2px solid #ff6341',
-              borderRadius: '4px',
-              boxShadow: '4px 4px 0 0 #ff6341',
-              color: '#ffffff',
-              fontWeight: 700,
-              textTransform: 'uppercase' as const,
-              fontSize: '0.875rem',
-            },
-          }}
-        />
+        {content}
+        {!SAFE_BOOT && (
+          <Toaster
+            position="top-center"
+            toastOptions={{
+              style: {
+                background: "#1a1a1a",
+                border: "2px solid #ff6341",
+                borderRadius: "4px",
+                boxShadow: "4px 4px 0 0 #ff6341",
+                color: "#ffffff",
+                fontWeight: 700,
+                textTransform: "uppercase" as const,
+                fontSize: "0.875rem",
+              },
+            }}
+          />
+        )}
       </body>
     </html>
   );

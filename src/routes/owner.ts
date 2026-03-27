@@ -350,6 +350,10 @@ router.post("/predictions/:predictionId/resolve", authenticateOwner, async (req:
 
     const prediction = await Prediction.findByPk(predictionId);
     if (!prediction) { res.status(404).json({ error: "Prediction not found" }); return; }
+    if (prediction.status === "resolved" && prediction.correctOption === correctOption) {
+      res.json({ message: "Prediction already resolved" });
+      return;
+    }
 
     const io = req.app.get("io");
     await resolvePrediction(prediction, correctOption, io);
