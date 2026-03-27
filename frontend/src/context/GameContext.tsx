@@ -29,6 +29,7 @@ type GameAction =
   | { type: "SET_USER"; user: User; token: string }
   | { type: "SET_VENUE"; venueId: string; venueName: string }
   | { type: "SET_MATCH"; matchId: string }
+  | { type: "CLEAR_MATCH" }
   | { type: "UPDATE_PARTICIPANT"; data: Partial<GameState> }
   | { type: "USE_BOOST" }
   | { type: "USE_ALL_IN" }
@@ -61,6 +62,11 @@ function gameReducer(state: GameState, action: GameAction): GameState {
       return { ...state, venueId: action.venueId, venueName: action.venueName };
     case "SET_MATCH":
       return { ...state, matchId: action.matchId };
+    case "CLEAR_MATCH":
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("jaffa_match_id");
+      }
+      return { ...state, matchId: null, currentRound: 0, totalPoints: 0, currentStreak: 0, roundPoints: {} };
     case "UPDATE_PARTICIPANT":
       return { ...state, ...action.data };
     case "USE_BOOST":

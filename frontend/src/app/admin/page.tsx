@@ -4,7 +4,17 @@ import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { IoCheckmarkCircle, IoStatsChart, IoTicket, IoPeople, IoQrCode, IoKeypad, IoCopy, IoRefresh } from "react-icons/io5";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
+
+const apiFetch = (url: string, options: RequestInit = {}) =>
+  fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
+      ...options.headers,
+    },
+  });
 
 export default function AdminDashboard() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -106,9 +116,9 @@ export default function AdminDashboard() {
       return;
     }
     try {
-      const res = await fetch(`${API_URL}/venues/register`, {
+      const res = await apiFetch(`${API_URL}/venues/register`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "true" },
         body: JSON.stringify({
           name: regName,
           ownerName: regOwnerName,
@@ -138,7 +148,7 @@ export default function AdminDashboard() {
 
   const handleLogin = async () => {
     try {
-      const res = await fetch(`${API_URL}/venues/login`, {
+      const res = await apiFetch(`${API_URL}/venues/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ownerPhone: loginPhone, password: loginPassword }),
@@ -159,7 +169,7 @@ export default function AdminDashboard() {
 
   const loadStats = async () => {
     try {
-      const res = await fetch(`${API_URL}/admin/venue/stats`, {
+      const res = await apiFetch(`${API_URL}/admin/venue/stats`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setStats(await res.json());
@@ -170,7 +180,7 @@ export default function AdminDashboard() {
 
   const loadRewards = async () => {
     try {
-      const res = await fetch(`${API_URL}/rewards/venue`, {
+      const res = await apiFetch(`${API_URL}/rewards/venue`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) setRewards(await res.json());
@@ -181,7 +191,7 @@ export default function AdminDashboard() {
 
   const loadMatches = async () => {
     try {
-      const res = await fetch(`${API_URL}/matches`, {
+      const res = await apiFetch(`${API_URL}/matches`, {
         headers: { "ngrok-skip-browser-warning": "true" },
       });
       if (res.ok) {
@@ -200,7 +210,7 @@ export default function AdminDashboard() {
 
   const loadMatchCode = async (matchId: string) => {
     try {
-      const res = await fetch(`${API_URL}/admin/match-code/${matchId}`, {
+      const res = await apiFetch(`${API_URL}/admin/match-code/${matchId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -214,7 +224,7 @@ export default function AdminDashboard() {
 
   const loadPlayerCount = async (matchId: string) => {
     try {
-      const res = await fetch(`${API_URL}/admin/venue/players/${matchId}`, {
+      const res = await apiFetch(`${API_URL}/admin/venue/players/${matchId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -227,7 +237,7 @@ export default function AdminDashboard() {
   const generateCode = async (matchId: string) => {
     setGeneratingCode(matchId);
     try {
-      const res = await fetch(`${API_URL}/admin/match-code`, {
+      const res = await apiFetch(`${API_URL}/admin/match-code`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -249,7 +259,7 @@ export default function AdminDashboard() {
   const handleRedeem = async () => {
     setRedeemResult(null);
     try {
-      const res = await fetch(`${API_URL}/rewards/redeem`, {
+      const res = await apiFetch(`${API_URL}/rewards/redeem`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -270,7 +280,7 @@ export default function AdminDashboard() {
 
   const handleUpdateRewards = async () => {
     try {
-      const res = await fetch(`${API_URL}/venues/rewards`, {
+      const res = await apiFetch(`${API_URL}/venues/rewards`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",

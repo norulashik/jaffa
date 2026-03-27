@@ -22,13 +22,14 @@ const server = http.createServer(app);
 
 const io = new SocketIOServer(server, {
   cors: {
-    origin: process.env.CORS_ORIGIN || "http://localhost:3001",
+    origin: true,
     methods: ["GET", "POST"],
+    credentials: true,
   },
 });
 
 // Middleware
-app.use(cors({ origin: process.env.CORS_ORIGIN || "http://localhost:3001" }));
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
 // Make io accessible in routes

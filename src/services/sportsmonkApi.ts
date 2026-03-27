@@ -292,7 +292,7 @@ function getCurrentOver(balls: BallData[], innings: string): number {
 }
 
 // Track last processed over per match to avoid duplicate processing
-const lastProcessedOver: Map<string, { innings: number; over: number }> = new Map();
+const lastProcessedOver: Map<string, { innings: number; over: number; resolved: number }> = new Map();
 
 // Track last known score per match to detect ball-by-ball changes (for locking predictions)
 const lastKnownScore: Map<string, { innings: number; score: number; wickets: number; overs: number }> = new Map();
@@ -308,32 +308,34 @@ function resolveHotTakeAtPhaseEnd(
   inningsStr: string
 ): string | null {
   const q = prediction.question.toLowerCase();
-  if (round === 1 && q.includes("first 3")) {
-    let first3 = 0, last3 = 0;
+
+  // Round 1: "Total runs in the powerplay?"
+  if (round === 1 && q.includes("total runs in the powerplay")) {
+    let ppRuns = 0;
     for (const b of balls) {
       if (b.scoreboard !== "S1") continue;
-      const overIdx = Math.floor(b.ball);
-      if (overIdx < 3) first3 += b.score?.runs || 0;
-      else if (overIdx < 6) last3 += b.score?.runs || 0;
+      if (Math.floor(b.ball) < 6) ppRuns += b.score?.runs || 0;
     }
-    return first3 >= last3 ? "first_3" : "last_3";
+    if (ppRuns < 30) return "under_30";
+    if (ppRuns < 45) return "30_45";
+    if (ppRuns < 60) return "45_60";
+    return "60_plus";
   }
-  if (round === 2 && q.includes("highest partnership")) {
-    let highestPartnership = 0, currentPartnership = 0;
+
+  // Round 2: "What will the score be at the 10-over mark?"
+  if (round === 2 && q.includes("10-over mark")) {
+    let scoreAt10 = 0;
     for (const b of balls) {
       if (b.scoreboard !== "S1") continue;
-      currentPartnership += b.score?.runs || 0;
-      if (b.score?.is_wicket || b.batsmanout_id) {
-        highestPartnership = Math.max(highestPartnership, currentPartnership);
-        currentPartnership = 0;
-      }
+      if (Math.floor(b.ball) < 10) scoreAt10 += b.score?.runs || 0;
     }
-    highestPartnership = Math.max(highestPartnership, currentPartnership);
-    if (highestPartnership < 30) return "under_30";
-    if (highestPartnership <= 50) return "30_50";
-    if (highestPartnership <= 75) return "50_75";
-    return "75_plus";
+    if (scoreAt10 < 70) return "under_70";
+    if (scoreAt10 < 90) return "70_90";
+    if (scoreAt10 < 110) return "90_110";
+    return "110_plus";
   }
+
+  // Round 5: "How many wickets fall in the chase by over 15?"
   if (round === 5 && q.includes("wickets fall in the chase")) {
     const inn2Balls = balls.filter((b: any) => b.scoreboard === "S2" && b.ball < 15);
     let wkts = 0;
@@ -343,6 +345,7 @@ function resolveHotTakeAtPhaseEnd(
     if (wkts <= 6) return "5_6";
     return "7_plus";
   }
+
   return null;
 }
 
@@ -377,6 +380,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
       lastProcessedOver.set(match.id, {
         innings: match.currentInnings || 0,
         over: match.currentOver || 0,
+        resolved: (match.currentOver || 1) - 1,
       });
       console.log(`[Sportsmonk] Initialized tracking for ${match.team1Short} vs ${match.team2Short}: innings=${match.currentInnings}, over=${match.currentOver}`);
     }
@@ -495,7 +499,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
     const isWholeOver = rawOvers > 0 && rawOvers === Math.floor(rawOvers);
     const justCompletedOver = isWholeOver ? rawOvers : 0;
 
-    const lastProcessed = lastProcessedOver.get(match.id) || { innings: 0, over: 0 };
+    const lastProcessed = lastProcessedOver.get(match.id) || { innings: 0, over: 0, resolved: 0 };
 
     // === ALWAYS update live score on every poll (every 30s) ===
     const liveScore: Record<string, unknown> = {
@@ -571,6 +575,44 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
             }
             io.emit("newPrediction", { matchId: match.id, type: "per_over", overNumber: nextOverNum, round: nextOverRound });
             console.log(`[Sportsmonk] Generated over ${nextOverNum} predictions (during over ${currentOver})`);
+          }
+        }
+
+        // === Resolve over predictions as soon as possible ===
+        // Case 1: overs is whole number (e.g., 3.0) → over 3 just completed, resolve over 3 NOW
+        // Case 2: ball in over N detected → over N-1 is definitely complete, resolve it
+        const overToResolve = isWholeOver ? justCompletedOver : currentOver - 1;
+        if (overToResolve > 0 && overToResolve > (lastProcessed.resolved || 0)) {
+          try {
+            const fixtureWithBalls = await fetchFixtureWithBalls(fixtureId);
+            const balls: BallData[] = fixtureWithBalls?.balls?.data || [];
+            const overToResolveInningsStr = currentInningsStr;
+            const overToResolveStats = computeOverStats(balls, overToResolve, overToResolveInningsStr);
+            const overToResolveRound = getCurrentRound(currentInnings, overToResolve);
+
+            const overToResolvePreds = await Prediction.findAll({
+              where: { matchId: match.id, overNumber: overToResolve, round: overToResolveRound, category: "per_over" },
+            });
+
+            for (const pred of overToResolvePreds) {
+              if (pred.status === "open") await pred.update({ status: "locked" });
+            }
+            for (const pred of overToResolvePreds) {
+              if (pred.status !== "resolved") {
+                const correctOption = resolveOverPredictionFromStats(pred, overToResolveStats);
+                if (correctOption) {
+                  await resolvePrediction(pred, correctOption, io);
+                }
+              }
+            }
+            if (overToResolvePreds.length > 0) {
+              console.log(`[Sportsmonk] Resolved over ${overToResolve} predictions immediately (ball detected in over ${currentOver})`);
+            }
+
+            // Update resolved tracking
+            lastProcessedOver.set(match.id, { ...lastProcessed, resolved: overToResolve });
+          } catch (err) {
+            console.error(`[Sportsmonk] Error resolving over ${overToResolve}:`, err);
           }
         }
 
@@ -814,7 +856,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
         }
 
         // Update tracking so over-completion block doesn't re-run
-        lastProcessedOver.set(match.id, { innings: currentInnings, over: currentOver });
+        lastProcessedOver.set(match.id, { innings: currentInnings, over: currentOver, resolved: lastProcessed.over });
 
         console.log(`[Sportsmonk] Innings break — target: ${target}`);
       }
@@ -852,21 +894,23 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           await resolvePrediction(pred, correctOption, io);
           console.log(`[Sportsmonk] Catch-up resolved: "${pred.question}" → ${correctOption}`);
         }
-        // Catch-up: resolve round 1 hot takes (powerplay first 3 vs last 3)
+        // Catch-up: resolve round 1 hot takes (total powerplay runs)
         const round1HotTakes = await Prediction.findAll({
           where: { matchId: match.id, category: "hot_take", status: "open", round: 1 },
         });
         for (const pred of round1HotTakes) {
           const fullFixture = await fetchFixtureWithBalls(fixtureId);
           const allBalls: BallData[] = fullFixture?.balls?.data || [];
-          let first3 = 0, last3 = 0;
+          let ppRuns = 0;
           for (const b of allBalls) {
             if (b.scoreboard !== "S1") continue;
-            const overIdx = Math.floor(b.ball);
-            if (overIdx < 3) first3 += b.score?.runs || 0;
-            else if (overIdx < 6) last3 += b.score?.runs || 0;
+            if (Math.floor(b.ball) < 6) ppRuns += b.score?.runs || 0;
           }
-          const correctOption = first3 >= last3 ? "first_3" : "last_3";
+          let correctOption: string;
+          if (ppRuns < 30) correctOption = "under_30";
+          else if (ppRuns < 45) correctOption = "30_45";
+          else if (ppRuns < 60) correctOption = "45_60";
+          else correctOption = "60_plus";
           await resolvePrediction(pred, correctOption, io);
           console.log(`[Sportsmonk] Catch-up resolved: "${pred.question}" → ${correctOption}`);
         }
@@ -1048,8 +1092,11 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
         console.error(`[Sportsmonk] Error processing over change for ${match.team1Short} vs ${match.team2Short}:`, overErr);
       }
 
-      // Update tracking
-      lastProcessedOver.set(match.id, { innings: currentInnings, over: currentOver });
+      // Update tracking — mark the completed over as resolved
+      const resolvedOver = currentInnings > lastProcessed.innings
+        ? lastProcessed.over
+        : justCompletedOver > 0 ? justCompletedOver : currentOver - 1;
+      lastProcessedOver.set(match.id, { innings: currentInnings, over: currentOver, resolved: Math.max(resolvedOver, lastProcessed.resolved || 0) });
     }
   }
 }
@@ -1295,36 +1342,69 @@ function resolveEndOfMatchPrediction(
     return "7_plus";
   }
 
-  // "More runs in the powerplay — first 3 overs or last 3?"
-  if (q.includes("powerplay") && q.includes("first 3")) {
-    let first3 = 0, last3 = 0;
+  // "Total runs in the powerplay?"
+  if (q.includes("total runs in the powerplay")) {
+    let ppRuns = 0;
     for (const b of allBalls) {
       if (b.scoreboard !== "S1") continue;
-      const overIdx = Math.floor(b.ball);
-      if (overIdx < 3) first3 += b.score?.runs || 0;
-      else if (overIdx < 6) last3 += b.score?.runs || 0;
+      if (Math.floor(b.ball) < 6) ppRuns += b.score?.runs || 0;
     }
-    return first3 >= last3 ? "first_3" : "last_3";
+    if (ppRuns < 30) return "under_30";
+    if (ppRuns < 45) return "30_45";
+    if (ppRuns < 60) return "45_60";
+    return "60_plus";
   }
 
-  // "Biggest over in the death — how many runs?"
-  if (q.includes("biggest over in the death")) {
-    let maxOverRuns = 0;
-    for (let ov = 16; ov <= 20; ov++) {
-      let overRuns = 0;
-      const prefix = String(ov - 1);
-      for (const b of allBalls) {
-        if (b.scoreboard !== "S2") continue;
-        if (String(b.ball).split(".")[0] === prefix) {
-          overRuns += b.score?.runs || 0;
-        }
-      }
-      maxOverRuns = Math.max(maxOverRuns, overRuns);
+  // "What will the score be at the 10-over mark?"
+  if (q.includes("10-over mark")) {
+    let scoreAt10 = 0;
+    for (const b of allBalls) {
+      if (b.scoreboard !== "S1") continue;
+      if (Math.floor(b.ball) < 10) scoreAt10 += b.score?.runs || 0;
     }
-    if (maxOverRuns < 10) return "under_10";
-    if (maxOverRuns <= 15) return "10_15";
-    if (maxOverRuns <= 20) return "16_20";
-    return "20_plus";
+    if (scoreAt10 < 70) return "under_70";
+    if (scoreAt10 < 90) return "70_90";
+    if (scoreAt10 < 110) return "90_110";
+    return "110_plus";
+  }
+
+  // "Will the match end with a six or a four?"
+  if (q.includes("end with a six or a four")) {
+    if (allBalls.length === 0) return "neither";
+    const lastBall = allBalls[allBalls.length - 1];
+    const runs = lastBall.score?.runs || 0;
+    const isSix = lastBall.score?.six || runs === 6;
+    const isFour = lastBall.score?.four || runs === 4;
+    if (isSix) return "six";
+    if (isFour) return "four";
+    return "neither";
+  }
+
+  // "How much will [team] score in the powerplay?" (rivalry call)
+  if (q.includes("score in the powerplay")) {
+    let ppRuns = 0;
+    for (const b of allBalls) {
+      if (b.scoreboard !== "S2") continue;
+      if (Math.floor(b.ball) < 6) ppRuns += b.score?.runs || 0;
+    }
+    if (ppRuns < 30) return "under_30";
+    if (ppRuns < 45) return "30_45";
+    if (ppRuns < 60) return "45_60";
+    return "60_plus";
+  }
+
+  // "Will any player score a century tonight?"
+  if (q.includes("century")) {
+    let hasCentury = false;
+    const batterRuns: Record<number, number> = {};
+    for (const b of allBalls) {
+      const batterId = b.batsman_id;
+      if (batterId) {
+        batterRuns[batterId] = (batterRuns[batterId] || 0) + (b.score?.runs || 0);
+        if (batterRuns[batterId] >= 100) { hasCentury = true; break; }
+      }
+    }
+    return hasCentury ? "yes" : "no";
   }
 
   // "Chase done in which phase?"

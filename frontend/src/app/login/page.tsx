@@ -21,6 +21,12 @@ export default function LoginOTP() {
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   useEffect(() => {
+    const isCafeRoute = window.location.pathname.startsWith("/cafe/");
+    if (!isCafeRoute) {
+      // Can't login without a venue — redirect to home
+      router.replace("/");
+      return;
+    }
     const venueId = localStorage.getItem("jaffa_venue_id");
     if (venueId) {
       api.getVenue(venueId).then((v) => setVenueName(v.name)).catch(() => {});

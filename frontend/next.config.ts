@@ -20,6 +20,18 @@ const nextConfig: NextConfig = {
     // Force Turbopack to treat the frontend folder as the workspace root
     root: path.join(__dirname),
   },
+  async rewrites() {
+    return [
+      {
+        source: "/api/:path*",
+        destination: "http://localhost:5000/api/:path*",
+      },
+      {
+        source: "/socket.io/:path*",
+        destination: "http://localhost:5000/socket.io/:path*",
+      },
+    ];
+  },
 };
 
 export default nextConfig;

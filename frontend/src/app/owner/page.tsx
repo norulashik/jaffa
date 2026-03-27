@@ -8,7 +8,7 @@ import {
   IoArrowBack, IoEye, IoSearch,
 } from "react-icons/io5";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 type Tab = "dashboard" | "venues" | "venue-detail" | "matches" | "tools";
 
@@ -79,6 +79,7 @@ export default function OwnerPortal() {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
+        "ngrok-skip-browser-warning": "true",
         ...options.headers,
       },
     });
@@ -92,7 +93,7 @@ export default function OwnerPortal() {
     try {
       const res = await fetch(`${API_URL}/owner/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "true" },
         body: JSON.stringify({ username: loginUser, password: loginPass }),
       });
       const data = await res.json();

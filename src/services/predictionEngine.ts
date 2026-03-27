@@ -97,6 +97,17 @@ export function generatePreMatchPredictions(
         { key: "stumped", label: "Stumped", points: 40 },
       ],
     },
+    // Q6: Will any player score a century?
+    {
+      matchId,
+      category: "pre_match",
+      round: 0,
+      question: "Will any player score a century tonight?",
+      options: [
+        { key: "yes", label: "Yes", points: 30 },
+        { key: "no", label: "No", points: 10 },
+      ],
+    },
   ];
 }
 
@@ -267,20 +278,22 @@ export function generateHotTake(
   const hotTakes: Record<number, () => { question: string; options: { key: string; label: string; points: number }[] }> = {
     // Round 1: 1st Innings Powerplay (Overs 1-6)
     1: () => ({
-      question: "More runs in the powerplay — first 3 overs or last 3?",
+      question: "Total runs in the powerplay?",
       options: [
-        { key: "first_3", label: "First 3 overs (1-3)", points: 20 },
-        { key: "last_3", label: "Last 3 overs (4-6)", points: 20 },
+        { key: "under_30", label: "Under 30", points: 25 },
+        { key: "30_45", label: "30-45", points: 20 },
+        { key: "45_60", label: "45-60", points: 20 },
+        { key: "60_plus", label: "60+", points: 25 },
       ],
     }),
     // Round 2: 1st Innings Middle (Overs 7-15)
     2: () => ({
-      question: "Highest partnership this innings — how big will it be?",
+      question: "What will the score be at the 10-over mark?",
       options: [
-        { key: "under_30", label: "Under 30 — wickets keep falling", points: 25 },
-        { key: "30_50", label: "30-50 — decent but nothing special", points: 20 },
-        { key: "50_75", label: "50-75 — solid partnership", points: 20 },
-        { key: "75_plus", label: "75+ — match-defining stand", points: 30 },
+        { key: "under_70", label: "Under 70", points: 25 },
+        { key: "70_90", label: "70-90", points: 20 },
+        { key: "90_110", label: "90-110", points: 20 },
+        { key: "110_plus", label: "110+", points: 25 },
       ],
     }),
     // Round 3: 1st Innings Death (Overs 16-20)
@@ -313,12 +326,11 @@ export function generateHotTake(
     }),
     // Round 6: Chase Death (Overs 16-20)
     6: () => ({
-      question: "What's the biggest over in the death — how many runs?",
+      question: "Will the match end with a six or a four?",
       options: [
-        { key: "under_10", label: "Under 10", points: 15 },
-        { key: "10_15", label: "10-15", points: 20 },
-        { key: "16_20", label: "16-20", points: 25 },
-        { key: "20_plus", label: "20+", points: 30 },
+        { key: "six", label: "Six — dramatic finish!", points: 25 },
+        { key: "four", label: "Four — classy ending", points: 20 },
+        { key: "neither", label: "Neither — single, dot, or wicket", points: 20 },
       ],
     }),
   };
@@ -366,21 +378,19 @@ export function generateRivalryCalls(
     },
   ];
 
-  // Q2: Who hits the winning runs?
-  if (team2Players.length >= 4) {
-    const candidates = team2Players.slice(0, 5);
-    predictions.push({
-      matchId,
-      category: "rivalry_call",
-      round: 4, // assigned to chase powerplay round for points tracking
-      question: "Who hits the winning runs?",
-      options: candidates.map((player) => ({
-        key: player.toLowerCase().replace(/\s+/g, "_"),
-        label: player,
-        points: 50,
-      })),
-    });
-  }
+  // Q2: Chase powerplay score
+  predictions.push({
+    matchId,
+    category: "rivalry_call",
+    round: 4,
+    question: `${team2Short} chasing — how much will they score in the powerplay?`,
+    options: [
+      { key: "under_30", label: "Under 30", points: 20 },
+      { key: "30_45", label: "30-45", points: 20 },
+      { key: "45_60", label: "45-60", points: 25 },
+      { key: "60_plus", label: "60+", points: 30 },
+    ],
+  });
 
   return predictions;
 }

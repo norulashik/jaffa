@@ -207,6 +207,12 @@ export default function MatchDashboard() {
         api.getPredictions(matchId, venueId),
       ]);
       setMatchData(match);
+
+      // Detect match completion — clear stale match from state
+      if (match.status === "completed") {
+        dispatch({ type: "CLEAR_MATCH" });
+      }
+
       const filtered = (preds || []).filter((p: any) => p.category !== "pre_match");
       setPredictions(filtered);
       // Restore already-answered selections
@@ -473,10 +479,16 @@ export default function MatchDashboard() {
                 <span className="font-label text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-widest">
                   {sd.series || `${matchData?.team1Short || "T1"} vs ${matchData?.team2Short || "T2"}`}
                 </span>
-                <div className="flex items-center gap-2 bg-error-container/20 px-3 py-1 rounded-full border border-error/30">
-                  <span className="w-2 h-2 rounded-full bg-error animate-pulse"></span>
-                  <span className="font-label text-[10px] font-bold text-error uppercase tracking-widest">Live</span>
-                </div>
+                {matchData?.status === "completed" ? (
+                  <div className="flex items-center gap-2 bg-surface-container-highest px-3 py-1 rounded-full border border-white/10">
+                    <span className="font-label text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Completed</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 bg-error-container/20 px-3 py-1 rounded-full border border-error/30">
+                    <span className="w-2 h-2 rounded-full bg-error animate-pulse"></span>
+                    <span className="font-label text-[10px] font-bold text-error uppercase tracking-widest">Live</span>
+                  </div>
+                )}
               </div>
 
               {/* Score Display */}

@@ -8,8 +8,8 @@ import { MdSportsCricket } from "react-icons/md";
 import CricketAvatar from "@/components/CricketAvatar";
 import { AvatarConfig } from "@/types/avatar";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api";
-const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001";
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
+const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || (typeof window !== "undefined" ? window.location.origin : "");
 
 interface TVLeaderboardEntry {
   rank: number;
