@@ -1,0 +1,8 @@
+<svg width="200" height="60" viewBox="0 0 200 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- JAFFA Text -->
+  <text x="10" y="45" font-family="Arial, sans-serif" font-size="42" font-weight="900" fill="#ff6341" letter-spacing="2">
+    JAFFA
+  </text>
+  <!-- Lightning Bolt Accent -->
+  <path d="M175 10 L170 25 L177 25 L172 40 L182 22 L176 22 L180 10 Z" fill="#ffd700" stroke="#ff6341" stroke-width="1.5"/>
+</svg>

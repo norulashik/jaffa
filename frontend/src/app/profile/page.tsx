@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
-import MaterialIcon from "@/components/MaterialIcon";
 import CricketAvatar from "@/components/CricketAvatar";
 import AvatarCustomizer from "@/components/AvatarCustomizer";
+import { Settings, HelpCircle, LogOut, ChevronRight, User } from "lucide-react";
 import { api } from "@/lib/api";
 import { AvatarConfig } from "@/types/avatar";
 
@@ -46,43 +47,33 @@ export default function ProfilePage() {
     try {
       await api.updateAvatar(config);
     } catch {
-      // Silent fail — local update is enough
+      // Silent fail -- local update is enough
     }
     setShowCustomizer(false);
   };
 
   return (
-    <div className="bg-surface text-on-surface font-body min-h-screen">
-      <Header
-        leftContent={
-          <button onClick={() => router.back()} className="flex items-center gap-2 text-on-surface-variant hover:text-on-surface transition-colors">
-            <MaterialIcon icon="arrow_back" />
-            <span className="font-label text-sm font-bold uppercase tracking-widest">Back</span>
-          </button>
-        }
-        rightContent={
-          <div className="w-10 h-10 rounded-full bg-surface-container-highest border-2 border-primary-container/30 overflow-hidden flex items-center justify-center">
-            <MaterialIcon icon="person" className="text-on-surface-variant" />
-          </div>
-        }
-      />
+    <div className="bg-[#0d0d0d] text-white min-h-screen">
+      <Header />
 
       <main className="pt-24 pb-32 px-6 max-w-2xl mx-auto">
         {/* Profile Card */}
-        <section className="relative overflow-hidden rounded-xl bg-surface-container-low p-8 stadium-glow mb-8">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-primary-container/5 rounded-full blur-3xl -mr-20 -mt-20"></div>
-          <div className="relative z-10 flex flex-col items-center text-center">
+        <section className="game-card mb-8" style={{ boxShadow: "6px 6px 0 0 #ff6341" }}>
+          <div className="flex flex-col items-center text-center py-4">
             {/* Avatar */}
             <div className="relative mb-4">
-              <div
-                className="absolute inset-0 rounded-full blur-2xl opacity-30"
-                style={{ background: avatarConfig?.jerseyColor || "#00FFAB" }}
-              />
               {avatarConfig ? (
                 <CricketAvatar config={avatarConfig} size="lg" interactive />
               ) : (
-                <div className="w-24 h-24 rounded-full border-2 border-primary-container shadow-[0_0_20px_rgba(0,255,171,0.2)] bg-surface-container-highest flex items-center justify-center">
-                  <MaterialIcon icon="person" className="text-4xl text-primary-container" />
+                <div
+                  className="w-24 h-24 flex items-center justify-center"
+                  style={{
+                    border: "3px solid #ff6341",
+                    borderRadius: "4px",
+                    background: "#1a1a1a",
+                  }}
+                >
+                  <User size={40} className="text-[#ff6341]" />
                 </div>
               )}
             </div>
@@ -90,43 +81,55 @@ export default function ProfilePage() {
             {/* Customize button */}
             <button
               onClick={() => setShowCustomizer(true)}
-              className="mb-4 px-4 py-1.5 rounded-full bg-primary-container/20 border border-primary-container/40 text-primary-container font-label text-xs font-bold uppercase tracking-widest hover:bg-primary-container/30 transition-all"
+              className="btn-secondary mb-4 text-xs px-4 py-1.5"
             >
-              ✏ Customize Avatar
+              CUSTOMIZE AVATAR
             </button>
 
-            <h1 className="font-headline text-2xl font-bold tracking-tight text-on-surface uppercase mb-1">
+            <h1
+              className="text-2xl font-bold tracking-tight text-white uppercase mb-1"
+              style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+            >
               {user?.displayName || "Player"}
             </h1>
-            <p className="font-label text-xs text-on-surface-variant tracking-widest uppercase mb-6">
+            <span className="info-pill">
               {user?.phone || ""}
-            </p>
+            </span>
           </div>
         </section>
 
         {/* Settings */}
         <section className="space-y-3">
-          <div className="bg-surface-container-low rounded-xl p-5 border border-white/5 flex items-center justify-between hover:bg-surface-container-high transition-colors cursor-pointer">
-            <div className="flex items-center gap-4">
-              <MaterialIcon icon="settings" className="text-on-surface-variant" />
-              <span className="font-body font-medium">Settings</span>
-            </div>
-            <MaterialIcon icon="chevron_right" className="text-on-surface-variant" />
-          </div>
-          <div className="bg-surface-container-low rounded-xl p-5 border border-white/5 flex items-center justify-between hover:bg-surface-container-high transition-colors cursor-pointer">
-            <div className="flex items-center gap-4">
-              <MaterialIcon icon="help" className="text-on-surface-variant" />
-              <span className="font-body font-medium">Help & Support</span>
-            </div>
-            <MaterialIcon icon="chevron_right" className="text-on-surface-variant" />
-          </div>
-          <button
-            onClick={handleLogout}
-            className="w-full bg-surface-container-low rounded-xl p-5 border border-white/5 flex items-center gap-4 hover:bg-error-container/20 transition-colors text-left"
+          <motion.div
+            whileTap={{ scale: 0.98 }}
+            className="game-card flex items-center justify-between cursor-pointer"
           >
-            <MaterialIcon icon="logout" className="text-error" />
-            <span className="font-body font-medium text-error">Logout</span>
-          </button>
+            <div className="flex items-center gap-4">
+              <Settings size={20} className="text-[#6b7280]" />
+              <span className="font-medium">Settings</span>
+            </div>
+            <ChevronRight size={20} className="text-[#6b7280]" />
+          </motion.div>
+
+          <motion.div
+            whileTap={{ scale: 0.98 }}
+            className="game-card flex items-center justify-between cursor-pointer"
+          >
+            <div className="flex items-center gap-4">
+              <HelpCircle size={20} className="text-[#6b7280]" />
+              <span className="font-medium">Help & Support</span>
+            </div>
+            <ChevronRight size={20} className="text-[#6b7280]" />
+          </motion.div>
+
+          <motion.button
+            whileTap={{ scale: 0.98 }}
+            onClick={handleLogout}
+            className="w-full game-card flex items-center gap-4 text-left hover:border-[#ff6341] transition-colors"
+          >
+            <LogOut size={20} className="text-red-500" />
+            <span className="font-medium text-red-500">Logout</span>
+          </motion.button>
         </section>
       </main>
 

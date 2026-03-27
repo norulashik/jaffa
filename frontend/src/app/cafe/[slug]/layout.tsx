@@ -4,6 +4,11 @@ import { useEffect, useState, ReactNode } from "react";
 import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
 
+const BUNGEE: React.CSSProperties = {
+  fontFamily: "'Bungee', 'Impact', cursive",
+  textTransform: "uppercase" as const,
+};
+
 export default function CafeLayout({ children }: { children: ReactNode }) {
   const params = useParams();
   const slug = params.slug as string;
@@ -34,19 +39,39 @@ export default function CafeLayout({ children }: { children: ReactNode }) {
 
   if (status === "loading") {
     return (
-      <div className="min-h-screen bg-surface flex items-center justify-center">
-        <div className="w-10 h-10 border-3 border-primary-container border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-[#0d0d0d] flex items-center justify-center">
+        <div
+          className="w-10 h-10 animate-spin"
+          style={{
+            border: "3px solid #1a1a1a",
+            borderTop: "3px solid #ff6341",
+            borderRadius: "2px",
+          }}
+        />
       </div>
     );
   }
 
   if (status === "invalid") {
     return (
-      <div className="min-h-screen bg-surface flex items-center justify-center p-6">
-        <div className="text-center">
-          <div className="text-6xl mb-4">🏏</div>
-          <h1 className="text-2xl font-bold text-on-surface mb-2">Venue Not Found</h1>
-          <p className="text-on-surface-variant text-sm">This cafe link is invalid or no longer active.</p>
+      <div className="min-h-screen bg-[#0d0d0d] flex items-center justify-center p-6">
+        <div className="game-card p-8 text-center max-w-sm w-full">
+          <div
+            className="w-16 h-16 mx-auto mb-4 bg-[#ff6341] flex items-center justify-center"
+            style={{
+              border: "3px solid #000",
+              borderRadius: "3px",
+              boxShadow: "4px 4px 0 0 #000",
+            }}
+          >
+            <span className="text-3xl text-black" style={BUNGEE}>!</span>
+          </div>
+          <h1 className="text-xl mb-2" style={BUNGEE}>
+            Venue Not Found
+          </h1>
+          <p className="text-white/50 text-sm">
+            This cafe link is invalid or no longer active.
+          </p>
         </div>
       </div>
     );

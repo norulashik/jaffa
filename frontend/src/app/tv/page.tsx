@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { io, Socket } from "socket.io-client";
 import { IoFlame, IoRocket, IoTrophy } from "react-icons/io5";
-import { MdSportsCricket } from "react-icons/md";
+import { GiCrownCoin } from "react-icons/gi";
 import CricketAvatar from "@/components/CricketAvatar";
 import { AvatarConfig } from "@/types/avatar";
 
@@ -49,7 +49,6 @@ export default function TVDisplay() {
     loadMatch();
     loadLeaderboards();
 
-    // Connect socket
     const socket = io(SOCKET_URL);
     socketRef.current = socket;
 
@@ -112,7 +111,9 @@ export default function TVDisplay() {
 
   const loadMatch = async () => {
     try {
-      const res = await fetch(`${API_URL}/matches/${matchId}`);
+      const res = await fetch(`${API_URL}/matches/${matchId}`, {
+        headers: { "ngrok-skip-browser-warning": "true" },
+      });
       if (res.ok) setMatch(await res.json());
     } catch (err) {
       console.error(err);
@@ -122,9 +123,15 @@ export default function TVDisplay() {
   const loadLeaderboards = async () => {
     try {
       const [roundRes, matchRes, countRes] = await Promise.all([
-        fetch(`${API_URL}/leaderboard/${matchId}/${venueId}/round/${currentRound}`),
-        fetch(`${API_URL}/leaderboard/${matchId}/${venueId}/match`),
-        fetch(`${API_URL}/leaderboard/${matchId}/${venueId}/count`),
+        fetch(`${API_URL}/leaderboard/${matchId}/${venueId}/round/${currentRound}`, {
+          headers: { "ngrok-skip-browser-warning": "true" },
+        }),
+        fetch(`${API_URL}/leaderboard/${matchId}/${venueId}/match`, {
+          headers: { "ngrok-skip-browser-warning": "true" },
+        }),
+        fetch(`${API_URL}/leaderboard/${matchId}/${venueId}/count`, {
+          headers: { "ngrok-skip-browser-warning": "true" },
+        }),
       ]);
 
       if (roundRes.ok) {
@@ -146,35 +153,44 @@ export default function TVDisplay() {
 
   if (!venueId || !matchId) {
     return (
-      <div className="min-h-screen bg-surface flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#0d0d0d' }}>
         <div className="text-center">
-          <h1 className="text-6xl font-black text-primary-container mb-4">JAFFA</h1>
-          <p className="text-on-surface-variant text-xl">TV Display</p>
-          <p className="text-outline-variant mt-4">Add ?v=VENUE_ID&m=MATCH_ID to the URL</p>
+          <h1 className="text-7xl mb-4" style={{ fontFamily: 'Bungee', color: '#ff6341' }}>JAFFA</h1>
+          <p className="text-2xl font-black text-white/50 uppercase">TV Display</p>
+          <div className="mt-6 p-4" style={{ background: '#1a1a1a', border: '2px solid #ff6341', borderRadius: '4px', boxShadow: '4px 4px 0 0 #ff6341' }}>
+            <p className="text-white/60 font-bold">Add <span className="text-[#ff6341]">?v=VENUE_ID&m=MATCH_ID</span> to the URL</p>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-surface via-surface-container-low to-surface p-8 overflow-hidden">
+    <div className="min-h-screen p-8 overflow-hidden" style={{ background: '#0d0d0d' }}>
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <div className="flex items-center gap-4">
-          <h1 className="text-5xl font-black text-primary-container">JAFFA</h1>
+      <div
+        className="flex items-center justify-between mb-8 p-6"
+        style={{ background: '#1a1a1a', border: '3px solid #ff6341', borderRadius: '4px', boxShadow: '6px 6px 0 0 #000' }}
+      >
+        <div className="flex items-center gap-6">
+          <h1 className="text-5xl" style={{ fontFamily: 'Bungee', color: '#ff6341' }}>JAFFA</h1>
           {match && (
-            <div className="flex items-center gap-3 ml-4">
-              <MdSportsCricket className="text-2xl text-on-surface-variant" />
-              <span className="text-2xl font-bold text-on-surface">
-                {match.team1Short} vs {match.team2Short}
-              </span>
+            <div className="flex items-center gap-3">
+              <span className="text-3xl font-black text-white uppercase">{match.team1Short}</span>
+              <span className="text-2xl font-black px-3 py-1" style={{ fontFamily: 'Bungee', color: '#ff6341', background: '#111', border: '2px solid #ff6341', borderRadius: '2px' }}>VS</span>
+              <span className="text-3xl font-black text-white uppercase">{match.team2Short}</span>
             </div>
           )}
         </div>
-        <div className="text-right">
-          <div className="text-lg text-on-surface-variant">{playerCount} players</div>
-          <div className="text-sm text-primary-container">
-            {displayMode === "round" ? `Round ${currentRound}` : displayMode === "match" ? "Overall" : ""}
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 px-4 py-2" style={{ background: '#ff6341', border: '2px solid #000', borderRadius: '2px', boxShadow: '3px 3px 0 0 #000' }}>
+            <GiCrownCoin className="w-5 h-5 text-black" />
+            <span className="text-black font-black">{playerCount} PLAYERS</span>
+          </div>
+          <div className="px-3 py-1" style={{ background: '#222', border: '2px solid #555', borderRadius: '2px' }}>
+            <span className="text-sm font-black text-white uppercase">
+              {displayMode === "round" ? `Round ${currentRound}` : displayMode === "match" ? "Overall" : displayMode === "pulse" ? "Prediction" : "Hype"}
+            </span>
           </div>
         </div>
       </div>
@@ -190,10 +206,10 @@ export default function TVDisplay() {
             exit={{ opacity: 0, y: -20 }}
           >
             <div className="text-center mb-6">
-              <h2 className="text-3xl font-bold text-on-surface">
-                Round {currentRound} Leaderboard
+              <h2 className="text-4xl mb-2" style={{ fontFamily: 'Bungee' }}>
+                ROUND <span style={{ color: '#ff6341' }}>{currentRound}</span> LEADERBOARD
               </h2>
-              <p className="text-on-surface-variant">Top performers this round</p>
+              <p className="text-white/50 font-bold uppercase">Top performers this round</p>
             </div>
             <TVLeaderboard entries={roundLeaderboard} pointsKey="points" />
           </motion.div>
@@ -208,8 +224,10 @@ export default function TVDisplay() {
             exit={{ opacity: 0, y: -20 }}
           >
             <div className="text-center mb-6">
-              <h2 className="text-3xl font-bold text-on-surface">Match Leaderboard</h2>
-              <p className="text-on-surface-variant">Overall standings</p>
+              <h2 className="text-4xl mb-2" style={{ fontFamily: 'Bungee' }}>
+                MATCH <span style={{ color: '#ffd60a' }}>LEADERBOARD</span>
+              </h2>
+              <p className="text-white/50 font-bold uppercase">Overall standings</p>
             </div>
             <TVLeaderboard entries={matchLeaderboard} pointsKey="totalPoints" />
           </motion.div>
@@ -224,12 +242,13 @@ export default function TVDisplay() {
             exit={{ scale: 0.8, opacity: 0 }}
             className="flex items-center justify-center h-[60vh]"
           >
-            <div className="text-center max-w-3xl">
-              <div className="text-xl text-on-surface-variant mb-4">{pulseData.question}</div>
-              <div className="text-4xl font-black text-primary-container mb-6">
+            <div className="text-center max-w-3xl p-12" style={{ background: '#1a1a1a', border: '3px solid #ff6341', borderRadius: '4px', boxShadow: '8px 8px 0 0 #ff6341' }}>
+              <span className="live-badge mb-6 inline-block">PREDICTION RESULT</span>
+              <div className="text-xl text-white/60 mb-4 font-bold uppercase">{pulseData.question}</div>
+              <div className="text-5xl mb-6" style={{ fontFamily: 'Bungee', color: '#22c55e' }}>
                 {pulseData.correctLabel}
               </div>
-              <div className="text-2xl font-bold text-on-surface">
+              <div className="text-2xl font-black text-white">
                 {pulseData.pulse}
               </div>
             </div>
@@ -248,14 +267,11 @@ export default function TVDisplay() {
             <div className="text-center">
               {hypeData.type === "all_in" && (
                 <>
-                  <motion.div
-                    animate={{ rotate: [0, -10, 10, 0], scale: [1, 1.2, 1] }}
-                    transition={{ duration: 0.5 }}
-                  >
-                    <IoRocket className="text-8xl text-purple-400 mx-auto mb-6" />
+                  <motion.div animate={{ rotate: [0, -10, 10, 0], scale: [1, 1.2, 1] }} transition={{ duration: 0.5 }}>
+                    <IoRocket className="text-8xl mx-auto mb-6" style={{ color: '#ffd60a' }} />
                   </motion.div>
-                  <p className="text-5xl font-black text-on-surface mb-4">ALL IN!</p>
-                  <p className="text-2xl text-purple-300">
+                  <p className="text-6xl mb-4" style={{ fontFamily: 'Bungee', color: '#ffd60a' }}>ALL IN!</p>
+                  <p className="text-2xl font-black text-white">
                     {hypeData.playerName} is going all in!
                   </p>
                 </>
@@ -263,32 +279,26 @@ export default function TVDisplay() {
 
               {hypeData.type === "all_in_failed" && (
                 <>
-                  <motion.div
-                    animate={{ rotate: [0, -15, 15, -10, 10, 0], scale: [1, 0.8, 1] }}
-                    transition={{ duration: 0.6 }}
-                  >
-                    <IoRocket className="text-8xl text-red-500 mx-auto mb-6" />
+                  <motion.div animate={{ rotate: [0, -15, 15, -10, 10, 0], scale: [1, 0.8, 1] }} transition={{ duration: 0.6 }}>
+                    <IoRocket className="text-8xl mx-auto mb-6" style={{ color: '#ff6341' }} />
                   </motion.div>
-                  <p className="text-5xl font-black text-red-400 mb-4">ALL IN FAILED!</p>
-                  <p className="text-2xl text-red-300">
+                  <p className="text-6xl mb-4" style={{ fontFamily: 'Bungee', color: '#ff6341' }}>ALL IN FAILED!</p>
+                  <p className="text-2xl font-black text-white">
                     {hypeData.playerName} lost {hypeData.pointsLost} points
                   </p>
-                  <p className="text-xl text-on-surface-variant mt-2">That&apos;s gotta hurt.</p>
+                  <p className="text-xl text-white/50 mt-2 font-bold">That&apos;s gotta hurt.</p>
                 </>
               )}
 
               {hypeData.type === "streak" && (
                 <>
-                  <motion.div
-                    animate={{ scale: [1, 1.3, 1] }}
-                    transition={{ repeat: 3, duration: 0.3 }}
-                  >
-                    <IoFlame className="text-8xl text-yellow-400 mx-auto mb-6" />
+                  <motion.div animate={{ scale: [1, 1.3, 1] }} transition={{ repeat: 3, duration: 0.3 }}>
+                    <IoFlame className="text-8xl mx-auto mb-6" style={{ color: '#ffd60a' }} />
                   </motion.div>
-                  <p className="text-5xl font-black text-on-surface mb-4">
+                  <p className="text-6xl mb-4" style={{ fontFamily: 'Bungee', color: '#ffd60a' }}>
                     {hypeData.streak} STREAK!
                   </p>
-                  <p className="text-2xl text-yellow-300">
+                  <p className="text-2xl font-black text-white">
                     {hypeData.playerName} is on fire!
                   </p>
                 </>
@@ -296,14 +306,15 @@ export default function TVDisplay() {
 
               {hypeData.type === "round_winner" && (
                 <>
-                  <motion.div
-                    animate={{ rotate: [0, -5, 5, 0] }}
-                    transition={{ repeat: 2, duration: 0.5 }}
-                  >
-                    <IoTrophy className="text-8xl text-yellow-400 mx-auto mb-6" />
+                  <motion.div animate={{ rotate: [0, -5, 5, 0] }} transition={{ repeat: 2, duration: 0.5 }}>
+                    <IoTrophy className="text-8xl mx-auto mb-6" style={{ color: '#ffd60a' }} />
                   </motion.div>
-                  <p className="text-4xl font-black text-on-surface mb-6">
-                    {hypeData.isGrandPrize ? "MATCH CHAMPION!" : `ROUND ${hypeData.round} WINNERS!`}
+                  <p className="text-5xl mb-8" style={{ fontFamily: 'Bungee' }}>
+                    {hypeData.isGrandPrize ? (
+                      <span style={{ color: '#ffd60a' }}>MATCH CHAMPION!</span>
+                    ) : (
+                      <>ROUND <span style={{ color: '#ff6341' }}>{hypeData.round}</span> WINNERS!</>
+                    )}
                   </p>
                   <div className="space-y-4">
                     {hypeData.winners?.map((w: any) => (
@@ -312,18 +323,20 @@ export default function TVDisplay() {
                         initial={{ x: -50, opacity: 0 }}
                         animate={{ x: 0, opacity: 1 }}
                         transition={{ delay: w.position * 0.3 }}
-                        className="flex items-center justify-center gap-4"
+                        className="flex items-center justify-center gap-6 p-4"
+                        style={{
+                          background: '#1a1a1a',
+                          border: `2px solid ${w.position === 1 ? '#ffd60a' : w.position === 2 ? '#9ca3af' : '#ff6341'}`,
+                          borderRadius: '4px',
+                          boxShadow: `4px 4px 0 0 ${w.position === 1 ? '#ffd60a' : w.position === 2 ? '#9ca3af' : '#ff6341'}`,
+                        }}
                       >
-                        <span className={`text-3xl font-black ${
-                          w.position === 1 ? "text-yellow-400" :
-                          w.position === 2 ? "text-slate-300" :
-                          "text-primary-container"
-                        }`}>
+                        <span className={w.position <= 3 ? 'rank-badge' : 'rank-badge-gray'} style={w.position === 1 ? { background: '#ffd60a' } : w.position === 2 ? { background: '#9ca3af' } : {}}>
                           #{w.position}
                         </span>
-                        <span className="text-2xl font-bold text-on-surface">{w.displayName}</span>
-                        <span className="text-xl text-on-surface-variant">{w.points} pts</span>
-                        <span className="text-lg text-green-400">{w.reward}</span>
+                        <span className="text-2xl font-black text-white uppercase">{w.displayName}</span>
+                        <span className="text-xl font-black" style={{ color: '#ff6341' }}>{w.points} pts</span>
+                        <span className="text-lg font-black" style={{ color: '#22c55e' }}>{w.reward}</span>
                       </motion.div>
                     ))}
                   </div>
@@ -335,11 +348,14 @@ export default function TVDisplay() {
       </AnimatePresence>
 
       {/* Footer */}
-      <div className="fixed bottom-0 left-0 right-0 bg-surface-container-low/80 backdrop-blur px-8 py-4 flex items-center justify-between">
-        <p className="text-on-surface-variant">
-          Scan the QR code to join! <span className="text-primary-container font-bold">JAFFA</span>
+      <div
+        className="fixed bottom-0 left-0 right-0 px-8 py-4 flex items-center justify-between"
+        style={{ background: '#1a1a1a', borderTop: '3px solid #ff6341', boxShadow: '0 -4px 0 0 #000' }}
+      >
+        <p className="text-white/50 font-bold uppercase">
+          Scan the QR code to join! <span className="font-black" style={{ color: '#ff6341' }}>JAFFA</span>
         </p>
-        <p className="text-outline text-sm">Predict. Play. Win.</p>
+        <p className="text-white/30 text-sm font-bold uppercase">Predict. Play. Win.</p>
       </div>
     </div>
   );
@@ -354,31 +370,33 @@ function TVLeaderboard({
 }) {
   const top10 = entries.slice(0, 10);
 
+  const getRankColor = (index: number) => {
+    if (index === 0) return '#ffd60a';
+    if (index === 1) return '#9ca3af';
+    if (index === 2) return '#ff6341';
+    return '#4b5563';
+  };
+
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-5xl mx-auto space-y-3">
       {top10.map((entry, index) => (
         <motion.div
           key={entry.displayName}
           initial={{ x: -50, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
           transition={{ delay: index * 0.05 }}
-          className={`flex items-center gap-4 px-6 py-4 mb-2 rounded-xl ${
-            index === 0
-              ? "bg-gradient-to-r from-yellow-600/20 to-orange-600/20 border border-yellow-500/30"
-              : index <= 2
-              ? "bg-surface-container-high/60 border border-white/10"
-              : "bg-surface-container-low/40"
-          }`}
+          className="flex items-center gap-5 px-6 py-5"
+          style={{
+            background: '#1a1a1a',
+            border: `2px solid ${index < 3 ? getRankColor(index) : '#2a2a2a'}`,
+            borderRadius: '4px',
+            boxShadow: `4px 4px 0 0 ${index < 3 ? getRankColor(index) : '#333'}`,
+          }}
         >
           {/* Rank */}
-          <div className={`text-3xl font-black w-12 text-center ${
-            index === 0 ? "text-yellow-400" :
-            index === 1 ? "text-slate-300" :
-            index === 2 ? "text-primary-container" :
-            "text-outline-variant"
-          }`}>
+          <span className={index < 3 ? 'rank-badge' : 'rank-badge-gray'} style={index === 0 ? { background: '#ffd60a' } : index === 1 ? { background: '#9ca3af' } : {}}>
             {entry.rank}
-          </div>
+          </span>
 
           {/* Avatar */}
           {entry.avatarConfig && (
@@ -391,10 +409,10 @@ function TVLeaderboard({
 
           {/* Name + streak */}
           <div className="flex-1">
-            <div className="flex items-center gap-2">
-              <span className="text-xl font-bold text-on-surface">{entry.displayName}</span>
+            <div className="flex items-center gap-3">
+              <span className="text-2xl font-black text-white uppercase">{entry.displayName}</span>
               {entry.currentStreak >= 3 && (
-                <span className="flex items-center gap-1 text-yellow-400 text-sm">
+                <span className="flex items-center gap-1 text-sm font-black" style={{ color: '#ffd60a' }}>
                   <IoFlame /> {entry.currentStreak}
                 </span>
               )}
@@ -403,20 +421,18 @@ function TVLeaderboard({
 
           {/* Points */}
           <div className="text-right">
-            <span className={`text-2xl font-black ${
-              index === 0 ? "text-yellow-400" : "text-on-surface"
-            }`}>
+            <span className="text-3xl" style={{ fontFamily: 'Bungee', color: index === 0 ? '#ffd60a' : '#ffffff' }}>
               {(entry as any)[pointsKey]}
             </span>
-            <span className="text-sm text-outline ml-1">pts</span>
+            <span className="text-sm text-white/50 font-black ml-1 uppercase">pts</span>
           </div>
         </motion.div>
       ))}
 
       {top10.length === 0 && (
-        <div className="text-center py-20">
-          <p className="text-2xl text-outline">Waiting for players...</p>
-          <p className="text-outline-variant mt-2">Scan the QR code to join!</p>
+        <div className="text-center py-20 p-12" style={{ background: '#1a1a1a', border: '2px solid #2a2a2a', borderRadius: '4px', boxShadow: '4px 4px 0 0 #ff6341' }}>
+          <p className="text-2xl font-black text-white/50 uppercase">Waiting for players...</p>
+          <p className="text-white/30 mt-2 font-bold">Scan the QR code to join!</p>
         </div>
       )}
     </div>

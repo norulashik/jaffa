@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
-import MaterialIcon from "@/components/MaterialIcon";
+import { Flame, Share2, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cafeUrl } from "@/lib/navigation";
 
@@ -123,130 +124,158 @@ export default function HomeLiveMatches() {
   };
 
   return (
-    <div className="bg-surface text-on-surface font-body min-h-screen pb-24">
-      {/* TopAppBar */}
-      <Header
-        rightContent={
-          <>
-            <MaterialIcon
-              icon="search"
-              className="text-slate-400 hover:text-[#14d1ff] transition-colors duration-300 cursor-pointer"
-            />
-            <div className="w-10 h-10 rounded-full border-2 border-[#00FFAB]/30 overflow-hidden scale-95 active:scale-90 transition-transform cursor-pointer bg-surface-container-highest">
-              <div className="w-full h-full flex items-center justify-center">
-                <MaterialIcon icon="person" className="text-on-surface-variant" />
-              </div>
-            </div>
-          </>
-        }
-      />
+    <div className="bg-[#0d0d0d] text-white min-h-screen pb-24">
+      <Header />
 
       <main className="pt-24 px-4 space-y-6 max-w-2xl mx-auto">
-        {/* Live Header Section */}
-        <section className="flex justify-between items-end mb-4">
-          <div>
-            <span className="font-label text-xs uppercase tracking-[0.2em] text-secondary-fixed-dim">
-              Arena Dashboard
-            </span>
-            <h2 className="font-headline text-3xl font-bold tracking-tight">Active Battles</h2>
-          </div>
-          <div className="text-right">
-            <span className="font-label text-[10px] uppercase text-outline">Pulse Rate</span>
-            <div className="h-1 w-24 bg-surface-container-high rounded-full mt-1 overflow-hidden">
-              <div className="h-full bg-gradient-to-r from-secondary-container to-primary-container w-[75%]"></div>
-            </div>
-          </div>
+        {/* Title Section */}
+        <section className="mb-4">
+          <h2
+            className="text-3xl font-bold tracking-tight uppercase text-white"
+            style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+          >
+            ACTIVE BATTLES
+          </h2>
         </section>
 
         {/* Loading State */}
         {loading && (
           <div className="flex justify-center py-12">
-            <div className="w-8 h-8 border-2 border-primary-container border-t-transparent rounded-full animate-spin"></div>
+            <div
+              className="w-8 h-8 animate-spin rounded-[2px]"
+              style={{ border: "3px solid #ff6341", borderTopColor: "transparent" }}
+            />
           </div>
         )}
 
         {/* Live Matches */}
         {!loading && liveMatches.length > 0 && liveMatches.map((match) => (
-          <div key={match.id} className="relative group">
-            <div className="absolute -inset-0.5 bg-gradient-to-r from-primary-container to-secondary-container rounded-xl blur opacity-20 group-hover:opacity-40 transition duration-1000"></div>
-            <div className="relative bg-surface-container-low neon-border rounded-xl overflow-hidden p-6">
-              {/* Status Row */}
-              <div className="flex justify-between items-center mb-8">
-                <div className="flex items-center gap-2 bg-primary-container/10 px-3 py-1 rounded-full border border-primary-container/20">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary-container opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary-container"></span>
-                  </span>
-                  <span className="font-label text-[10px] font-bold text-primary-container uppercase tracking-widest">LIVE</span>
-                </div>
-                {match.note && (
-                  <span className="font-label text-[10px] text-on-surface-variant uppercase tracking-widest bg-surface-container-highest px-2 py-1 rounded">
-                    {match.note}
-                  </span>
-                )}
-              </div>
-              {/* Matchup */}
-              <div className="flex justify-between items-center mb-8 px-4">
-                <div className="flex flex-col items-center gap-3">
-                  <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center p-2 shadow-inner overflow-hidden">
-                    {match.team1Img ? (
-                      <img src={match.team1Img} alt={match.team1Short || match.team1} className="w-full h-full object-contain" />
-                    ) : (
-                      <span className="font-headline font-bold text-sm text-primary-container">{match.team1Short || match.team1?.slice(0, 3)}</span>
-                    )}
-                  </div>
-                  <span className="font-headline font-bold text-xl tracking-wider">{(match.team1Short || match.team1?.slice(0, 3))?.toUpperCase()}</span>
-                </div>
-                <div className="flex flex-col items-center">
-                  <span className="font-headline font-black text-4xl text-outline-variant italic opacity-50">VS</span>
-                  {match.score && (
-                    <div className="mt-2 text-center">
-                      <div className="text-primary-container font-headline font-bold text-lg leading-tight glow-text">{match.score}</div>
-                      {match.overs && <div className="text-[10px] text-outline font-label uppercase">{match.overs} Overs</div>}
-                    </div>
+          <motion.div
+            key={match.id}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="game-card"
+          >
+            {/* Status Row */}
+            <div className="flex justify-between items-center mb-6">
+              <span className="live-badge">LIVE</span>
+              {match.note && (
+                <span className="info-pill">{match.note}</span>
+              )}
+            </div>
+
+            {/* Matchup */}
+            <div className="flex justify-between items-center mb-6 px-2">
+              {/* Team 1 */}
+              <div className="flex flex-col items-center gap-3">
+                <div
+                  className="w-16 h-16 flex items-center justify-center p-2 overflow-hidden"
+                  style={{ border: "2px solid #ff6341", borderRadius: "4px", background: "#1a1a1a" }}
+                >
+                  {match.team1Img ? (
+                    <img src={match.team1Img} alt={match.team1Short || match.team1} className="w-full h-full object-contain" />
+                  ) : (
+                    <span
+                      className="font-bold text-sm"
+                      style={{ fontFamily: "'Bungee', 'Impact', cursive", color: "#ff6341" }}
+                    >
+                      {match.team1Short || match.team1?.slice(0, 3)}
+                    </span>
                   )}
                 </div>
-                <div className="flex flex-col items-center gap-3">
-                  <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center p-2 shadow-inner overflow-hidden">
-                    {match.team2Img ? (
-                      <img src={match.team2Img} alt={match.team2Short || match.team2} className="w-full h-full object-contain" />
-                    ) : (
-                      <span className="font-headline font-bold text-sm text-secondary-container">{match.team2Short || match.team2?.slice(0, 3)}</span>
-                    )}
-                  </div>
-                  <span className="font-headline font-bold text-xl tracking-wider">{(match.team2Short || match.team2?.slice(0, 3))?.toUpperCase()}</span>
-                </div>
-              </div>
-              {/* Footer Action */}
-              <div className="flex items-center gap-4">
-                <button
-                  onClick={() => handleJoin(match)}
-                  disabled={importing === match.id}
-                  className="flex-1 bg-primary-container text-on-primary-container font-headline font-bold py-3 rounded-xl scale-95 active:scale-90 transition-all shadow-[0_4px_20px_rgba(0,255,171,0.4)] uppercase tracking-tight disabled:opacity-50"
+                <span
+                  className="font-bold text-lg tracking-wider text-white"
+                  style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
                 >
-                  {importing === match.id ? "Loading..." : "Join Now"}
-                </button>
-                <button className="w-12 h-12 bg-surface-container-highest rounded-xl flex items-center justify-center text-on-surface-variant hover:text-primary-container transition-colors">
-                  <MaterialIcon icon="share" />
-                </button>
+                  {(match.team1Short || match.team1?.slice(0, 3))?.toUpperCase()}
+                </span>
+              </div>
+
+              {/* VS + Score */}
+              <div className="flex flex-col items-center">
+                <span
+                  className="font-black text-3xl italic"
+                  style={{ fontFamily: "'Bungee', 'Impact', cursive", color: "#ff6341" }}
+                >
+                  VS
+                </span>
+                {match.score && (
+                  <div className="mt-2 text-center">
+                    <div className="stat-number text-lg">{match.score}</div>
+                    {match.overs && <div className="text-[10px] text-[#6b7280] uppercase">{match.overs} Overs</div>}
+                  </div>
+                )}
+              </div>
+
+              {/* Team 2 */}
+              <div className="flex flex-col items-center gap-3">
+                <div
+                  className="w-16 h-16 flex items-center justify-center p-2 overflow-hidden"
+                  style={{ border: "2px solid #ff6341", borderRadius: "4px", background: "#1a1a1a" }}
+                >
+                  {match.team2Img ? (
+                    <img src={match.team2Img} alt={match.team2Short || match.team2} className="w-full h-full object-contain" />
+                  ) : (
+                    <span
+                      className="font-bold text-sm"
+                      style={{ fontFamily: "'Bungee', 'Impact', cursive", color: "#3b9eff" }}
+                    >
+                      {match.team2Short || match.team2?.slice(0, 3)}
+                    </span>
+                  )}
+                </div>
+                <span
+                  className="font-bold text-lg tracking-wider text-white"
+                  style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                >
+                  {(match.team2Short || match.team2?.slice(0, 3))?.toUpperCase()}
+                </span>
               </div>
             </div>
-          </div>
+
+            {/* Footer Action */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => handleJoin(match)}
+                disabled={importing === match.id}
+                className="flex-1 btn-sticker btn-orange uppercase tracking-tight disabled:opacity-50"
+              >
+                {importing === match.id ? "LOADING..." : "JOIN NOW"}
+              </button>
+              <button
+                className="w-12 h-12 flex items-center justify-center text-[#6b7280] hover:text-[#ff6341] transition-colors"
+                style={{ border: "2px solid #333", borderRadius: "4px", background: "#1a1a1a" }}
+              >
+                <Share2 size={20} />
+              </button>
+            </div>
+          </motion.div>
         ))}
 
         {/* No live matches message */}
         {!loading && liveMatches.length === 0 && (
-          <div className="bg-surface-container-low rounded-xl p-8 text-center border border-white/5">
-            <MaterialIcon icon="sports_cricket" className="text-4xl text-outline-variant mb-3" />
-            <p className="font-headline font-bold text-lg text-on-surface-variant">No Live Matches</p>
-            <p className="font-label text-xs text-outline mt-1">Check back when a match is being played</p>
+          <div className="game-card text-center">
+            <div className="text-4xl mb-3">🏏</div>
+            <p
+              className="text-lg text-white mb-1"
+              style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+            >
+              NO LIVE MATCHES
+            </p>
+            <p className="text-xs text-[#6b7280]">Check back when a match is being played</p>
           </div>
         )}
 
         {/* Upcoming Matches Title */}
         {upcomingMatches.length > 0 && (
-          <h3 className="font-headline text-lg font-bold text-on-surface-variant mt-8 mb-4 border-l-4 border-secondary-container pl-3">
-            Upcoming Battles
+          <h3
+            className="text-lg font-bold text-white mt-8 mb-4 pl-3 uppercase"
+            style={{
+              fontFamily: "'Bungee', 'Impact', cursive",
+              borderLeft: "4px solid #ff6341",
+            }}
+          >
+            UPCOMING BATTLES
           </h3>
         )}
 
@@ -256,66 +285,109 @@ export default function HomeLiveMatches() {
           const timeStr = startDate ? startDate.toLocaleString("en-IN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
 
           return (
-            <div key={match.id} className="bg-surface-container-low rounded-xl p-5 border border-white/5 hover:border-white/10 transition-all group">
-              <div className="flex justify-between items-start mb-6">
-                <div className="flex flex-col">
-                  <span className="font-label text-[10px] text-outline uppercase tracking-widest">
-                    {match.note || "Upcoming"}
-                  </span>
-                </div>
+            <motion.div
+              key={match.id}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="game-card"
+            >
+              <div className="flex justify-between items-start mb-4">
+                <span className="text-[10px] text-[#6b7280] uppercase tracking-widest font-bold">
+                  {match.note || "Upcoming"}
+                </span>
                 {startDate && (
-                  <div className="bg-surface-container-highest px-3 py-1 rounded-full">
-                    <span className="font-label text-[10px] font-bold text-on-surface">{timeStr}</span>
-                  </div>
+                  <span className="info-pill">{timeStr}</span>
                 )}
               </div>
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center p-1.5 border border-white/10 overflow-hidden">
+
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-12 h-12 flex items-center justify-center p-1.5 overflow-hidden"
+                    style={{ border: "2px solid #333", borderRadius: "4px", background: "#1a1a1a" }}
+                  >
                     {match.team1Img ? (
                       <img src={match.team1Img} alt={match.team1Short || match.team1} className="w-full h-full object-contain" />
                     ) : (
-                      <span className="font-headline font-bold text-xs text-primary-container">{match.team1Short || match.team1?.slice(0, 3)}</span>
+                      <span
+                        className="font-bold text-xs"
+                        style={{ fontFamily: "'Bungee', 'Impact', cursive", color: "#ff6341" }}
+                      >
+                        {match.team1Short || match.team1?.slice(0, 3)}
+                      </span>
                     )}
                   </div>
-                  <span className="font-headline font-bold text-lg">{(match.team1Short || match.team1?.slice(0, 3))?.toUpperCase()}</span>
+                  <span
+                    className="font-bold text-base text-white"
+                    style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                  >
+                    {(match.team1Short || match.team1?.slice(0, 3))?.toUpperCase()}
+                  </span>
                 </div>
-                <div className="h-[1px] flex-1 mx-4 bg-gradient-to-r from-transparent via-outline-variant to-transparent opacity-30"></div>
-                <div className="flex items-center gap-4">
-                  <span className="font-headline font-bold text-lg">{(match.team2Short || match.team2?.slice(0, 3))?.toUpperCase()}</span>
-                  <div className="w-12 h-12 rounded-full bg-surface-container flex items-center justify-center p-1.5 border border-white/10 overflow-hidden">
+
+                <div
+                  className="h-[2px] flex-1 mx-4"
+                  style={{ background: "#333" }}
+                />
+
+                <div className="flex items-center gap-3">
+                  <span
+                    className="font-bold text-base text-white"
+                    style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                  >
+                    {(match.team2Short || match.team2?.slice(0, 3))?.toUpperCase()}
+                  </span>
+                  <div
+                    className="w-12 h-12 flex items-center justify-center p-1.5 overflow-hidden"
+                    style={{ border: "2px solid #333", borderRadius: "4px", background: "#1a1a1a" }}
+                  >
                     {match.team2Img ? (
                       <img src={match.team2Img} alt={match.team2Short || match.team2} className="w-full h-full object-contain" />
                     ) : (
-                      <span className="font-headline font-bold text-xs text-secondary-container">{match.team2Short || match.team2?.slice(0, 3)}</span>
+                      <span
+                        className="font-bold text-xs"
+                        style={{ fontFamily: "'Bungee', 'Impact', cursive", color: "#3b9eff" }}
+                      >
+                        {match.team2Short || match.team2?.slice(0, 3)}
+                      </span>
                     )}
                   </div>
                 </div>
               </div>
+
               {startDate && (startDate.getTime() - now) <= 30 * 60 * 1000 ? (
                 <button
                   onClick={() => handleJoin(match)}
                   disabled={importing === match.id}
-                  className="w-full bg-primary-container text-on-primary-container font-headline font-bold py-3 rounded-xl scale-95 active:scale-90 transition-all shadow-[0_4px_20px_rgba(0,255,171,0.4)] uppercase tracking-tight disabled:opacity-50"
+                  className="w-full btn-sticker btn-orange uppercase tracking-tight disabled:opacity-50"
                 >
-                  {importing === match.id ? "Loading..." : "Join Match"}
+                  {importing === match.id ? "LOADING..." : "JOIN MATCH"}
                 </button>
               ) : (
-                <button className="w-full bg-surface-container-high hover:bg-surface-container-highest text-on-surface font-label text-xs font-bold py-2.5 rounded-lg transition-colors border border-white/5 uppercase tracking-widest">
-                  Notify Me
+                <button className="w-full btn-gray uppercase tracking-widest text-xs font-bold py-2.5">
+                  NOTIFY ME
                 </button>
               )}
-            </div>
+            </motion.div>
           );
         })}
       </main>
 
       {/* Match Code Modal */}
       {codeModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-6">
-          <div className="bg-surface-container-low rounded-2xl p-6 w-full max-w-sm border border-white/10 shadow-2xl">
-            <h3 className="font-headline text-xl font-bold text-center mb-1">Enter Match Code</h3>
-            <p className="text-outline text-xs text-center mb-6">
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-6">
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="game-card w-full max-w-sm"
+          >
+            <h3
+              className="text-xl font-bold text-center mb-1 text-white uppercase"
+              style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+            >
+              ENTER MATCH CODE
+            </h3>
+            <p className="text-[#6b7280] text-xs text-center mb-6">
               Get the 4-digit code from your cafe to join
             </p>
 
@@ -330,30 +402,31 @@ export default function HomeLiveMatches() {
                 placeholder="0000"
                 maxLength={4}
                 autoFocus
-                className="flex-1 bg-surface-container-high text-on-surface text-center text-3xl font-black tracking-[0.4em] px-4 py-4 rounded-xl outline-none focus:ring-2 focus:ring-primary-container"
+                className="nb-input flex-1 text-center text-3xl font-black tracking-[0.4em] py-4"
+                style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
               />
             </div>
 
             {codeModal.error && (
-              <p className="text-red-400 text-xs text-center mb-3">{codeModal.error}</p>
+              <p className="text-xs text-center mb-3" style={{ color: "#ff6341" }}>{codeModal.error}</p>
             )}
 
             <div className="flex gap-3">
               <button
                 onClick={() => setCodeModal(null)}
-                className="flex-1 bg-surface-container-high text-on-surface-variant font-label font-bold py-3 rounded-xl"
+                className="flex-1 btn-gray py-3 font-bold"
               >
-                Cancel
+                CANCEL
               </button>
               <button
                 onClick={handleCodeSubmit}
                 disabled={codeModal.code.length !== 4 || codeModal.validating}
-                className="flex-1 bg-primary-container text-on-primary-container font-headline font-bold py-3 rounded-xl disabled:opacity-50 shadow-[0_4px_20px_rgba(0,255,171,0.3)]"
+                className="flex-1 btn-sticker btn-orange py-3 font-bold disabled:opacity-50"
               >
-                {codeModal.validating ? "Checking..." : "Join"}
+                {codeModal.validating ? "CHECKING..." : "JOIN"}
               </button>
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
 

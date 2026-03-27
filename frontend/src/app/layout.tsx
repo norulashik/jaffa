@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from "next";
+import { Toaster } from "sonner";
+import { GameProvider } from "@/context/GameContext";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -18,7 +20,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: "#111317",
+  themeColor: "#0d0d0d",
 };
 
 export default function RootLayout({
@@ -36,16 +38,29 @@ export default function RootLayout({
           crossOrigin=""
         />
         <link
-          href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700&family=Manrope:wght@300;400;500;600;700;800&display=swap"
-          rel="stylesheet"
-        />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Bungee&family=Barlow:wght@400;500;600;700;800;900&display=swap"
           rel="stylesheet"
         />
       </head>
-      <body className="bg-surface font-body text-on-surface antialiased selection:bg-primary-container selection:text-on-primary-container">
+      <body className="bg-[#0d0d0d] text-white antialiased">
+        <GameProvider>
         {children}
+        </GameProvider>
+        <Toaster
+          position="top-center"
+          toastOptions={{
+            style: {
+              background: '#1a1a1a',
+              border: '2px solid #ff6341',
+              borderRadius: '4px',
+              boxShadow: '4px 4px 0 0 #ff6341',
+              color: '#ffffff',
+              fontWeight: 700,
+              textTransform: 'uppercase' as const,
+              fontSize: '0.875rem',
+            },
+          }}
+        />
       </body>
     </html>
   );

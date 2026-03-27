@@ -13,21 +13,28 @@ interface User {
 interface GameState {
   user: User | null;
   token: string | null;
+  userId: string | null;
   venueId: string | null;
+  venueSlug: string | null;
   matchId: string | null;
   venueName: string | null;
   currentRound: number;
   boostsUsedThisRound: number;
+  boostsUsedRound: number;
   allInUsed: boolean;
   currentStreak: number;
+  bestStreak: number;
   totalPoints: number;
   roundPoints: Record<number, number>;
+  totalPredictions: number;
+  correctPredictions: number;
   isLoading: boolean;
 }
 
 type GameAction =
   | { type: "SET_USER"; user: User; token: string }
-  | { type: "SET_VENUE"; venueId: string; venueName: string }
+  | { type: "SET_TOKEN"; payload: string }
+  | { type: "SET_VENUE"; venueId: string; venueName?: string; venueSlug?: string }
   | { type: "SET_MATCH"; matchId: string }
   | { type: "CLEAR_MATCH" }
   | { type: "UPDATE_PARTICIPANT"; data: Partial<GameState> }
@@ -37,44 +44,56 @@ type GameAction =
   | { type: "ADD_POINTS"; points: number; round: number }
   | { type: "SET_ROUND"; round: number }
   | { type: "SET_LOADING"; isLoading: boolean }
-  | { type: "LOGOUT" };
+  | { type: "LOGOUT" }
+  | { type: "RESET" };
 
 const initialState: GameState = {
   user: null,
   token: null,
+  userId: null,
   venueId: null,
+  venueSlug: null,
   matchId: null,
   venueName: null,
   currentRound: 0,
   boostsUsedThisRound: 0,
+  boostsUsedRound: 0,
   allInUsed: false,
   currentStreak: 0,
+  bestStreak: 0,
   totalPoints: 0,
   roundPoints: {},
+  totalPredictions: 0,
+  correctPredictions: 0,
   isLoading: true,
 };
 
 function gameReducer(state: GameState, action: GameAction): GameState {
   switch (action.type) {
     case "SET_USER":
-      return { ...state, user: action.user, token: action.token, isLoading: false };
+      return { ...state, user: action.user, userId: action.user.id, token: action.token, isLoading: false };
+    case "SET_TOKEN":
+      if (typeof window !== "undefined") {
+        localStorage.setItem("jaffa_token", action.payload);
+      }
+      return { ...state, token: action.payload };
     case "SET_VENUE":
-      return { ...state, venueId: action.venueId, venueName: action.venueName };
+      return { ...state, venueId: action.venueId, venueName: action.venueName || state.venueName, venueSlug: action.venueSlug || state.venueSlug };
     case "SET_MATCH":
       return { ...state, matchId: action.matchId };
     case "CLEAR_MATCH":
       if (typeof window !== "undefined") {
         localStorage.removeItem("jaffa_match_id");
       }
-      return { ...state, matchId: null, currentRound: 0, totalPoints: 0, currentStreak: 0, roundPoints: {} };
+      return { ...state, matchId: null, currentRound: 0, totalPoints: 0, currentStreak: 0, roundPoints: {}, totalPredictions: 0, correctPredictions: 0 };
     case "UPDATE_PARTICIPANT":
       return { ...state, ...action.data };
     case "USE_BOOST":
-      return { ...state, boostsUsedThisRound: state.boostsUsedThisRound + 1 };
+      return { ...state, boostsUsedThisRound: state.boostsUsedThisRound + 1, boostsUsedRound: state.boostsUsedRound + 1 };
     case "USE_ALL_IN":
       return { ...state, allInUsed: true };
     case "UPDATE_STREAK":
-      return { ...state, currentStreak: action.streak };
+      return { ...state, currentStreak: action.streak, bestStreak: Math.max(state.bestStreak, action.streak) };
     case "ADD_POINTS":
       return {
         ...state,
@@ -85,12 +104,17 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         },
       };
     case "SET_ROUND":
-      return { ...state, currentRound: action.round, boostsUsedThisRound: 0 };
+      return { ...state, currentRound: action.round, boostsUsedThisRound: 0, boostsUsedRound: 0 };
     case "SET_LOADING":
       return { ...state, isLoading: action.isLoading };
     case "LOGOUT":
+    case "RESET":
       if (typeof window !== "undefined") {
         localStorage.removeItem("jaffa_token");
+        localStorage.removeItem("jaffa_user");
+        localStorage.removeItem("jaffa_venue_id");
+        localStorage.removeItem("jaffa_match_id");
+        localStorage.removeItem("jaffa_venue_name");
       }
       return { ...initialState, isLoading: false };
     default:
@@ -137,6 +161,11 @@ export function GameProvider({ children }: { children: ReactNode }) {
           localStorage.removeItem("jaffa_token");
           dispatch({ type: "SET_LOADING", isLoading: false });
         });
+
+      return () => {
+        clearTimeout(timeout);
+        controller.abort();
+      };
     } else {
       dispatch({ type: "SET_LOADING", isLoading: false });
       const savedVenueId = localStorage.getItem("jaffa_venue_id");

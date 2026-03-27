@@ -1,366 +1,182 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useGame } from "@/context/GameContext";
 import { api } from "@/lib/api";
-import { IoCheckmarkCircle } from "react-icons/io5";
-import { MdSportsCricket } from "react-icons/md";
-
-// IPL team colors for rendering
-const TEAM_COLORS: Record<string, string> = {
-  CSK: "#f9cd05",
-  MI: "#004ba0",
-  RCB: "#d4213d",
-  KKR: "#3a225d",
-  DC: "#004c93",
-  RR: "#ea1a85",
-  PBKS: "#ed1b24",
-  SRH: "#f7a721",
-  GT: "#1c1c2b",
-  LSG: "#005da0",
-};
+import { toast } from "sonner";
 
 interface PreMatchCardsProps {
-  match: any;
-  venueId: string;
-  onComplete: () => void;
+  matchId: string;
+  venueId: string | null;
 }
 
-export default function PreMatchCards({ match, venueId, onComplete }: PreMatchCardsProps) {
-  const { state } = useGame();
+const ACCENT_COLORS = ["#ff6341", "#ffd60a", "#3b9eff", "#22c55e"];
+
+export default function PreMatchCards({ matchId, venueId }: PreMatchCardsProps) {
   const [predictions, setPredictions] = useState<any[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [showResult, setShowResult] = useState(false);
-  const [joinedMatch, setJoinedMatch] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
-  // Join match first, then load predictions
   useEffect(() => {
-    if (match?.id && venueId && state.user && !joinedMatch) {
-      const matchCode = localStorage.getItem("jaffa_match_code") || undefined;
-      api.joinMatch(match.id, venueId, matchCode)
-        .then(() => {
-          setJoinedMatch(true);
-        })
-        .catch((err) => {
-          console.error("Join error:", err);
-          // Still mark as joined if already joined (409/duplicate)
-          setJoinedMatch(true);
-        });
-    }
-  }, [match?.id, venueId, state.user]);
+    if (!venueId) return;
 
-  // Load predictions after joining
-  useEffect(() => {
-    if (match?.id && venueId && joinedMatch) {
-      api.getPredictions(match.id, venueId, 0)
-        .then((preds) => {
-          const preMatch = preds.filter(
-            (p: any) => p.category === "pre_match" && !p.userAnswer && p.status === "open"
-          );
-          setPredictions(preMatch);
-          setLoaded(true);
-          if (preMatch.length === 0) {
-            onComplete();
-          }
-        })
-        .catch((err) => {
-          console.error("Load predictions error:", err);
-          setLoaded(true);
-          onComplete();
-        });
-    }
-  }, [match?.id, venueId, joinedMatch]);
-
-  const currentPrediction = predictions[currentIndex];
+    api
+      .getPredictions(matchId, venueId, 0)
+      .then((preds) => {
+        const preMatch = preds.filter(
+          (p: any) =>
+            p.category === "pre_match" && !p.userAnswer && p.status === "open"
+        );
+        setPredictions(preMatch);
+        setLoaded(true);
+      })
+      .catch((err) => {
+        console.error("Load pre-match error:", err);
+        setLoaded(true);
+      });
+  }, [matchId, venueId]);
 
   const handleSelect = async (optionKey: string) => {
-    if (submitting || selectedOption) return;
+    if (submitting || selectedOption || !venueId) return;
+
+    const currentPred = predictions[currentIndex];
+    if (!currentPred) return;
 
     setSelectedOption(optionKey);
     setSubmitting(true);
 
     try {
-      await api.submitPrediction(currentPrediction.id, optionKey, venueId);
-      setAnswers({ ...answers, [currentPrediction.id]: optionKey });
-
-      setShowResult(true);
+      await api.submitPrediction(currentPred.id, optionKey, venueId);
+      toast("Answer locked!");
 
       setTimeout(() => {
-        setShowResult(false);
         setSelectedOption(null);
         setSubmitting(false);
 
         if (currentIndex < predictions.length - 1) {
-          setCurrentIndex(currentIndex + 1);
+          setCurrentIndex((prev) => prev + 1);
         } else {
-          onComplete();
+          // All done -- clear predictions to hide component
+          setPredictions([]);
         }
       }, 800);
-    } catch (err) {
-      console.error("Submit error:", err);
+    } catch (err: any) {
+      toast(err.message || "Failed to submit");
       setSelectedOption(null);
       setSubmitting(false);
     }
   };
 
-  // Detect question layout type
-  const getLayoutType = (pred: any): "team_vs" | "player_grid" | "list" => {
-    if (!pred) return "list";
-    const opts = pred.options;
-    // 2 options with team data = team vs team (big cards side by side)
-    if (opts.length === 2 && opts[0].team && opts[1].team) return "team_vs";
-    // Options with player images = grid layout
-    if (opts.some((o: any) => o.image?.includes("/players/"))) return "player_grid";
-    return "list";
-  };
-
   if (!loaded) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 flex items-center justify-center p-6">
-        <div className="text-center">
-          <MdSportsCricket className="text-5xl text-orange-500 mx-auto mb-4" />
-          <p className="text-white font-semibold text-lg mb-2">Getting ready...</p>
-          <p className="text-slate-400 text-sm">Loading predictions</p>
-        </div>
+      <div className="py-16 text-center">
+        <p className="text-white/50 font-bold uppercase tracking-wider animate-pulse">
+          Loading pre-match questions...
+        </p>
       </div>
     );
   }
 
-  // If loaded but no unanswered predictions, skip straight to live game
   if (predictions.length === 0) {
     return null;
   }
 
-  const layoutType = getLayoutType(currentPrediction);
+  const currentPred = predictions[currentIndex];
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 flex flex-col p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="text-sm text-slate-400">
-          {match.team1Short} vs {match.team2Short}
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="text-sm text-slate-400">
-            {currentIndex + 1} / {predictions.length}
-          </div>
-          <button
-            onClick={() => {
-              localStorage.removeItem("jaffa_token");
-              window.location.reload();
-            }}
-            className="text-xs text-slate-600 hover:text-red-400 transition-colors"
-          >
-            Sign out
-          </button>
-        </div>
-      </div>
-
+    <div className="space-y-6">
       {/* Progress dots */}
-      <div className="flex gap-1.5 mb-8">
+      <div className="flex gap-1.5">
         {predictions.map((_: any, i: number) => (
           <div
             key={i}
-            className={`h-1.5 flex-1 rounded-full transition-colors duration-300 ${
+            className={`h-2 flex-1 rounded-[2px] border border-[#2a2a2a] transition-colors ${
               i < currentIndex
-                ? "bg-orange-500"
+                ? "bg-[#ff6341]"
                 : i === currentIndex
-                ? "bg-orange-400"
-                : "bg-slate-700"
+                ? "bg-[#ff6341]/60"
+                : "bg-[#0d0d0d]"
             }`}
           />
         ))}
       </div>
 
       {/* Card */}
-      <div className="flex-1 flex items-center justify-center">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={currentPrediction.id}
-            initial={{ x: 80, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: -80, opacity: 0 }}
-            transition={{ duration: 0.25, ease: "easeOut" }}
-            className="w-full max-w-sm"
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={currentPred.id}
+          initial={{ x: 80, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          exit={{ x: -80, opacity: 0 }}
+          transition={{ duration: 0.25, ease: "easeOut" }}
+          className="game-card p-5"
+        >
+          {/* Progress label */}
+          <div className="flex items-center justify-between mb-3">
+            <span className="info-pill text-[#ff6341]">
+              Q{currentIndex + 1} of {predictions.length}
+            </span>
+            <span className="text-xs text-white/40 font-bold">PRE-MATCH</span>
+          </div>
+
+          {/* Question */}
+          <h3
+            className="text-lg text-white mb-5 leading-tight"
+            style={{ fontFamily: "'Bungee', cursive" }}
           >
-            {/* Question */}
-            <div className="mb-8">
-              <div className="text-xs font-medium text-orange-400 uppercase tracking-wider mb-3">
-                {getQuestionLabel(currentIndex)}
-              </div>
-              <h2 className="text-2xl font-bold text-white leading-tight">
-                {currentPrediction.question}
-              </h2>
-              <div className="text-xs text-slate-500 mt-2">
-                {getPointsLabel(currentPrediction.options)}
-              </div>
-            </div>
+            {currentPred.question}
+          </h3>
 
-            {/* Team vs Team layout (2 big cards side by side) */}
-            {layoutType === "team_vs" && (
-              <div className="flex gap-4">
-                {currentPrediction.options.map((option: any, i: number) => {
-                  const teamColor = option.color || TEAM_COLORS[option.team] || "#64748b";
-                  return (
-                    <motion.button
-                      key={option.key}
-                      initial={{ y: 30, opacity: 0 }}
-                      animate={{ y: 0, opacity: 1 }}
-                      transition={{ delay: i * 0.1 }}
-                      onClick={() => handleSelect(option.key)}
-                      disabled={submitting}
-                      className={`flex-1 flex flex-col items-center justify-center py-8 rounded-2xl font-bold transition-all duration-200 ${
-                        selectedOption === option.key
-                          ? "scale-[1.02] ring-2 ring-white"
-                          : selectedOption
-                          ? "opacity-30 scale-[0.95]"
-                          : "hover:scale-[1.02] active:scale-[0.98]"
-                      }`}
-                      style={{
-                        backgroundColor: selectedOption === option.key
-                          ? teamColor
-                          : `${teamColor}22`,
-                        borderWidth: 2,
-                        borderColor: teamColor,
-                      }}
-                    >
-                      {/* Team logo placeholder - initials in colored circle */}
-                      <div
-                        className="w-16 h-16 rounded-full flex items-center justify-center mb-3 text-2xl font-black"
-                        style={{
-                          backgroundColor: selectedOption === option.key ? "rgba(255,255,255,0.2)" : teamColor,
-                          color: teamColor === "#f9cd05" || teamColor === "#f7a721" ? "#000" : "#fff",
-                        }}
-                      >
-                        {option.label}
-                      </div>
-                      <span className="text-white text-xl font-bold">{option.label}</span>
-                      <span className="text-xs mt-1" style={{ color: `${teamColor}cc` }}>
-                        {option.points} pts
-                      </span>
-                      {selectedOption === option.key && showResult && (
-                        <IoCheckmarkCircle className="text-2xl text-white mt-2" />
-                      )}
-                    </motion.button>
-                  );
-                })}
-              </div>
-            )}
+          {/* Options */}
+          <div className="space-y-2">
+            {currentPred.options.map((opt: any, idx: number) => {
+              const color = ACCENT_COLORS[idx % ACCENT_COLORS.length];
+              const isSelected = selectedOption === opt.key;
+              const hasSelection = selectedOption !== null;
 
-            {/* Player grid layout (2 columns) */}
-            {layoutType === "player_grid" && (
-              <div className="grid grid-cols-2 gap-3">
-                {currentPrediction.options.map((option: any, i: number) => {
-                  const teamColor = option.color || TEAM_COLORS[option.team] || "#64748b";
-                  const initials = option.label.split(" ").map((w: string) => w[0]).join("").slice(0, 2);
-                  return (
-                    <motion.button
-                      key={option.key}
-                      initial={{ y: 20, opacity: 0 }}
-                      animate={{ y: 0, opacity: 1 }}
-                      transition={{ delay: i * 0.05 }}
-                      onClick={() => handleSelect(option.key)}
-                      disabled={submitting}
-                      className={`flex flex-col items-center py-4 px-3 rounded-xl transition-all duration-200 ${
-                        selectedOption === option.key
-                          ? "scale-[0.95] ring-2 ring-white"
-                          : selectedOption
-                          ? "opacity-30"
-                          : "hover:scale-[1.02] active:scale-[0.95]"
-                      }`}
-                      style={{
-                        backgroundColor: selectedOption === option.key
-                          ? teamColor
-                          : `${teamColor}15`,
-                        borderWidth: 1,
-                        borderColor: `${teamColor}40`,
-                      }}
-                    >
-                      {/* Player avatar - initials */}
-                      <div
-                        className="w-12 h-12 rounded-full flex items-center justify-center mb-2 text-sm font-bold"
-                        style={{
-                          backgroundColor: teamColor,
-                          color: teamColor === "#f9cd05" || teamColor === "#f7a721" ? "#000" : "#fff",
-                        }}
-                      >
-                        {initials}
-                      </div>
-                      <span className="text-white text-sm font-semibold text-center leading-tight">
-                        {option.label}
-                      </span>
-                      <span className="text-xs mt-1" style={{ color: teamColor }}>
-                        {option.team}
-                      </span>
-                      {selectedOption === option.key && showResult && (
-                        <IoCheckmarkCircle className="text-xl text-white mt-1" />
-                      )}
-                    </motion.button>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Standard list layout */}
-            {layoutType === "list" && (
-              <div className="space-y-3">
-                {currentPrediction.options.map((option: any, i: number) => (
-                  <motion.button
-                    key={option.key}
-                    initial={{ y: 20, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    transition={{ delay: i * 0.05 }}
-                    onClick={() => handleSelect(option.key)}
-                    disabled={submitting}
-                    className={`w-full text-left px-5 py-4 rounded-xl font-medium transition-all duration-200 flex items-center justify-between ${
-                      selectedOption === option.key
-                        ? "bg-orange-500 text-white scale-[0.98]"
-                        : selectedOption
-                        ? "bg-slate-800/50 text-slate-500"
-                        : "bg-slate-800 text-white hover:bg-slate-700 active:scale-[0.98]"
+              return (
+                <motion.button
+                  key={opt.key}
+                  initial={{ y: 10, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  transition={{ delay: idx * 0.05 }}
+                  onClick={() => handleSelect(opt.key)}
+                  disabled={submitting}
+                  className={`option-btn px-4 py-3 text-left flex items-center justify-between transition-all ${
+                    isSelected ? "selected" : ""
+                  } ${hasSelection && !isSelected ? "opacity-30" : ""}`}
+                  style={
+                    isSelected
+                      ? {
+                          background: color,
+                          borderColor: "#000",
+                          color: "#000",
+                          boxShadow: "4px 4px 0 0 #000",
+                        }
+                      : {}
+                  }
+                >
+                  <span className="font-bold text-sm">{opt.label}</span>
+                  <span
+                    className={`text-xs font-black ${
+                      isSelected ? "text-black" : "text-white/40"
                     }`}
                   >
-                    <span>{option.label}</span>
-                    {selectedOption === option.key && showResult && (
-                      <IoCheckmarkCircle className="text-xl" />
-                    )}
-                    {!selectedOption && (
-                      <span className="text-xs text-slate-500">{option.points} pts</span>
-                    )}
-                  </motion.button>
-                ))}
-              </div>
-            )}
-          </motion.div>
-        </AnimatePresence>
-      </div>
+                    {opt.points} pts
+                  </span>
+                </motion.button>
+              );
+            })}
+          </div>
 
-      {/* Bottom hint */}
-      <div className="text-center text-slate-600 text-xs mt-4">
-        Tap to select your prediction
-      </div>
+          {/* Bottom hint */}
+          <p className="text-center text-white/30 text-xs font-bold uppercase mt-4">
+            Tap to select your prediction
+          </p>
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
-}
-
-function getQuestionLabel(index: number): string {
-  const labels = [
-    "Match Winner",
-    "Man of the Match",
-    "Toss Call",
-    "Six Showdown",
-    "First Wicket",
-  ];
-  return labels[index] || `Question ${index + 1}`;
-}
-
-function getPointsLabel(options: { points: number }[]): string {
-  const points = [...new Set(options.map((o) => o.points))];
-  if (points.length === 1) return `${points[0]} points if correct`;
-  return `${Math.min(...points)}-${Math.max(...points)} points based on pick`;
 }

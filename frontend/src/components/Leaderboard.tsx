@@ -1,60 +1,42 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { api } from "@/lib/api";
-import { IoFlame, IoTrophy } from "react-icons/io5";
-import CricketAvatar from "./CricketAvatar";
+import { useGame } from "@/context/GameContext";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 interface LeaderboardProps {
   matchId: string;
   venueId: string;
-  currentRound: number;
-  userId?: string;
 }
 
-const PHASE_NAMES: Record<number, string> = {
-  1: "Powerplay", 2: "Middle Overs", 3: "Death Overs",
-  4: "Powerplay", 5: "Middle Overs", 6: "Death Overs",
-};
-const PHASE_INNINGS: Record<number, number> = { 1: 1, 2: 1, 3: 1, 4: 2, 5: 2, 6: 2 };
+export default function Leaderboard({ matchId, venueId }: LeaderboardProps) {
+  const { state } = useGame();
+  const { currentRound, userId } = state;
 
-export default function Leaderboard({ matchId, venueId, currentRound, userId }: LeaderboardProps) {
-  const [view, setView] = useState<"round" | "match">("round");
-  const [selectedRound, setSelectedRound] = useState(currentRound);
   const [roundData, setRoundData] = useState<any[]>([]);
   const [matchData, setMatchData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const tabsRef = useRef<HTMLDivElement>(null);
-
-  // Sync selectedRound with currentRound when it changes
-  useEffect(() => {
-    setSelectedRound(currentRound);
-  }, [currentRound]);
-
-  // Auto-scroll active tab into view
-  useEffect(() => {
-    if (tabsRef.current && view === "round") {
-      const activeTab = tabsRef.current.querySelector("[data-active='true']");
-      if (activeTab) {
-        activeTab.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
-      }
-    }
-  }, [selectedRound, view]);
+  const [activeTab, setActiveTab] = useState<"round" | "match">("round");
 
   useEffect(() => {
     loadLeaderboard();
-  }, [matchId, venueId, selectedRound, view]);
+  }, [matchId, venueId, currentRound, activeTab]);
 
   const loadLeaderboard = async () => {
     setLoading(true);
     try {
-      if (view === "round") {
-        const data = await api.getRoundLeaderboard(matchId, venueId, selectedRound);
-        setRoundData(data.leaderboard);
+      if (activeTab === "round") {
+        const data = await api.getRoundLeaderboard(
+          matchId,
+          venueId,
+          currentRound || 1
+        );
+        setRoundData(data.leaderboard || []);
       } else {
         const data = await api.getMatchLeaderboard(matchId, venueId);
-        setMatchData(data.leaderboard);
+        setMatchData(data.leaderboard || []);
       }
     } catch (err) {
       console.error("Leaderboard error:", err);
@@ -62,124 +44,114 @@ export default function Leaderboard({ matchId, venueId, currentRound, userId }: 
     setLoading(false);
   };
 
-  const data = view === "round" ? roundData : matchData;
-
-  const rounds = Array.from({ length: Math.max(currentRound, 1) }, (_, i) => i + 1);
+  const data = activeTab === "round" ? roundData : matchData;
 
   return (
-    <div className="p-4">
-      {/* Scrollable Tabs */}
-      <div className="flex bg-slate-900 rounded-xl p-1 mb-4 overflow-x-auto no-scrollbar" ref={tabsRef}>
-        {rounds.map((r) => (
-          <button
-            key={r}
-            data-active={view === "round" && selectedRound === r}
-            onClick={() => { setView("round"); setSelectedRound(r); }}
-            className={`flex-shrink-0 px-3 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
-              view === "round" && selectedRound === r
-                ? "bg-orange-500 text-white"
-                : "text-slate-400 hover:text-white"
-            }`}
+    <div className="space-y-4">
+      {/* Tabs */}
+      <Tabs
+        value={activeTab}
+        onValueChange={(v) => setActiveTab(v as "round" | "match")}
+      >
+        <TabsList className="w-full bg-[#0d0d0d] border-2 border-[#2a2a2a] rounded-[3px] p-1 h-auto">
+          <TabsTrigger
+            value="round"
+            className="flex-1 rounded-[2px] py-2 text-xs font-black uppercase tracking-wider data-[state=active]:bg-[#ff6341] data-[state=active]:text-black data-[state=active]:border-2 data-[state=active]:border-black data-[state=active]:shadow-[2px_2px_0_0_#000] data-[state=inactive]:text-white/50"
           >
-            {PHASE_INNINGS[r] ? `Inn ${PHASE_INNINGS[r]}` : ""} {PHASE_NAMES[r] || `R${r}`}
-          </button>
-        ))}
-        <button
-          onClick={() => setView("match")}
-          className={`flex-shrink-0 px-3 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
-            view === "match"
-              ? "bg-orange-500 text-white"
-              : "text-slate-400 hover:text-white"
-          }`}
-        >
-          Overall Match
-        </button>
-      </div>
+            Round {currentRound || 1}
+          </TabsTrigger>
+          <TabsTrigger
+            value="match"
+            className="flex-1 rounded-[2px] py-2 text-xs font-black uppercase tracking-wider data-[state=active]:bg-[#ff6341] data-[state=active]:text-black data-[state=active]:border-2 data-[state=active]:border-black data-[state=active]:shadow-[2px_2px_0_0_#000] data-[state=inactive]:text-white/50"
+          >
+            Full Match
+          </TabsTrigger>
+        </TabsList>
 
-      {loading ? (
-        <div className="py-12 text-center text-slate-400 animate-pulse">Loading...</div>
-      ) : data.length === 0 ? (
-        <div className="py-12 text-center">
-          <p className="text-slate-400">No players yet</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {data.map((player: any, index: number) => {
-            const isMe = player.userId === userId;
-            const rank = player.rank || index + 1;
+        <TabsContent value={activeTab}>
+          {loading ? (
+            <div className="py-12 text-center text-white/50 font-bold uppercase tracking-wider animate-pulse">
+              Loading...
+            </div>
+          ) : data.length === 0 ? (
+            <div className="py-12 text-center">
+              <p className="text-white/40 font-bold uppercase tracking-wider">
+                No players yet
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {data.map((player: any, index: number) => {
+                const isMe = player.userId === userId;
+                const rank = player.rank || index + 1;
+                const points =
+                  activeTab === "round"
+                    ? player.points
+                    : player.totalPoints;
 
-            return (
-              <motion.div
-                key={player.userId}
-                initial={{ y: 10, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: index * 0.03 }}
-                className={`flex items-center gap-3 px-4 py-3 rounded-xl ${
-                  isMe
-                    ? "bg-orange-500/10 border border-orange-500/30"
-                    : rank <= 3
-                    ? "bg-slate-800/80"
-                    : "bg-slate-900"
-                }`}
-              >
-                {/* Avatar + Rank */}
-                <div className="relative">
-                  {player.avatarConfig ? (
-                    <CricketAvatar config={player.avatarConfig} size="sm" mood={isMe ? "excited" : "idle"} />
-                  ) : (
-                    <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold ${
-                      rank === 1 ? "bg-yellow-500 text-black" :
-                      rank === 2 ? "bg-slate-300 text-black" :
-                      rank === 3 ? "bg-orange-600 text-white" :
-                      "bg-slate-800 text-slate-400"
-                    }`}>
-                      {rank <= 3 ? <IoTrophy /> : rank}
-                    </div>
-                  )}
-                  {player.avatarConfig && (
-                    <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold ${
-                      rank === 1 ? "bg-yellow-500 text-black" :
-                      rank === 2 ? "bg-slate-300 text-black" :
-                      rank === 3 ? "bg-orange-600 text-white" :
-                      "bg-slate-700 text-slate-300"
-                    }`}>
+                return (
+                  <motion.div
+                    key={player.userId}
+                    initial={{ y: 10, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ delay: index * 0.03 }}
+                    className={`flex items-center gap-3 px-4 py-3 rounded-[4px] border-2 ${
+                      isMe
+                        ? "border-[#ff6341] bg-[#1a0800]"
+                        : "border-[#2a2a2a] bg-[#1a1a1a]"
+                    }`}
+                    style={{
+                      boxShadow: isMe
+                        ? "4px 4px 0 0 #ff6341"
+                        : "2px 2px 0 0 #2a2a2a",
+                    }}
+                  >
+                    {/* Rank badge */}
+                    <div
+                      className={
+                        rank <= 3 ? "rank-badge" : "rank-badge-gray"
+                      }
+                    >
                       {rank}
                     </div>
-                  )}
-                </div>
 
-                {/* Name + streak */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className={`font-medium truncate ${isMe ? "text-orange-400" : "text-white"}`}>
-                      {player.displayName}
-                      {isMe && " (You)"}
-                    </span>
-                    {player.currentStreak >= 3 && (
-                      <span className="flex items-center text-xs text-yellow-400">
-                        <IoFlame /> {player.currentStreak}
+                    {/* Player name */}
+                    <div className="flex-1 min-w-0">
+                      <span
+                        className={`player-name truncate block ${
+                          isMe ? "text-[#ff6341]" : ""
+                        }`}
+                      >
+                        {player.displayName}
+                        {isMe && " (You)"}
                       </span>
-                    )}
-                  </div>
-                  {view === "match" && (
-                    <div className="text-xs text-slate-500">
-                      {player.accuracy}% accuracy
+                      {activeTab === "match" && player.accuracy !== undefined && (
+                        <span className="text-xs text-white/40 font-bold">
+                          {player.accuracy}% accuracy
+                        </span>
+                      )}
                     </div>
-                  )}
-                </div>
 
-                {/* Points */}
-                <div className="text-right">
-                  <div className={`font-bold ${isMe ? "text-orange-400" : "text-white"}`}>
-                    {view === "round" ? player.points : player.totalPoints}
-                  </div>
-                  <div className="text-xs text-slate-500">pts</div>
-                </div>
-              </motion.div>
-            );
-          })}
-        </div>
-      )}
+                    {/* Points */}
+                    <div className="text-right">
+                      <div
+                        className={`stat-number text-xl ${
+                          isMe ? "text-[#ff6341]" : ""
+                        }`}
+                      >
+                        {points}
+                      </div>
+                      <div className="text-[10px] text-white/40 font-bold uppercase">
+                        pts
+                      </div>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

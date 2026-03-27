@@ -3,9 +3,19 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  Star,
+  Trophy,
+  Flame,
+  Zap,
+  Rocket,
+  ChevronUp,
+  ChevronDown,
+  CheckCircle,
+} from "lucide-react";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
-import MaterialIcon from "@/components/MaterialIcon";
 import CorrectAnswerFeedback from "@/components/CorrectAnswerFeedback";
 import { api } from "@/lib/api";
 import { connectSocket, joinVenueMatch, disconnectSocket } from "@/lib/socket";
@@ -303,15 +313,35 @@ export default function MatchDashboard() {
   // ─── LOADING PHASE ───
   if (phase === "loading") {
     return (
-      <div className="bg-surface min-h-screen flex flex-col items-center justify-center">
+      <div className="bg-[#0d0d0d] min-h-screen flex flex-col items-center justify-center">
         <div className="relative mb-6">
-          <div className="w-20 h-20 rounded-2xl bg-surface-container-low flex items-center justify-center">
-            <MaterialIcon icon="sports_cricket" className="text-4xl text-primary-container" />
+          <div
+            className="w-20 h-20 flex items-center justify-center"
+            style={{
+              background: "#1a1a1a",
+              border: "2px solid #ff6341",
+              borderRadius: "4px",
+              boxShadow: "4px 4px 0 0 #ff6341",
+            }}
+          >
+            <span className="text-4xl">🏏</span>
           </div>
-          <div className="absolute inset-0 rounded-2xl animate-ping bg-primary-container/10"></div>
+          <div
+            className="absolute inset-0 animate-ping"
+            style={{
+              border: "2px solid #ff6341",
+              borderRadius: "4px",
+              opacity: 0.3,
+            }}
+          />
         </div>
-        <p className="font-headline text-lg font-bold text-on-surface mb-2">Getting Ready...</p>
-        <p className="font-body text-sm text-on-surface-variant">Loading match predictions</p>
+        <h2
+          className="text-lg mb-2"
+          style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+        >
+          GETTING READY...
+        </h2>
+        <p className="text-sm text-white/60">Loading match predictions</p>
       </div>
     );
   }
@@ -322,106 +352,105 @@ export default function MatchDashboard() {
     const questionLabel = QUESTION_LABELS[currentCardIndex] || `Question ${currentCardIndex + 1}`;
 
     return (
-      <div className="bg-surface min-h-screen flex flex-col">
+      <div className="bg-[#0d0d0d] min-h-screen flex flex-col">
         {/* Pre-match Header */}
         <div className="px-4 pt-6 pb-2">
           <div className="flex items-center justify-between mb-1">
-            <div className="flex items-center gap-2">
-              <MaterialIcon icon="sports_cricket" className="text-primary-container text-lg" />
-              <span className="font-label text-xs text-on-surface-variant font-bold uppercase tracking-widest">
-                {matchData?.team1Short || "Team 1"} vs {matchData?.team2Short || "Team 2"}
-              </span>
-            </div>
-            <span className="font-label text-xs text-on-surface-variant">
+            <span className="info-pill text-white/80">
+              {matchData?.team1Short || "Team 1"} vs {matchData?.team2Short || "Team 2"}
+            </span>
+            <span className="info-pill text-[#ff6341]">
               {currentCardIndex + 1} / {preMatchPredictions.length}
             </span>
           </div>
 
           {/* Progress bar */}
-          <div className="flex gap-1.5 mt-3">
-            {preMatchPredictions.map((_: any, i: number) => (
-              <div
-                key={i}
-                className={`h-1.5 flex-1 rounded-full transition-all duration-500 ${
-                  i < currentCardIndex
-                    ? "bg-primary-container"
-                    : i === currentCardIndex
-                    ? "bg-primary-container/70"
-                    : "bg-surface-container-highest/30"
-                }`}
-              />
-            ))}
+          <div className="progress-bar h-3 mt-3">
+            <div
+              className="progress-fill"
+              style={{
+                width: `${((currentCardIndex + 1) / preMatchPredictions.length) * 100}%`,
+              }}
+            />
           </div>
         </div>
 
         {/* Card Area */}
         <div className="flex-1 flex items-center justify-center px-4 py-6">
-          <div
-            className={`w-full max-w-md transition-all duration-300 ${
-              cardExiting ? "opacity-0 translate-x-[-60px]" : "opacity-100 translate-x-0"
-            }`}
-          >
-            {/* Question Category Label */}
-            <div className="mb-3">
-              <span className="font-label text-[10px] font-black text-amber-500 uppercase tracking-widest">
-                {questionLabel}
-              </span>
-            </div>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentCardIndex}
+              initial={{ opacity: 0, x: 60 }}
+              animate={{ opacity: cardExiting ? 0 : 1, x: cardExiting ? -60 : 0 }}
+              exit={{ opacity: 0, x: -60 }}
+              transition={{ duration: 0.3 }}
+              className="w-full max-w-md game-card p-6"
+            >
+              {/* Question Category Label */}
+              <div className="mb-3">
+                <span className="info-pill text-[#ffd60a]">
+                  {questionLabel}
+                </span>
+              </div>
 
-            {/* Question Text */}
-            <h2 className="font-headline text-2xl font-bold text-on-surface leading-tight mb-2">
-              {currentPred?.question}
-            </h2>
+              {/* Question Text */}
+              <h2
+                className="text-2xl text-white leading-tight mb-2"
+                style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+              >
+                {currentPred?.question}
+              </h2>
 
-            {/* Points hint */}
-            <p className="font-body text-xs text-on-surface-variant mb-8">
-              {getPointsLabel(currentPred?.options || [])}
-            </p>
+              {/* Points hint */}
+              <p className="text-xs text-white/50 mb-8">
+                {getPointsLabel(currentPred?.options || [])}
+              </p>
 
-            {/* Options */}
-            <div className="space-y-3">
-              {(currentPred?.options || []).map((option: any, i: number) => {
-                const optKey = option.key || option.label;
-                const isSelected = selectedPreMatchOption === optKey;
-                const hasSelection = selectedPreMatchOption !== null;
+              {/* Options */}
+              <div className="space-y-3">
+                {(currentPred?.options || []).map((option: any, i: number) => {
+                  const optKey = option.key || option.label;
+                  const isSelected = selectedPreMatchOption === optKey;
+                  const hasSelection = selectedPreMatchOption !== null;
 
-                return (
-                  <button
-                    key={optKey}
-                    onClick={() => handlePreMatchSelect(optKey)}
-                    disabled={preMatchSubmitting}
-                    className={`w-full text-left px-5 py-4 rounded-xl font-medium transition-all duration-300 flex items-center justify-between ${
-                      isSelected
-                        ? "bg-primary-container text-on-primary-container scale-[0.98]"
-                        : hasSelection
-                        ? "bg-surface-container-low/50 text-on-surface-variant/50"
-                        : "bg-surface-container-low text-on-surface hover:bg-surface-container active:scale-[0.98]"
-                    }`}
-                    style={{
-                      animationDelay: `${i * 50}ms`,
-                    }}
-                  >
-                    <span className="font-body text-sm font-medium">{option.label}</span>
-                    <div className="flex items-center gap-2">
-                      {isSelected && showPreMatchResult && (
-                        <MaterialIcon icon="check_circle" filled className="text-on-primary-container" />
-                      )}
-                      <span className={`font-label text-xs font-bold ${
-                        isSelected ? "text-on-primary-container/80" : "text-primary-container"
-                      }`}>
-                        {option.points} pts
-                      </span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+                  return (
+                    <button
+                      key={optKey}
+                      onClick={() => handlePreMatchSelect(optKey)}
+                      disabled={preMatchSubmitting}
+                      className={`option-btn text-left px-5 py-4 flex items-center justify-between ${
+                        isSelected
+                          ? "selected"
+                          : hasSelection
+                          ? "opacity-50"
+                          : ""
+                      }`}
+                      style={{
+                        animationDelay: `${i * 50}ms`,
+                      }}
+                    >
+                      <span className="text-sm font-bold">{option.label}</span>
+                      <div className="flex items-center gap-2">
+                        {isSelected && showPreMatchResult && (
+                          <CheckCircle className="w-5 h-5 text-black" />
+                        )}
+                        <span className={`text-xs font-black ${
+                          isSelected ? "text-black" : "text-[#ff6341]"
+                        }`}>
+                          {option.points} pts
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </motion.div>
+          </AnimatePresence>
         </div>
 
         {/* Bottom hint */}
         <div className="text-center pb-8">
-          <p className="font-body text-xs text-on-surface-variant/50">Tap to select your prediction</p>
+          <p className="text-xs text-white/40">Tap to select your prediction</p>
         </div>
       </div>
     );
@@ -429,19 +458,9 @@ export default function MatchDashboard() {
 
   // ─── LIVE DASHBOARD PHASE ───
   return (
-    <div className="bg-surface text-on-surface font-body overflow-x-hidden">
+    <div className="bg-[#0d0d0d] text-white overflow-x-hidden">
       {/* TopAppBar */}
-      <Header
-        rightContent={
-          <>
-            <Link href="/profile" className="w-10 h-10 rounded-full border-2 border-primary-container p-0.5 overflow-hidden bg-surface-container-highest">
-              <div className="w-full h-full flex items-center justify-center rounded-full">
-                <MaterialIcon icon="person" className="text-primary-container" />
-              </div>
-            </Link>
-          </>
-        }
-      />
+      <Header />
 
       <main className="pt-24 pb-32 px-4 min-h-screen space-y-6 max-w-2xl mx-auto">
         {/* Scoreboard Hero Section */}
@@ -473,21 +492,16 @@ export default function MatchDashboard() {
             : null;
 
           return (
-            <section className="relative overflow-hidden rounded-xl bg-surface-container-low p-5 border border-white/5">
+            <section className="game-card p-5 relative overflow-hidden">
               {/* Series & Live badge */}
               <div className="flex items-center justify-between mb-3">
-                <span className="font-label text-[10px] font-bold text-on-surface-variant/60 uppercase tracking-widest">
+                <span className="info-pill text-white/60">
                   {sd.series || `${matchData?.team1Short || "T1"} vs ${matchData?.team2Short || "T2"}`}
                 </span>
                 {matchData?.status === "completed" ? (
-                  <div className="flex items-center gap-2 bg-surface-container-highest px-3 py-1 rounded-full border border-white/10">
-                    <span className="font-label text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Completed</span>
-                  </div>
+                  <span className="info-pill text-white/60">COMPLETED</span>
                 ) : (
-                  <div className="flex items-center gap-2 bg-error-container/20 px-3 py-1 rounded-full border border-error/30">
-                    <span className="w-2 h-2 rounded-full bg-error animate-pulse"></span>
-                    <span className="font-label text-[10px] font-bold text-error uppercase tracking-widest">Live</span>
-                  </div>
+                  <span className="live-badge">LIVE</span>
                 )}
               </div>
 
@@ -495,17 +509,36 @@ export default function MatchDashboard() {
               <div className="flex items-center justify-between">
                 {/* Batting Team — LEFT */}
                 <div className="flex items-center gap-3">
-                  {battingImg && (
-                    <img src={battingImg} alt={battingTeam} className="w-8 h-8 rounded-full bg-surface-container-highest" />
+                  {battingImg ? (
+                    <img
+                      src={battingImg}
+                      alt={battingTeam}
+                      className="w-8 h-8"
+                      style={{ borderRadius: "2px", border: "2px solid #2a2a2a" }}
+                    />
+                  ) : (
+                    <div
+                      className="w-8 h-8 flex items-center justify-center text-xs font-black text-[#ff6341]"
+                      style={{ background: "#1a1a1a", borderRadius: "2px", border: "2px solid #ff6341" }}
+                    >
+                      {battingTeam?.charAt(0)}
+                    </div>
                   )}
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="font-headline text-lg font-bold text-on-surface">{battingTeam}</span>
-                      <span className="font-label text-[10px] font-bold bg-primary-container/20 text-primary-container px-1.5 py-0.5 rounded uppercase tracking-wider">BAT</span>
+                      <span
+                        className="text-lg font-bold text-white"
+                        style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                      >
+                        {battingTeam}
+                      </span>
+                      <span className="info-pill text-[#ff6341] !py-0.5 !px-1.5 !text-[10px]">BAT</span>
                     </div>
                     <div className="flex items-baseline gap-1">
-                      <span className="font-headline text-2xl font-black text-primary-container">{score}/{wickets}</span>
-                      <span className="font-body text-sm text-on-surface-variant">({overs} ov)</span>
+                      <span className="stat-number" style={{ color: "#ff6341" }}>
+                        {score}/{wickets}
+                      </span>
+                      <span className="text-sm text-white/50">({overs} ov)</span>
                     </div>
                   </div>
                 </div>
@@ -514,12 +547,22 @@ export default function MatchDashboard() {
                 <div className="text-center">
                   {target ? (
                     <div>
-                      <div className="font-label text-[10px] text-on-surface-variant uppercase tracking-widest">Need</div>
-                      <div className="font-headline text-lg font-black text-secondary-container">{runsNeeded}</div>
-                      <div className="font-label text-[10px] text-on-surface-variant/60">off {(20 - overs) > 0 ? Math.ceil((20 - overs) * 6) : 0} balls</div>
+                      <div className="text-[10px] text-white/50 uppercase tracking-widest font-bold">Need</div>
+                      <div
+                        className="text-lg font-black text-[#ffd60a]"
+                        style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                      >
+                        {runsNeeded}
+                      </div>
+                      <div className="text-[10px] text-white/40">off {(20 - overs) > 0 ? Math.ceil((20 - overs) * 6) : 0} balls</div>
                     </div>
                   ) : (
-                    <div className="font-headline font-bold text-sm text-on-surface-variant/40">VS</div>
+                    <div
+                      className="font-bold text-sm text-white/30"
+                      style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                    >
+                      VS
+                    </div>
                   )}
                 </div>
 
@@ -527,32 +570,49 @@ export default function MatchDashboard() {
                 <div className="flex items-center gap-3">
                   <div className="text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <span className="font-headline text-lg font-bold text-on-surface-variant">{bowlingTeam}</span>
-                      <span className="font-label text-[10px] font-bold bg-secondary-container/20 text-secondary-container px-1.5 py-0.5 rounded uppercase tracking-wider">BOWL</span>
+                      <span
+                        className="text-lg font-bold text-white/60"
+                        style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                      >
+                        {bowlingTeam}
+                      </span>
+                      <span className="info-pill text-[#3b9eff] !py-0.5 !px-1.5 !text-[10px]">BOWL</span>
                     </div>
                     {innings1 && currInn === 2 && (
-                      <div className="font-body text-sm text-on-surface-variant">
+                      <div className="text-sm text-white/50">
                         {innings1.score}/{innings1.wickets} ({innings1.overs} ov)
                       </div>
                     )}
                     {currInn === 1 && (
-                      <div className="font-label text-xs text-on-surface-variant/50">Yet to bat</div>
+                      <div className="text-xs text-white/40">Yet to bat</div>
                     )}
                   </div>
-                  {bowlingImg && (
-                    <img src={bowlingImg} alt={bowlingTeam} className="w-8 h-8 rounded-full bg-surface-container-highest" />
+                  {bowlingImg ? (
+                    <img
+                      src={bowlingImg}
+                      alt={bowlingTeam}
+                      className="w-8 h-8"
+                      style={{ borderRadius: "2px", border: "2px solid #2a2a2a" }}
+                    />
+                  ) : (
+                    <div
+                      className="w-8 h-8 flex items-center justify-center text-xs font-black text-[#3b9eff]"
+                      style={{ background: "#1a1a1a", borderRadius: "2px", border: "2px solid #3b9eff" }}
+                    >
+                      {bowlingTeam?.charAt(0)}
+                    </div>
                   )}
                 </div>
               </div>
 
               {/* CRR / RRR */}
-              <div className="flex items-center justify-between mt-3 text-[11px]">
-                <span className="font-label font-bold text-on-surface-variant/60 uppercase tracking-widest">
-                  CRR: <span className="text-on-surface font-bold">{crr}</span>
+              <div className="flex items-center justify-between mt-3">
+                <span className="info-pill text-white/60 !text-[11px]">
+                  CRR: <span className="text-white font-bold">{crr}</span>
                 </span>
                 {rrr && (
-                  <span className="font-label font-bold text-on-surface-variant/60 uppercase tracking-widest">
-                    RRR: <span className="text-secondary-container font-bold">{rrr}</span>
+                  <span className="info-pill text-white/60 !text-[11px]">
+                    RRR: <span className="text-[#3b9eff] font-bold">{rrr}</span>
                   </span>
                 )}
               </div>
@@ -567,7 +627,7 @@ export default function MatchDashboard() {
           if (currentOver > 0 && nextOver <= 20) {
             return (
               <div className="text-center py-2">
-                <p className="font-body text-sm text-primary-container font-medium">
+                <p className="text-sm text-[#ff6341] font-bold uppercase">
                   Make predictions for Over {nextOver} before this over ends!
                 </p>
               </div>
@@ -602,24 +662,31 @@ export default function MatchDashboard() {
                     const isExpired = timeLeft !== null && timeLeft <= 0;
 
                     return (
-                    <section key={pred.id} className={`prediction-card rounded-xl p-5 relative overflow-hidden ${pred.category === "hot_take" ? "border-l-4 border-l-amber-500" : ""} ${isExpired ? "opacity-50" : ""}`}>
+                    <section
+                      key={pred.id}
+                      className={`game-card p-5 relative overflow-hidden ${isExpired ? "opacity-50" : ""}`}
+                      style={pred.category === "hot_take" ? { borderLeft: "4px solid #ffd60a" } : undefined}
+                    >
                       <div className="flex justify-between items-start mb-3">
-                        <div className="flex flex-col">
-                          <span className="font-label text-[10px] font-black text-amber-500 uppercase tracking-widest">
+                        <div className="flex flex-col gap-1">
+                          <span className="info-pill inline-block w-fit text-[#ffd60a]">
                             {getCategoryLabel(pred)}
                           </span>
-                          <h3 className="font-headline text-lg font-bold">{pred.question}</h3>
+                          <h3
+                            className="text-lg text-white"
+                            style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                          >
+                            {pred.question}
+                          </h3>
                         </div>
                         {timeLeft !== null && (
-                          <span className={`font-label text-[10px] font-bold px-2 py-1 rounded-full ${
-                            isExpired
-                              ? "bg-error/20 text-error"
-                              : timeLeft <= 15
-                              ? "bg-error/20 text-error animate-pulse"
-                              : "bg-primary-container/20 text-primary-container"
-                          }`}>
-                            {isExpired ? "Locked" : `${timeLeft}s`}
-                          </span>
+                          isExpired ? (
+                            <span className="info-pill text-white/50">LOCKED</span>
+                          ) : timeLeft <= 15 ? (
+                            <span className="live-badge">{timeLeft}s</span>
+                          ) : (
+                            <span className="info-pill text-[#ff6341]">{timeLeft}s</span>
+                          )
                         )}
                       </div>
                       <div className="space-y-2 mb-4">
@@ -630,26 +697,24 @@ export default function MatchDashboard() {
                               key={i}
                               onClick={() => !isExpired && handleOptionSelect(pred.id, optKey)}
                               disabled={isExpired}
-                              className={`option-button w-full p-3 rounded-lg flex justify-between items-center transition-all duration-200 ${
-                                isExpired
-                                  ? "text-on-surface/40 cursor-not-allowed"
-                                  : "text-on-surface hover:bg-surface-container active:scale-[0.98]"
+                              className={`option-btn text-left p-3 flex justify-between items-center ${
+                                isExpired ? "opacity-40 cursor-not-allowed" : ""
                               }`}
                             >
-                              <span className="font-body text-sm font-medium">{opt.label}</span>
-                              <span className="font-label text-xs font-bold text-primary-container">{opt.points} pts</span>
+                              <span className="text-sm font-bold">{opt.label}</span>
+                              <span className="text-xs font-black text-[#ff6341]">{opt.points} pts</span>
                             </button>
                           );
                         })}
                       </div>
                       <div className="flex gap-2">
-                        <button className="flex items-center gap-1.5 bg-primary-container/10 border border-primary-container/20 px-3 py-1.5 rounded-full">
-                          <MaterialIcon icon="bolt" filled className="text-primary-container text-sm" />
-                          <span className="font-label text-[10px] font-bold text-primary-container uppercase tracking-tighter">2x Boost</span>
+                        <button className="btn-secondary px-3 py-1.5 flex items-center gap-1.5 text-xs">
+                          <Zap className="w-3.5 h-3.5 text-[#ff6341]" />
+                          <span className="text-[10px] font-black tracking-tight">2x BOOST</span>
                         </button>
-                        <button className="flex items-center gap-1.5 bg-secondary-container/10 border border-secondary-container/20 px-3 py-1.5 rounded-full">
-                          <MaterialIcon icon="rocket_launch" filled className="text-secondary-container text-sm" />
-                          <span className="font-label text-[10px] font-bold text-secondary-container uppercase tracking-tighter">3x All-In</span>
+                        <button className="btn-secondary px-3 py-1.5 flex items-center gap-1.5 text-xs">
+                          <Rocket className="w-3.5 h-3.5 text-[#ff6341]" />
+                          <span className="text-[10px] font-black tracking-tight">3x ALL-IN</span>
                         </button>
                       </div>
                     </section>
@@ -658,10 +723,15 @@ export default function MatchDashboard() {
 
                   {/* All caught up */}
                   {openPreds.length === 0 && (
-                    <div className="flex flex-col items-center justify-center py-16 text-center">
+                    <div className="game-card flex flex-col items-center justify-center py-16 text-center p-6">
                       <span className="text-5xl mb-4">🏏</span>
-                      <h3 className="font-headline text-xl font-bold text-on-surface mb-2">All caught up!</h3>
-                      <p className="font-body text-sm text-on-surface-variant max-w-[240px]">
+                      <h3
+                        className="text-xl text-white mb-2"
+                        style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                      >
+                        ALL CAUGHT UP!
+                      </h3>
+                      <p className="text-sm text-white/50 max-w-[240px]">
                         New predictions drop at the end of this over. Keep watching!
                       </p>
                     </div>
@@ -678,11 +748,14 @@ export default function MatchDashboard() {
                         onClick={() => setPicksExpanded(!picksExpanded)}
                         className="flex justify-between items-center w-full mb-3 px-1"
                       >
-                        <span className="font-label text-sm font-bold text-on-surface-variant">My Picks ({allPicks.length})</span>
-                        <MaterialIcon
-                          icon={picksExpanded ? "expand_less" : "expand_more"}
-                          className="text-on-surface-variant text-xl"
-                        />
+                        <span className="text-sm font-black text-white/60 uppercase tracking-wider">
+                          My Picks ({allPicks.length})
+                        </span>
+                        {picksExpanded ? (
+                          <ChevronUp className="w-5 h-5 text-white/60" />
+                        ) : (
+                          <ChevronDown className="w-5 h-5 text-white/60" />
+                        )}
                       </button>
                       {picksExpanded && (
                         <>
@@ -698,50 +771,50 @@ export default function MatchDashboard() {
                                 ? getOptionLabel(pred, pred.correctOption)
                                 : null;
 
-                              let statusText = "Pending";
-                              let statusColor = "text-amber-400";
-                              let cardBg = "bg-surface-container-low";
+                              let statusText = "PENDING";
+                              let statusColor = "text-[#ffd60a]";
+                              let cardClass = "game-card";
                               if (isMissed) {
-                                statusText = "Missed";
-                                statusColor = "text-on-surface-variant/50";
-                                cardBg = "bg-surface-container-low/50";
+                                statusText = "MISSED";
+                                statusColor = "text-white/40";
+                                cardClass = "game-card opacity-50";
                               } else if (isClosed && isCorrect === true) {
                                 statusText = `+${pointsEarned || 0} pts`;
-                                statusColor = "text-primary-container";
-                                cardBg = "bg-primary-container/10";
+                                statusColor = "text-[#22c55e]";
+                                cardClass = "card-green";
                               } else if (isClosed && isCorrect === false) {
-                                statusText = "Wrong";
-                                statusColor = "text-error";
-                                cardBg = "bg-error/5";
+                                statusText = "WRONG";
+                                statusColor = "text-[#ff6341]";
+                                cardClass = "card-orange";
                               }
 
                               return (
-                                <div key={pred.id} className={`${cardBg} rounded-xl p-4 border border-white/5`}>
+                                <div key={pred.id} className={`${cardClass} p-4`}>
                                   <div className="flex justify-between items-start mb-1">
-                                    <span className="font-label text-[10px] text-on-surface-variant uppercase tracking-widest">
+                                    <span className="info-pill inline-block w-fit text-white/50 !text-[10px]">
                                       {getCategoryLabel(pred)}
                                     </span>
-                                    <span className={`font-label text-xs font-bold ${statusColor}`}>{statusText}</span>
+                                    <span className={`text-xs font-black ${statusColor}`}>{statusText}</span>
                                   </div>
-                                  <p className="font-body text-sm font-medium text-on-surface mb-2">{pred.question}</p>
+                                  <p className="text-sm font-bold text-white mb-2">{pred.question}</p>
                                   <div className="flex items-center gap-2 flex-wrap">
                                     {isMissed ? (
-                                      <span className="font-label text-xs px-3 py-1 rounded-full font-bold bg-surface-container-highest/50 text-on-surface-variant/50">
+                                      <span className="info-pill text-white/40">
                                         Not answered
                                       </span>
                                     ) : (
-                                      <span className={`font-label text-xs px-3 py-1 rounded-full font-bold ${
+                                      <span className={`info-pill ${
                                         isClosed && isCorrect === false
-                                          ? "bg-error/20 text-error"
+                                          ? "!border-[#ff6341] text-[#ff6341]"
                                           : isClosed && isCorrect === true
-                                          ? "bg-primary-container/20 text-primary-container"
-                                          : "bg-surface-container-highest text-on-surface-variant"
+                                          ? "!border-[#22c55e] text-[#22c55e]"
+                                          : "text-white/60"
                                       }`}>
                                         Your pick: {selectedLabel}
                                       </span>
                                     )}
                                     {correctAnswerLabel && (
-                                      <span className="font-label text-xs text-on-surface-variant">
+                                      <span className="text-xs text-white/40">
                                         Answer: {correctAnswerLabel}
                                       </span>
                                     )}
@@ -753,7 +826,7 @@ export default function MatchDashboard() {
                           {hasMore && (
                             <button
                               onClick={() => setShowAllPicks(!showAllPicks)}
-                              className="w-full py-3 text-center font-label text-xs font-bold text-primary-container uppercase tracking-widest hover:text-primary-container/80 transition-colors"
+                              className="w-full py-3 text-center text-xs font-black text-[#ff6341] uppercase tracking-widest hover:text-[#ff6341]/80 transition-colors"
                             >
                               {showAllPicks ? "Show less" : `See more (${allPicks.length - 5} more)`}
                             </button>
@@ -772,25 +845,33 @@ export default function MatchDashboard() {
 
       {/* Footer Stats Bar */}
       <div className="fixed bottom-[84px] left-0 w-full px-4 z-40 pointer-events-none">
-        <div className="max-w-2xl mx-auto bg-surface-container-highest/90 backdrop-blur-md rounded-full px-6 py-3 flex items-center justify-between pointer-events-auto border border-white/5 shadow-2xl">
+        <div
+          className="max-w-2xl mx-auto px-6 py-3 flex items-center justify-between pointer-events-auto"
+          style={{
+            background: "#1a1a1a",
+            borderTop: "2px solid #ff6341",
+            borderRadius: "4px",
+            boxShadow: "4px 4px 0 0 #ff6341",
+          }}
+        >
           <div className="flex items-center gap-2">
-            <MaterialIcon icon="stars" className="text-primary-container text-sm" />
-            <span className="font-label text-xs font-bold uppercase tracking-tighter">
-              Points: <span className="text-on-surface">{gameState.totalPoints}</span>
+            <Star className="w-4 h-4 text-[#ffd60a]" />
+            <span className="text-xs font-black uppercase tracking-tight">
+              Points: <span className="text-[#ffd60a]">{gameState.totalPoints}</span>
             </span>
           </div>
-          <div className="w-[1px] h-4 bg-white/10"></div>
+          <div className="w-[1px] h-4 bg-white/10" />
           <div className="flex items-center gap-2">
-            <MaterialIcon icon="leaderboard" className="text-secondary-container text-sm" />
-            <span className="font-label text-xs font-bold uppercase tracking-tighter">
-              Rank: <span className="text-on-surface">{userRank ? `#${userRank}` : "--"}</span>
+            <Trophy className="w-4 h-4 text-white/60" />
+            <span className="text-xs font-black uppercase tracking-tight">
+              Rank: <span className="text-white">{userRank ? `#${userRank}` : "--"}</span>
             </span>
           </div>
-          <div className="w-[1px] h-4 bg-white/10"></div>
+          <div className="w-[1px] h-4 bg-white/10" />
           <div className="flex items-center gap-2">
-            <MaterialIcon icon="local_fire_department" filled className="text-error text-sm" />
-            <span className="font-label text-xs font-bold uppercase tracking-tighter">
-              Streak: <span className="text-on-surface">{gameState.currentStreak}</span>
+            <Flame className="w-4 h-4 text-[#ff6341]" />
+            <span className="text-xs font-black uppercase tracking-tight">
+              Streak: <span className="text-[#ff6341]">{gameState.currentStreak}</span>
             </span>
           </div>
         </div>
@@ -818,4 +899,3 @@ function getPointsLabel(options: { points: number }[]): string {
   if (points.length === 1) return `${points[0]} points if correct`;
   return `${Math.min(...points)}-${Math.max(...points)} points based on pick`;
 }
-

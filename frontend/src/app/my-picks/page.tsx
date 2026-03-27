@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { motion } from "framer-motion";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
-import MaterialIcon from "@/components/MaterialIcon";
+import { Target, HelpCircle } from "lucide-react";
 import { useGame } from "@/context/GameContext";
 import { api } from "@/lib/api";
 
@@ -61,38 +62,54 @@ export default function MyPicksPage() {
   );
   const allPicks = [...answeredPreds, ...missedPreds].reverse();
 
+  // Stat counts
+  const correctCount = answeredPreds.filter((p: any) => p.status === "resolved" && p.userAnswer?.selectedOption === p.correctOption).length;
+  const wrongCount = answeredPreds.filter((p: any) => p.status === "resolved" && p.userAnswer?.selectedOption !== p.correctOption).length;
+  const pendingCount = answeredPreds.filter((p: any) => p.status !== "resolved").length;
+  const missedCount = missedPreds.length;
+
   return (
-    <div className="bg-background text-on-surface font-body min-h-screen">
-      <Header
-        rightContent={
-          <div className="w-10 h-10 rounded-full border-2 border-[#00FFAB]/20 overflow-hidden active:scale-90 transition-transform cursor-pointer bg-surface-container-highest">
-            <div className="w-full h-full flex items-center justify-center">
-              <MaterialIcon icon="person" className="text-on-surface-variant" />
-            </div>
-          </div>
-        }
-      />
+    <div className="bg-[#0d0d0d] text-white min-h-screen">
+      <Header />
 
       <main className="pt-24 pb-32 px-4 max-w-2xl mx-auto">
-        <h2 className="font-headline text-4xl font-extrabold tracking-tight mb-6">My Picks</h2>
+        <h2
+          className="text-4xl font-extrabold tracking-tight mb-6 uppercase"
+          style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+        >
+          MY PICKS
+        </h2>
 
         {loading ? (
           <div className="flex justify-center py-20">
-            <div className="w-8 h-8 border-2 border-primary-container border-t-transparent rounded-full animate-spin" />
+            <div
+              className="w-8 h-8 animate-spin rounded-[2px]"
+              style={{ border: "3px solid #ff6341", borderTopColor: "transparent" }}
+            />
           </div>
         ) : !matchId || !venueId ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <MaterialIcon icon="psychology" className="text-5xl text-on-surface-variant/30 mb-4" />
-            <h3 className="font-headline text-xl font-bold text-on-surface mb-2">No active match</h3>
-            <p className="font-body text-sm text-on-surface-variant max-w-[240px]">
+          <div className="game-card flex flex-col items-center py-12 text-center">
+            <Target size={48} className="text-[#6b7280] mb-4" />
+            <h3
+              className="text-xl font-bold text-white mb-2 uppercase"
+              style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+            >
+              NO ACTIVE MATCH
+            </h3>
+            <p className="text-sm text-[#6b7280] max-w-[240px]">
               Join a match to see your predictions!
             </p>
           </div>
         ) : allPicks.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <MaterialIcon icon="quiz" className="text-5xl text-on-surface-variant/30 mb-4" />
-            <h3 className="font-headline text-xl font-bold text-on-surface mb-2">No picks yet</h3>
-            <p className="font-body text-sm text-on-surface-variant max-w-[240px]">
+          <div className="game-card flex flex-col items-center py-12 text-center">
+            <HelpCircle size={48} className="text-[#6b7280] mb-4" />
+            <h3
+              className="text-xl font-bold text-white mb-2 uppercase"
+              style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+            >
+              NO PICKS YET
+            </h3>
+            <p className="text-sm text-[#6b7280] max-w-[240px]">
               Make predictions during the match to see them here!
             </p>
           </div>
@@ -100,29 +117,29 @@ export default function MyPicksPage() {
           <>
             {/* Stats summary */}
             <div className="grid grid-cols-4 gap-2 mb-6">
-              <div className="bg-surface-container-low rounded-xl p-3 text-center border border-white/5">
-                <div className="font-headline text-xl font-bold text-primary-container">
-                  {answeredPreds.filter((p: any) => p.status === "resolved" && p.userAnswer?.selectedOption === p.correctOption).length}
+              <div className="card-green p-3 text-center">
+                <div className="stat-number text-xl" style={{ color: "#22c55e" }}>
+                  {correctCount}
                 </div>
-                <div className="font-label text-[10px] text-on-surface-variant uppercase tracking-widest">Correct</div>
+                <div className="text-[10px] text-[#6b7280] uppercase tracking-widest font-bold">Correct</div>
               </div>
-              <div className="bg-surface-container-low rounded-xl p-3 text-center border border-white/5">
-                <div className="font-headline text-xl font-bold text-error">
-                  {answeredPreds.filter((p: any) => p.status === "resolved" && p.userAnswer?.selectedOption !== p.correctOption).length}
+              <div className="card-orange p-3 text-center">
+                <div className="stat-number text-xl" style={{ color: "#ff6341" }}>
+                  {wrongCount}
                 </div>
-                <div className="font-label text-[10px] text-on-surface-variant uppercase tracking-widest">Wrong</div>
+                <div className="text-[10px] text-[#6b7280] uppercase tracking-widest font-bold">Wrong</div>
               </div>
-              <div className="bg-surface-container-low rounded-xl p-3 text-center border border-white/5">
-                <div className="font-headline text-xl font-bold text-amber-400">
-                  {answeredPreds.filter((p: any) => p.status !== "resolved").length}
+              <div className="card-yellow p-3 text-center">
+                <div className="stat-number text-xl" style={{ color: "#ffd60a" }}>
+                  {pendingCount}
                 </div>
-                <div className="font-label text-[10px] text-on-surface-variant uppercase tracking-widest">Pending</div>
+                <div className="text-[10px] text-[#6b7280] uppercase tracking-widest font-bold">Pending</div>
               </div>
-              <div className="bg-surface-container-low rounded-xl p-3 text-center border border-white/5">
-                <div className="font-headline text-xl font-bold text-on-surface-variant/50">
-                  {missedPreds.length}
+              <div className="game-card p-3 text-center">
+                <div className="stat-number text-xl" style={{ color: "#6b7280" }}>
+                  {missedCount}
                 </div>
-                <div className="font-label text-[10px] text-on-surface-variant uppercase tracking-widest">Missed</div>
+                <div className="text-[10px] text-[#6b7280] uppercase tracking-widest font-bold">Missed</div>
               </div>
             </div>
 
@@ -139,55 +156,86 @@ export default function MyPicksPage() {
                   ? getOptionLabel(pred, pred.correctOption)
                   : null;
 
-                let statusText = "Pending";
-                let statusColor = "text-amber-400";
-                let cardBg = "bg-surface-container-low";
+                let statusText = "PENDING";
+                let statusColor = "#ffd60a";
+                let cardClass = "game-card";
                 if (isMissed) {
-                  statusText = "Missed";
-                  statusColor = "text-on-surface-variant/50";
-                  cardBg = "bg-surface-container-low/50";
+                  statusText = "MISSED";
+                  statusColor = "#6b7280";
+                  cardClass = "game-card opacity-50";
                 } else if (isClosed && isCorrect === true) {
                   statusText = `+${pointsEarned || 0} pts`;
-                  statusColor = "text-primary-container";
-                  cardBg = "bg-primary-container/10";
+                  statusColor = "#22c55e";
+                  cardClass = "card-green";
                 } else if (isClosed && isCorrect === false) {
-                  statusText = "Wrong";
-                  statusColor = "text-error";
-                  cardBg = "bg-error/5";
+                  statusText = "WRONG";
+                  statusColor = "#ff6341";
+                  cardClass = "card-orange";
                 }
 
                 return (
-                  <div key={pred.id} className={`${cardBg} rounded-xl p-4 border border-white/5`}>
+                  <motion.div
+                    key={pred.id}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className={cardClass}
+                  >
                     <div className="flex justify-between items-start mb-1">
-                      <span className="font-label text-[10px] text-on-surface-variant uppercase tracking-widest">
+                      <span className="info-pill">
                         {getCategoryLabel(pred)}
                       </span>
-                      <span className={`font-label text-xs font-bold ${statusColor}`}>{statusText}</span>
+                      <span className="text-xs font-bold" style={{ color: statusColor }}>
+                        {statusText}
+                      </span>
                     </div>
-                    <p className="font-body text-sm font-medium text-on-surface mb-2">{pred.question}</p>
+                    <p className="text-sm font-medium text-white mb-2">{pred.question}</p>
                     <div className="flex items-center gap-2 flex-wrap">
                       {isMissed ? (
-                        <span className="font-label text-xs px-3 py-1 rounded-full font-bold bg-surface-container-highest/50 text-on-surface-variant/50">
+                        <span
+                          className="text-xs px-3 py-1 font-bold"
+                          style={{
+                            background: "#1a1a1a",
+                            border: "2px solid #333",
+                            borderRadius: "4px",
+                            color: "#6b7280",
+                          }}
+                        >
                           Not answered
                         </span>
                       ) : (
-                        <span className={`font-label text-xs px-3 py-1 rounded-full font-bold ${
-                          isClosed && isCorrect === false
-                            ? "bg-error/20 text-error"
-                            : isClosed && isCorrect === true
-                            ? "bg-primary-container/20 text-primary-container"
-                            : "bg-surface-container-highest text-on-surface-variant"
-                        }`}>
+                        <span
+                          className="text-xs px-3 py-1 font-bold"
+                          style={{
+                            background: isClosed && isCorrect === false
+                              ? "rgba(255, 99, 65, 0.15)"
+                              : isClosed && isCorrect === true
+                              ? "rgba(34, 197, 94, 0.15)"
+                              : "#1a1a1a",
+                            border: `2px solid ${
+                              isClosed && isCorrect === false
+                                ? "#ff6341"
+                                : isClosed && isCorrect === true
+                                ? "#22c55e"
+                                : "#333"
+                            }`,
+                            borderRadius: "4px",
+                            color: isClosed && isCorrect === false
+                              ? "#ff6341"
+                              : isClosed && isCorrect === true
+                              ? "#22c55e"
+                              : "#ccc",
+                          }}
+                        >
                           Your pick: {selectedLabel}
                         </span>
                       )}
                       {correctAnswerLabel && (
-                        <span className="font-label text-xs text-on-surface-variant">
+                        <span className="text-xs text-[#6b7280]">
                           Answer: {correctAnswerLabel}
                         </span>
                       )}
                     </div>
-                  </div>
+                  </motion.div>
                 );
               })}
             </div>

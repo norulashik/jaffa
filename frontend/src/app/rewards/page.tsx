@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { motion } from "framer-motion";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
-import MaterialIcon from "@/components/MaterialIcon";
+import { Trophy, Star, Gift, Lock, Copy } from "lucide-react";
 import { useGame } from "@/context/GameContext";
 import { api } from "@/lib/api";
 
@@ -37,27 +38,34 @@ export default function RewardsPage() {
   };
 
   return (
-    <div className="bg-background text-on-surface font-body min-h-screen">
-      <Header
-        rightContent={
-          <div className="w-10 h-10 rounded-full bg-surface-container-highest border-2 border-primary-container/30 overflow-hidden flex items-center justify-center">
-            <MaterialIcon icon="person" className="text-on-surface-variant" />
-          </div>
-        }
-      />
+    <div className="bg-[#0d0d0d] text-white min-h-screen">
+      <Header />
 
       <main className="pt-24 pb-32 px-6 max-w-2xl mx-auto">
-        <h2 className="font-headline text-4xl font-extrabold tracking-tight mb-6">Rewards</h2>
+        <h2
+          className="text-4xl font-extrabold tracking-tight mb-6 uppercase"
+          style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+        >
+          REWARDS
+        </h2>
 
         {loading ? (
           <div className="flex justify-center py-20">
-            <div className="w-8 h-8 border-2 border-primary-container border-t-transparent rounded-full animate-spin" />
+            <div
+              className="w-8 h-8 animate-spin rounded-[2px]"
+              style={{ border: "3px solid #ff6341", borderTopColor: "transparent" }}
+            />
           </div>
         ) : rewards.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <MaterialIcon icon="military_tech" className="text-5xl text-on-surface-variant/30 mb-4" />
-            <h3 className="font-headline text-xl font-bold text-on-surface mb-2">No rewards yet</h3>
-            <p className="font-body text-sm text-on-surface-variant max-w-[240px]">
+          <div className="game-card flex flex-col items-center py-12 text-center">
+            <Gift size={48} className="text-[#6b7280] mb-4" />
+            <h3
+              className="text-xl font-bold text-white mb-2 uppercase"
+              style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+            >
+              NO REWARDS YET
+            </h3>
+            <p className="text-sm text-[#6b7280] max-w-[240px]">
               Win rounds and matches to earn rewards from the venue!
             </p>
           </div>
@@ -68,55 +76,81 @@ export default function RewardsPage() {
               const isExpired = reward.status === "expired";
               const isActive = reward.status === "active";
 
+              const cardClass = isActive
+                ? "card-orange"
+                : isRedeemed
+                ? "card-green"
+                : "game-card opacity-60";
+
               return (
-                <div
+                <motion.div
                   key={reward.id}
-                  className={`rounded-xl p-5 border ${
-                    isActive
-                      ? "bg-surface-container-low border-primary-container/20 stadium-glow"
-                      : "bg-surface-container-low/50 border-white/5 opacity-60"
-                  }`}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className={cardClass}
+                  style={isActive ? { boxShadow: "0 0 20px rgba(255, 99, 65, 0.3)" } : undefined}
                 >
                   <div className="flex justify-between items-start mb-3">
                     <div className="flex items-center gap-2">
-                      <MaterialIcon
-                        icon={reward.type === "round" ? "emoji_events" : "workspace_premium"}
-                        className={isActive ? "text-primary-container" : "text-on-surface-variant/50"}
-                      />
-                      <span className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-                        {reward.type === "round" ? `Round ${reward.round} Winner` : "Match Winner"}
+                      {reward.type === "round" ? (
+                        <Trophy size={16} className={isActive ? "text-[#ff6341]" : "text-[#6b7280]"} />
+                      ) : (
+                        <Star size={16} className={isActive ? "text-[#ff6341]" : "text-[#6b7280]"} />
+                      )}
+                      <span className="info-pill">
+                        {reward.type === "round" ? `ROUND ${reward.round} WINNER` : "MATCH WINNER"}
                       </span>
                     </div>
-                    <span className={`font-label text-[10px] font-bold px-2 py-1 rounded ${
-                      isActive ? "bg-primary-container/20 text-primary-container"
-                      : isRedeemed ? "bg-surface-container-highest text-on-surface-variant"
-                      : "bg-error/10 text-error"
-                    }`}>
-                      {isActive ? "ACTIVE" : isRedeemed ? "REDEEMED" : "EXPIRED"}
-                    </span>
+                    {isActive ? (
+                      <span className="live-badge">ACTIVE</span>
+                    ) : (
+                      <span className="info-pill">
+                        {isRedeemed ? "REDEEMED" : "EXPIRED"}
+                      </span>
+                    )}
                   </div>
 
-                  <h3 className="font-headline text-lg font-bold text-on-surface mb-1">
+                  <h3
+                    className="text-lg font-bold text-white mb-1"
+                    style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                  >
                     {reward.prize || "Reward"}
                   </h3>
-                  <p className="font-body text-xs text-on-surface-variant mb-4">
+                  <p className="text-xs text-[#6b7280] mb-4">
                     Rank #{reward.rank} · {reward.venueName || "Venue"}
                   </p>
 
                   {isActive && reward.code ? (
                     <button
                       onClick={() => handleReveal(reward.id)}
-                      className="w-full py-3 bg-primary-container text-on-primary-container font-label text-xs font-black uppercase tracking-[0.2em] rounded hover:shadow-[0_0_20px_rgba(0,255,171,0.4)] transition-all flex items-center justify-center gap-2 active:scale-95"
+                      className="w-full btn-sticker btn-orange flex items-center justify-center gap-2 uppercase tracking-[0.2em] text-xs font-black"
                     >
-                      {revealedCodes.has(reward.id) ? reward.code : "Reveal Code"}
-                      <MaterialIcon icon={revealedCodes.has(reward.id) ? "content_copy" : "lock_open"} className="text-sm" />
+                      {revealedCodes.has(reward.id) ? (
+                        <>
+                          <span
+                            className="text-base tracking-[0.3em]"
+                            style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                          >
+                            {reward.code}
+                          </span>
+                          <Copy size={14} />
+                        </>
+                      ) : (
+                        <>
+                          REVEAL CODE
+                          <Lock size={14} />
+                        </>
+                      )}
                     </button>
                   ) : (
-                    <div className="w-full py-3 bg-surface-container-highest text-on-surface-variant/50 font-label text-xs font-bold uppercase tracking-widest rounded text-center">
-                      {isRedeemed ? "Already claimed" : isExpired ? "Expired" : "—"}
-                    </div>
+                    <button
+                      className="w-full btn-gray py-3 text-xs font-bold uppercase tracking-widest text-center cursor-not-allowed opacity-60"
+                      disabled
+                    >
+                      {isRedeemed ? "ALREADY CLAIMED" : isExpired ? "EXPIRED" : "\u2014"}
+                    </button>
                   )}
-                </div>
+                </motion.div>
               );
             })}
           </div>

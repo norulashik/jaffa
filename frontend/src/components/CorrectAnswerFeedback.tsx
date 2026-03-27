@@ -1,6 +1,6 @@
 "use client";
 
-import MaterialIcon from "./MaterialIcon";
+import { Trophy, Check, Plus } from "lucide-react";
 
 interface CorrectAnswerFeedbackProps {
   points: number;
@@ -19,49 +19,86 @@ export default function CorrectAnswerFeedback({
 }: CorrectAnswerFeedbackProps) {
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center px-6">
-      {/* Overlay Backdrop with Green Pulse */}
-      <div className="absolute inset-0 bg-[#00FFAB]/10 backdrop-blur-md"></div>
-      <div className="absolute inset-0 confetti-overlay"></div>
+      {/* Overlay Backdrop — flat black, no blur */}
+      <div className="absolute inset-0 bg-black/80" />
 
       {/* Reward Card */}
-      <div className="relative w-full max-w-md bg-surface-container-high/90 backdrop-blur-2xl rounded-[2rem] p-8 shadow-[0_32px_128px_rgba(0,0,0,0.8)] border border-primary-container/20">
+      <div
+        className="relative w-full max-w-md p-8"
+        style={{
+          background: "#1a1a1a",
+          border: "3px solid #22c55e",
+          borderRadius: "4px",
+          boxShadow: "8px 8px 0 0 #22c55e",
+        }}
+      >
         {/* Top Icon */}
-        <div className="absolute -top-10 left-1/2 -translate-x-1/2 w-20 h-20 bg-primary-container rounded-2xl flex items-center justify-center shadow-[0_0_40px_rgba(0,255,171,0.6)] rotate-6">
-          <MaterialIcon
-            icon="military_tech"
-            filled
-            className="text-on-primary-container text-4xl font-bold"
-          />
+        <div
+          className="absolute -top-10 left-1/2 -translate-x-1/2 w-20 h-20 flex items-center justify-center"
+          style={{
+            background: "#22c55e",
+            border: "3px solid #000000",
+            borderRadius: "4px",
+            boxShadow: "4px 4px 0 0 #000000",
+          }}
+        >
+          <Trophy className="w-9 h-9 text-black" strokeWidth={3} />
         </div>
 
         {/* Content */}
         <div className="text-center pt-8">
-          <h2 className="font-headline text-5xl font-black text-white italic tracking-tighter mb-2 scale-110">
+          <h2
+            className="text-5xl text-white tracking-tighter mb-2"
+            style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+          >
             BOOM!
           </h2>
-          <div className="inline-flex items-center gap-2 bg-primary-container/20 px-6 py-2 rounded-full mb-8 border border-primary-container/30">
-            <MaterialIcon icon="add_circle" className="text-primary-container text-xl" />
-            <span className="font-headline font-bold text-primary-container text-2xl tracking-tight">
-              +{points} Points
+
+          {/* Points pill */}
+          <div
+            className="inline-flex items-center gap-2 px-6 py-2 mb-8"
+            style={{
+              background: "#22c55e",
+              color: "#000000",
+              borderRadius: "3px",
+              border: "2px solid #000000",
+              boxShadow: "4px 4px 0 0 #000000",
+            }}
+          >
+            <Plus className="w-5 h-5 text-black" strokeWidth={3} />
+            <span
+              className="text-2xl text-black tracking-tight"
+              style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+            >
+              +{points} POINTS
             </span>
           </div>
 
           {/* Prediction Highlight */}
-          <div className="bg-surface-container-lowest rounded-2xl p-6 text-left border border-primary-container/40 correct-glow mb-8 overflow-hidden relative">
-            <div className="absolute inset-0 bg-gradient-to-br from-primary-container/5 to-transparent"></div>
+          <div className="card-green p-6 text-left mb-8 overflow-hidden relative">
             <div className="relative z-10">
-              <p className="font-label text-[10px] font-extrabold text-primary-container uppercase tracking-[0.2em] mb-3">
+              <p className="info-pill inline-block w-fit text-[#22c55e] mb-3 !text-[10px] !tracking-[0.2em]">
                 CORRECT PREDICTION
               </p>
               <div className="flex justify-between items-center">
                 <div>
-                  <h4 className="font-headline text-2xl font-bold text-white mb-1 leading-none">
+                  <h4
+                    className="text-2xl text-white mb-1 leading-none"
+                    style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                  >
                     {prediction}
                   </h4>
-                  <p className="font-body text-sm text-slate-400">Result: {result}</p>
+                  <p className="text-sm text-white/50">Result: {result}</p>
                 </div>
-                <div className="w-12 h-12 bg-primary-container rounded-xl flex items-center justify-center">
-                  <MaterialIcon icon="check" className="text-on-primary-container font-black text-3xl" />
+                <div
+                  className="w-12 h-12 flex items-center justify-center"
+                  style={{
+                    background: "#22c55e",
+                    borderRadius: "4px",
+                    border: "2px solid #000000",
+                  }}
+                >
+                  <Check className="w-7 h-7 text-black" strokeWidth={3} />
                 </div>
               </div>
             </div>
@@ -70,11 +107,11 @@ export default function CorrectAnswerFeedback({
           {/* Action Button */}
           <button
             onClick={onClose}
-            className="w-full bg-primary-container text-on-primary-container font-headline font-bold py-5 rounded-xl hover:shadow-[0_0_25px_rgba(0,255,171,0.4)] transition-all active:scale-95 text-lg uppercase tracking-wider"
+            className="btn-sticker btn-green w-full py-5 text-lg tracking-wider"
           >
-            Keep Winning
+            KEEP WINNING
           </button>
-          <p className="mt-6 font-label text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+          <p className="mt-6 text-[10px] font-black text-white/40 uppercase tracking-widest">
             Streaking: {streak} in a row
           </p>
         </div>

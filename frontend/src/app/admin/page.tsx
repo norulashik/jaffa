@@ -1,9 +1,27 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
-import { IoCheckmarkCircle, IoStatsChart, IoTicket, IoPeople, IoQrCode, IoKeypad, IoCopy, IoRefresh } from "react-icons/io5";
+import { useState, useEffect, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { toast } from "sonner";
+import {
+  IoStorefront,
+  IoKeypad,
+  IoGift,
+  IoTrophy,
+  IoSettings,
+  IoLogOut,
+  IoPeople,
+  IoCopy,
+  IoRefresh,
+  IoLocationSharp,
+  IoCheckmarkCircle,
+  IoCloseCircle,
+} from "react-icons/io5";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
+/* ------------------------------------------------------------------ */
+/*  API helpers                                                        */
+/* ------------------------------------------------------------------ */
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 const apiFetch = (url: string, options: RequestInit = {}) =>
@@ -16,28 +34,46 @@ const apiFetch = (url: string, options: RequestInit = {}) =>
     },
   });
 
+/* ------------------------------------------------------------------ */
+/*  Fade / slide animation variants                                    */
+/* ------------------------------------------------------------------ */
+const fadeUp = {
+  hidden: { opacity: 0, y: 18 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.35 } },
+  exit: { opacity: 0, y: -12, transition: { duration: 0.2 } },
+};
+
+const stagger = {
+  show: { transition: { staggerChildren: 0.07 } },
+};
+
+/* ================================================================== */
+/*  MAIN COMPONENT                                                     */
+/* ================================================================== */
 export default function AdminDashboard() {
+  /* ── auth state ── */
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [token, setToken] = useState("");
   const [venue, setVenue] = useState<any>(null);
+
+  /* ── data state ── */
   const [stats, setStats] = useState<any>(null);
   const [rewards, setRewards] = useState<any[]>([]);
-  const [redeemCode, setRedeemCode] = useState("");
-  const [redeemResult, setRedeemResult] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<"overview" | "codes" | "rewards" | "redeem" | "setup">("overview");
-
-  // Match codes
   const [matches, setMatches] = useState<any[]>([]);
   const [matchCodes, setMatchCodes] = useState<Record<string, string>>({});
-  const [generatingCode, setGeneratingCode] = useState<string | null>(null);
   const [matchPlayers, setMatchPlayers] = useState<Record<string, number>>({});
+  const [generatingCode, setGeneratingCode] = useState<string | null>(null);
 
-  // Login form
+  /* ── redeem ── */
+  const [redeemCode, setRedeemCode] = useState("");
+  const [redeemResult, setRedeemResult] = useState<any>(null);
+
+  /* ── login form ── */
   const [loginPhone, setLoginPhone] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
 
-  // Registration form
+  /* ── register form ── */
   const [showRegister, setShowRegister] = useState(false);
   const [regName, setRegName] = useState("");
   const [regOwnerName, setRegOwnerName] = useState("");
@@ -49,21 +85,21 @@ export default function AdminDashboard() {
   const [regSuccess, setRegSuccess] = useState("");
   const [detectingLocation, setDetectingLocation] = useState(false);
 
-  // Setup
+  /* ── setup ── */
   const [copied, setCopied] = useState(false);
-
-  // Reward config form
   const [rewardConfig, setRewardConfig] = useState({
     roundReward: { top1: "", top2: "", top3: "" },
     grandPrize: { top1: "", top2: "", top3: "" },
   });
 
+  /* ================================================================ */
+  /*  AUTO-LOGIN FROM LOCALSTORAGE                                     */
+  /* ================================================================ */
   useEffect(() => {
     const saved = localStorage.getItem("jaffa_venue_token");
     if (saved) {
       setToken(saved);
       setIsLoggedIn(true);
-      // Restore venue data from localStorage
       const savedVenue = localStorage.getItem("jaffa_venue_data");
       if (savedVenue) {
         try {
@@ -75,6 +111,82 @@ export default function AdminDashboard() {
     }
   }, []);
 
+  /* ================================================================ */
+  /*  DATA LOADERS                                                     */
+  /* ================================================================ */
+  const loadStats = useCallback(async () => {
+    try {
+      const res = await apiFetch(`${API_URL}/admin/venue/stats`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setStats(await res.json());
+    } catch (err) {
+      console.error(err);
+    }
+  }, [token]);
+
+  const loadRewards = useCallback(async () => {
+    try {
+      const res = await apiFetch(`${API_URL}/rewards/venue`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setRewards(await res.json());
+    } catch (err) {
+      console.error(err);
+    }
+  }, [token]);
+
+  const loadMatchCode = useCallback(
+    async (matchId: string) => {
+      try {
+        const res = await apiFetch(`${API_URL}/admin/match-code/${matchId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.matchCode) {
+            setMatchCodes((prev) => ({ ...prev, [matchId]: data.matchCode.code }));
+          }
+        }
+      } catch {}
+    },
+    [token]
+  );
+
+  const loadPlayerCount = useCallback(
+    async (matchId: string) => {
+      try {
+        const res = await apiFetch(`${API_URL}/admin/venue/players/${matchId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setMatchPlayers((prev) => ({ ...prev, [matchId]: data.count }));
+        }
+      } catch {}
+    },
+    [token]
+  );
+
+  const loadMatches = useCallback(async () => {
+    try {
+      const res = await apiFetch(`${API_URL}/matches`, {
+        headers: { "ngrok-skip-browser-warning": "true" },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMatches(data || []);
+        for (const m of data || []) {
+          loadMatchCode(m.id);
+          loadPlayerCount(m.id);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }, [token, loadMatchCode, loadPlayerCount]);
+
+  /* ── auto-refresh every 15s ── */
   useEffect(() => {
     if (isLoggedIn && token) {
       loadStats();
@@ -87,8 +199,11 @@ export default function AdminDashboard() {
       }, 15000);
       return () => clearInterval(interval);
     }
-  }, [isLoggedIn, token]);
+  }, [isLoggedIn, token, loadStats, loadRewards, loadMatches]);
 
+  /* ================================================================ */
+  /*  AUTH HANDLERS                                                    */
+  /* ================================================================ */
   const detectLocation = () => {
     if (!navigator.geolocation) {
       setRegError("Geolocation not supported by your browser");
@@ -100,6 +215,7 @@ export default function AdminDashboard() {
         setRegLatitude(pos.coords.latitude.toFixed(6));
         setRegLongitude(pos.coords.longitude.toFixed(6));
         setDetectingLocation(false);
+        toast.success("Location detected");
       },
       () => {
         setRegError("Failed to detect location. Please enter manually.");
@@ -131,6 +247,7 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
       setRegSuccess("Registration submitted! Your venue is pending approval. You can login once approved.");
+      toast.success("Registration submitted!");
       setTimeout(() => {
         setShowRegister(false);
         setRegSuccess("");
@@ -143,10 +260,12 @@ export default function AdminDashboard() {
       }, 3000);
     } catch (err: any) {
       setRegError(err.message);
+      toast.error(err.message);
     }
   };
 
   const handleLogin = async () => {
+    setLoginError("");
     try {
       const res = await apiFetch(`${API_URL}/venues/login`, {
         method: "POST",
@@ -162,78 +281,30 @@ export default function AdminDashboard() {
       localStorage.setItem("jaffa_venue_token", data.token);
       localStorage.setItem("jaffa_venue_data", JSON.stringify(data.venue));
       setIsLoggedIn(true);
+      toast.success("Logged in successfully");
     } catch (err: any) {
       setLoginError(err.message);
+      toast.error(err.message);
     }
   };
 
-  const loadStats = async () => {
-    try {
-      const res = await apiFetch(`${API_URL}/admin/venue/stats`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) setStats(await res.json());
-    } catch (err) {
-      console.error(err);
-    }
+  const handleLogout = () => {
+    localStorage.removeItem("jaffa_venue_token");
+    localStorage.removeItem("jaffa_venue_data");
+    setIsLoggedIn(false);
+    setToken("");
+    setVenue(null);
+    setStats(null);
+    setRewards([]);
+    setMatches([]);
+    setMatchCodes({});
+    setMatchPlayers({});
+    toast("Logged out");
   };
 
-  const loadRewards = async () => {
-    try {
-      const res = await apiFetch(`${API_URL}/rewards/venue`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) setRewards(await res.json());
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const loadMatches = async () => {
-    try {
-      const res = await apiFetch(`${API_URL}/matches`, {
-        headers: { "ngrok-skip-browser-warning": "true" },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setMatches(data || []);
-        // Load existing codes for each match
-        for (const m of data || []) {
-          loadMatchCode(m.id);
-          loadPlayerCount(m.id);
-        }
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const loadMatchCode = async (matchId: string) => {
-    try {
-      const res = await apiFetch(`${API_URL}/admin/match-code/${matchId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.matchCode) {
-          setMatchCodes((prev) => ({ ...prev, [matchId]: data.matchCode.code }));
-        }
-      }
-    } catch {}
-  };
-
-  const loadPlayerCount = async (matchId: string) => {
-    try {
-      const res = await apiFetch(`${API_URL}/admin/venue/players/${matchId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setMatchPlayers((prev) => ({ ...prev, [matchId]: data.count }));
-      }
-    } catch {}
-  };
-
+  /* ================================================================ */
+  /*  MATCH CODE GENERATION                                            */
+  /* ================================================================ */
   const generateCode = async (matchId: string) => {
     setGeneratingCode(matchId);
     try {
@@ -248,14 +319,19 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (res.ok) {
         setMatchCodes((prev) => ({ ...prev, [matchId]: data.matchCode.code }));
+        toast.success("Match code generated");
       }
     } catch (err) {
       console.error(err);
+      toast.error("Failed to generate code");
     } finally {
       setGeneratingCode(null);
     }
   };
 
+  /* ================================================================ */
+  /*  REDEEM                                                           */
+  /* ================================================================ */
   const handleRedeem = async () => {
     setRedeemResult(null);
     try {
@@ -273,11 +349,16 @@ export default function AdminDashboard() {
       setRedeemResult({ success: true, ...data });
       setRedeemCode("");
       loadRewards();
+      toast.success("Reward redeemed!");
     } catch (err: any) {
       setRedeemResult({ success: false, error: err.message });
+      toast.error(err.message);
     }
   };
 
+  /* ================================================================ */
+  /*  UPDATE REWARDS CONFIG                                            */
+  /* ================================================================ */
   const handleUpdateRewards = async () => {
     try {
       const res = await apiFetch(`${API_URL}/venues/rewards`, {
@@ -289,8 +370,7 @@ export default function AdminDashboard() {
         body: JSON.stringify({ rewardConfig }),
       });
       if (res.ok) {
-        alert("Rewards updated!");
-        // Update cached venue data with new reward config
+        toast.success("Rewards updated!");
         if (venue) {
           const updatedVenue = { ...venue, rewardConfig };
           setVenue(updatedVenue);
@@ -299,508 +379,1045 @@ export default function AdminDashboard() {
       }
     } catch (err) {
       console.error(err);
+      toast.error("Failed to update rewards");
     }
   };
 
-  const cafeUrl = typeof window !== "undefined" && venue?.slug
-    ? `${window.location.origin}/cafe/${venue.slug}`
-    : "";
+  /* ================================================================ */
+  /*  DERIVED                                                          */
+  /* ================================================================ */
+  const cafeUrl =
+    typeof window !== "undefined" && venue?.slug
+      ? `${window.location.origin}/cafe/${venue.slug}`
+      : "";
 
   const copyLink = () => {
     if (cafeUrl) {
       navigator.clipboard.writeText(cafeUrl);
       setCopied(true);
+      toast.success("Link copied!");
       setTimeout(() => setCopied(false), 2000);
     }
   };
 
+  const activeMatches = matches.filter(
+    (m) => m.status === "live" || m.status === "upcoming"
+  );
+
+  /* ================================================================ */
+  /*  LOGIN / REGISTER SCREEN                                          */
+  /* ================================================================ */
   if (!isLoggedIn) {
     return (
-      <div className="min-h-screen bg-surface flex items-center justify-center p-6">
-        <div className="w-full max-w-sm">
-          <h1 className="text-3xl font-black text-primary-container text-center mb-2">JAFFA</h1>
-          <p className="text-on-surface-variant text-center text-sm mb-8">Venue Dashboard</p>
+      <div className="min-h-screen bg-[#0d0d0d] flex items-center justify-center p-4">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.4 }}
+          className="w-full max-w-md"
+          style={{
+            background: "#1a1a1a",
+            border: "3px solid #ff6341",
+            borderRadius: "4px",
+            boxShadow: "6px 6px 0 0 #ff6341",
+            padding: "2rem",
+          }}
+        >
+          {/* Title */}
+          <h1
+            className="text-center mb-1"
+            style={{ fontFamily: "Bungee", fontSize: "2rem", color: "#ff6341" }}
+          >
+            VENUE ADMIN
+          </h1>
+          <p
+            className="text-center mb-8"
+            style={{ color: "#9ca3af", fontSize: "0.85rem", fontWeight: 600 }}
+          >
+            JAFFA IPL Prediction Portal
+          </p>
 
-          {!showRegister ? (
-            <>
-              <input
-                type="tel"
-                value={loginPhone}
-                onChange={(e) => setLoginPhone(e.target.value)}
-                placeholder="Owner phone number"
-                className="w-full bg-surface-container-high text-on-surface px-4 py-3 rounded-xl mb-3 outline-none focus:ring-2 focus:ring-primary-container"
-              />
-              <input
-                type="password"
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                placeholder="Password"
-                className="w-full bg-surface-container-high text-on-surface px-4 py-3 rounded-xl mb-4 outline-none focus:ring-2 focus:ring-primary-container"
-              />
-
-              {loginError && <p className="text-error text-sm mb-4">{loginError}</p>}
-
-              <button
-                onClick={handleLogin}
-                className="w-full bg-primary-container hover:bg-primary-fixed-dim text-on-primary-container font-bold py-3 rounded-xl transition-colors shadow-[0_4px_20px_rgba(0,255,171,0.3)]"
+          <AnimatePresence mode="wait">
+            {!showRegister ? (
+              /* ── LOGIN FORM ── */
+              <motion.div
+                key="login"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                transition={{ duration: 0.25 }}
               >
-                Login
-              </button>
+                <label style={{ color: "#9ca3af" }}>Phone Number</label>
+                <input
+                  type="tel"
+                  value={loginPhone}
+                  onChange={(e) => setLoginPhone(e.target.value)}
+                  placeholder="Owner phone number"
+                  className="nb-input w-full px-4 py-3 mb-4 mt-1"
+                />
 
-              <p className="text-center mt-4">
+                <label style={{ color: "#9ca3af" }}>Password</label>
+                <input
+                  type="password"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  placeholder="Enter password"
+                  className="nb-input w-full px-4 py-3 mb-5 mt-1"
+                  onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+                />
+
+                {loginError && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="card-orange px-4 py-3 mb-4"
+                  >
+                    <p style={{ color: "#ff6341", fontSize: "0.85rem", fontWeight: 700 }}>
+                      {loginError}
+                    </p>
+                  </motion.div>
+                )}
+
                 <button
-                  onClick={() => { setShowRegister(true); setLoginError(""); }}
-                  className="text-primary-container hover:text-primary-fixed text-sm"
+                  onClick={handleLogin}
+                  className="btn-sticker btn-orange w-full py-3 text-base"
                 >
-                  New venue? Register here
+                  Login
                 </button>
-              </p>
-            </>
-          ) : (
-            <>
-              {regSuccess ? (
-                <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-4 text-center">
-                  <p className="text-green-400 font-medium">{regSuccess}</p>
-                </div>
-              ) : (
-                <>
-                  <input
-                    type="text"
-                    value={regName}
-                    onChange={(e) => setRegName(e.target.value)}
-                    placeholder="Venue / Cafe name"
-                    className="w-full bg-surface-container-high text-on-surface px-4 py-3 rounded-xl mb-3 outline-none focus:ring-2 focus:ring-primary-container"
-                  />
-                  <input
-                    type="text"
-                    value={regOwnerName}
-                    onChange={(e) => setRegOwnerName(e.target.value)}
-                    placeholder="Owner name"
-                    className="w-full bg-surface-container-high text-on-surface px-4 py-3 rounded-xl mb-3 outline-none focus:ring-2 focus:ring-primary-container"
-                  />
-                  <input
-                    type="tel"
-                    value={regPhone}
-                    onChange={(e) => setRegPhone(e.target.value)}
-                    placeholder="Phone number"
-                    className="w-full bg-surface-container-high text-on-surface px-4 py-3 rounded-xl mb-3 outline-none focus:ring-2 focus:ring-primary-container"
-                  />
-                  <input
-                    type="password"
-                    value={regPassword}
-                    onChange={(e) => setRegPassword(e.target.value)}
-                    placeholder="Password"
-                    className="w-full bg-surface-container-high text-on-surface px-4 py-3 rounded-xl mb-3 outline-none focus:ring-2 focus:ring-primary-container"
-                  />
 
-                  <div className="flex gap-2 mb-3">
+                <p className="text-center mt-5">
+                  <button
+                    onClick={() => {
+                      setShowRegister(true);
+                      setLoginError("");
+                    }}
+                    style={{
+                      color: "#ff6341",
+                      fontSize: "0.85rem",
+                      fontWeight: 700,
+                      background: "none",
+                      border: "none",
+                      boxShadow: "none",
+                      textTransform: "none",
+                    }}
+                  >
+                    New venue? Register here
+                  </button>
+                </p>
+              </motion.div>
+            ) : (
+              /* ── REGISTER FORM ── */
+              <motion.div
+                key="register"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                transition={{ duration: 0.25 }}
+              >
+                {regSuccess ? (
+                  <motion.div
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className="card-green px-4 py-6 text-center"
+                  >
+                    <IoCheckmarkCircle
+                      style={{ fontSize: "2.5rem", color: "#22c55e", margin: "0 auto 0.5rem" }}
+                    />
+                    <p style={{ color: "#22c55e", fontWeight: 700 }}>{regSuccess}</p>
+                  </motion.div>
+                ) : (
+                  <>
+                    <label style={{ color: "#9ca3af" }}>Venue / Cafe Name</label>
                     <input
                       type="text"
-                      value={regLatitude}
-                      onChange={(e) => setRegLatitude(e.target.value)}
-                      placeholder="Latitude"
-                      className="flex-1 bg-surface-container-high text-on-surface px-4 py-3 rounded-xl outline-none focus:ring-2 focus:ring-primary-container text-sm"
+                      value={regName}
+                      onChange={(e) => setRegName(e.target.value)}
+                      placeholder="e.g. Chai Point"
+                      className="nb-input w-full px-4 py-3 mb-3 mt-1"
                     />
+
+                    <label style={{ color: "#9ca3af" }}>Owner Name</label>
                     <input
                       type="text"
-                      value={regLongitude}
-                      onChange={(e) => setRegLongitude(e.target.value)}
-                      placeholder="Longitude"
-                      className="flex-1 bg-surface-container-high text-on-surface px-4 py-3 rounded-xl outline-none focus:ring-2 focus:ring-primary-container text-sm"
+                      value={regOwnerName}
+                      onChange={(e) => setRegOwnerName(e.target.value)}
+                      placeholder="Your full name"
+                      className="nb-input w-full px-4 py-3 mb-3 mt-1"
                     />
-                  </div>
+
+                    <label style={{ color: "#9ca3af" }}>Phone Number</label>
+                    <input
+                      type="tel"
+                      value={regPhone}
+                      onChange={(e) => setRegPhone(e.target.value)}
+                      placeholder="Phone number"
+                      className="nb-input w-full px-4 py-3 mb-3 mt-1"
+                    />
+
+                    <label style={{ color: "#9ca3af" }}>Password</label>
+                    <input
+                      type="password"
+                      value={regPassword}
+                      onChange={(e) => setRegPassword(e.target.value)}
+                      placeholder="Choose a password"
+                      className="nb-input w-full px-4 py-3 mb-4 mt-1"
+                    />
+
+                    <label style={{ color: "#9ca3af" }}>Location</label>
+                    <div className="flex gap-2 mb-2 mt-1">
+                      <input
+                        type="text"
+                        value={regLatitude}
+                        onChange={(e) => setRegLatitude(e.target.value)}
+                        placeholder="Latitude"
+                        className="nb-input flex-1 px-3 py-3 text-sm"
+                      />
+                      <input
+                        type="text"
+                        value={regLongitude}
+                        onChange={(e) => setRegLongitude(e.target.value)}
+                        placeholder="Longitude"
+                        className="nb-input flex-1 px-3 py-3 text-sm"
+                      />
+                    </div>
+                    <button
+                      onClick={detectLocation}
+                      disabled={detectingLocation}
+                      className="btn-secondary w-full py-2 mb-4 text-sm flex items-center justify-center gap-2"
+                    >
+                      <IoLocationSharp />
+                      {detectingLocation ? "Detecting..." : "Detect My Location"}
+                    </button>
+
+                    {regError && (
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="card-orange px-4 py-3 mb-4"
+                      >
+                        <p style={{ color: "#ff6341", fontSize: "0.85rem", fontWeight: 700 }}>
+                          {regError}
+                        </p>
+                      </motion.div>
+                    )}
+
+                    <button
+                      onClick={handleRegister}
+                      className="btn-sticker btn-orange w-full py-3 text-base"
+                    >
+                      Register Venue
+                    </button>
+                  </>
+                )}
+
+                <p className="text-center mt-5">
                   <button
-                    onClick={detectLocation}
-                    disabled={detectingLocation}
-                    className="w-full bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant text-sm py-2 rounded-xl mb-4 transition-colors"
+                    onClick={() => {
+                      setShowRegister(false);
+                      setRegError("");
+                      setRegSuccess("");
+                    }}
+                    style={{
+                      color: "#ff6341",
+                      fontSize: "0.85rem",
+                      fontWeight: 700,
+                      background: "none",
+                      border: "none",
+                      boxShadow: "none",
+                      textTransform: "none",
+                    }}
                   >
-                    {detectingLocation ? "Detecting..." : "Use my current location"}
+                    Already have an account? Login
                   </button>
-
-                  {regError && <p className="text-error text-sm mb-4">{regError}</p>}
-
-                  <button
-                    onClick={handleRegister}
-                    className="w-full bg-primary-container hover:bg-primary-fixed-dim text-on-primary-container font-bold py-3 rounded-xl transition-colors shadow-[0_4px_20px_rgba(0,255,171,0.3)]"
-                  >
-                    Register Venue
-                  </button>
-                </>
-              )}
-
-              <p className="text-center mt-4">
-                <button
-                  onClick={() => { setShowRegister(false); setRegError(""); setRegSuccess(""); }}
-                  className="text-primary-container hover:text-primary-fixed text-sm"
-                >
-                  Already have an account? Login
-                </button>
-              </p>
-            </>
-          )}
-        </div>
+                </p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
       </div>
     );
   }
 
+  /* ================================================================ */
+  /*  DASHBOARD                                                        */
+  /* ================================================================ */
   return (
-    <div className="min-h-screen bg-surface">
-      {/* Header */}
-      <div className="bg-surface-container-low border-b border-white/5 px-4 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-primary-container">JAFFA Admin</h1>
-            <p className="text-sm text-on-surface-variant">{venue?.name || "Your Venue"}</p>
-          </div>
-          <button
-            onClick={() => {
-              localStorage.removeItem("jaffa_venue_token");
-              localStorage.removeItem("jaffa_venue_data");
-              setIsLoggedIn(false);
+    <div className="min-h-screen bg-[#0d0d0d]">
+      {/* ── HEADER ── */}
+      <motion.header
+        initial={{ y: -20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        className="px-4 py-4 flex items-center justify-between"
+        style={{
+          background: "#1a1a1a",
+          borderBottom: "2px solid #2a2a2a",
+          boxShadow: "0 4px 0 0 #ff6341",
+        }}
+      >
+        <div>
+          <h2
+            style={{
+              fontFamily: "Bungee",
+              fontSize: "1.3rem",
+              color: "#ff6341",
+              lineHeight: 1.1,
             }}
-            className="text-sm text-outline hover:text-on-surface"
           >
-            Logout
-          </button>
+            VENUE ADMIN
+          </h2>
+          <p style={{ color: "#9ca3af", fontSize: "0.8rem", fontWeight: 600, marginTop: "2px" }}>
+            {venue?.name || "Your Venue"}
+          </p>
         </div>
-      </div>
+        <button onClick={handleLogout} className="btn-gray px-4 py-2 text-xs flex items-center gap-2">
+          <IoLogOut style={{ fontSize: "1rem" }} />
+          Logout
+        </button>
+      </motion.header>
 
-      {/* Tabs */}
-      <div className="flex bg-surface-container-low border-b border-white/5 overflow-x-auto">
-        {[
-          { key: "overview", icon: <IoStatsChart />, label: "Overview" },
-          { key: "codes", icon: <IoKeypad />, label: "Codes" },
-          { key: "redeem", icon: <IoTicket />, label: "Redeem" },
-          { key: "rewards", icon: <IoPeople />, label: "Winners" },
-          { key: "setup", icon: <IoQrCode />, label: "Setup" },
-        ].map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key as any)}
-            className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium whitespace-nowrap ${
-              activeTab === tab.key
-                ? "text-primary-container border-b-2 border-primary-container"
-                : "text-outline"
-            }`}
+      {/* ── TABS ── */}
+      <div className="max-w-3xl mx-auto px-4 pt-5 pb-8">
+        <Tabs defaultValue="overview" className="w-full">
+          <TabsList
+            className="w-full mb-5 overflow-x-auto no-scrollbar"
+            style={{
+              background: "#1a1a1a",
+              border: "2px solid #2a2a2a",
+              borderRadius: "4px",
+              boxShadow: "4px 4px 0 0 #000",
+              padding: "4px",
+            }}
           >
-            {tab.icon} {tab.label}
-          </button>
-        ))}
-      </div>
+            {[
+              { value: "overview", icon: <IoStorefront />, label: "Overview" },
+              { value: "codes", icon: <IoKeypad />, label: "Codes" },
+              { value: "redeem", icon: <IoGift />, label: "Redeem" },
+              { value: "winners", icon: <IoTrophy />, label: "Winners" },
+              { value: "setup", icon: <IoSettings />, label: "Setup" },
+            ].map((tab) => (
+              <TabsTrigger
+                key={tab.value}
+                value={tab.value}
+                className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs rounded-[3px] transition-all data-[state=active]:bg-[#ff6341] data-[state=active]:text-black data-[state=active]:shadow-[2px_2px_0_0_#000] data-[state=inactive]:text-[#9ca3af]"
+                style={{ fontWeight: 900, letterSpacing: "0.04em" }}
+              >
+                {tab.icon} {tab.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
 
-      <div className="p-4 max-w-2xl mx-auto">
-        {/* Overview */}
-        {activeTab === "overview" && (
-          <div className="space-y-4">
-            {stats && (
-              <>
-                <div className="grid grid-cols-3 gap-3">
-                  <StatCard label="Players" value={stats.totalPlayers} />
-                  <StatCard label="Rewards" value={stats.totalRewards} />
-                  <StatCard label="Redeemed" value={stats.redeemedRewards} />
-                </div>
+          {/* ============================================================ */}
+          {/*  TAB 1 — OVERVIEW                                            */}
+          {/* ============================================================ */}
+          <TabsContent value="overview">
+            <motion.div variants={stagger} initial="hidden" animate="show" className="space-y-5">
+              {stats ? (
+                <>
+                  {/* Stat Cards */}
+                  <motion.div variants={fadeUp} className="grid grid-cols-3 gap-3">
+                    <div className="card-yellow px-3 py-4 text-center">
+                      <div className="stat-number" style={{ color: "#ffd60a" }}>
+                        {stats.totalPlayers ?? 0}
+                      </div>
+                      <p
+                        style={{
+                          fontSize: "0.7rem",
+                          fontWeight: 800,
+                          color: "#ffd60a",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.06em",
+                          marginTop: "4px",
+                        }}
+                      >
+                        Total Players
+                      </p>
+                    </div>
+                    <div className="card-blue px-3 py-4 text-center">
+                      <div className="stat-number" style={{ color: "#3b9eff" }}>
+                        {stats.totalRewards ?? 0}
+                      </div>
+                      <p
+                        style={{
+                          fontSize: "0.7rem",
+                          fontWeight: 800,
+                          color: "#3b9eff",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.06em",
+                          marginTop: "4px",
+                        }}
+                      >
+                        Total Rewards
+                      </p>
+                    </div>
+                    <div className="card-green px-3 py-4 text-center">
+                      <div className="stat-number" style={{ color: "#22c55e" }}>
+                        {stats.redeemedRewards ?? 0}
+                      </div>
+                      <p
+                        style={{
+                          fontSize: "0.7rem",
+                          fontWeight: 800,
+                          color: "#22c55e",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.06em",
+                          marginTop: "4px",
+                        }}
+                      >
+                        Redeemed
+                      </p>
+                    </div>
+                  </motion.div>
 
-                <div className="bg-surface-container-low rounded-xl p-4 border border-white/5">
-                  <h3 className="text-on-surface font-semibold mb-3">Top Players</h3>
+                  {/* Top Players */}
+                  {stats.topPlayers && stats.topPlayers.length > 0 && (
+                    <motion.div variants={fadeUp} className="game-card p-4">
+                      <h4
+                        style={{
+                          fontFamily: "Bungee",
+                          fontSize: "1rem",
+                          color: "#ffd60a",
+                          marginBottom: "0.75rem",
+                        }}
+                      >
+                        Top Players
+                      </h4>
+                      <div className="space-y-2">
+                        {stats.topPlayers.map((p: any, i: number) => (
+                          <div
+                            key={p.rank ?? i}
+                            className="flex items-center justify-between py-2 px-3"
+                            style={{
+                              background: i === 0 ? "#1a1600" : "#111",
+                              border: "1px solid #2a2a2a",
+                              borderRadius: "3px",
+                            }}
+                          >
+                            <div className="flex items-center gap-3">
+                              <span
+                                className={i < 3 ? "rank-badge" : "rank-badge-gray"}
+                                style={{ fontSize: "0.85rem", padding: "2px 8px" }}
+                              >
+                                #{p.rank ?? i + 1}
+                              </span>
+                              <span className="player-name" style={{ fontSize: "0.85rem" }}>
+                                {p.displayName}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span
+                                className="info-pill"
+                                style={{ color: "#22c55e" }}
+                              >
+                                {p.accuracy}%
+                              </span>
+                              <span
+                                style={{
+                                  fontFamily: "Bungee",
+                                  fontSize: "0.85rem",
+                                  color: "#ffd60a",
+                                }}
+                              >
+                                {p.totalPoints} pts
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </>
+              ) : (
+                <motion.div variants={fadeUp} className="text-center py-12">
+                  <div
+                    className="inline-block"
+                    style={{
+                      width: 24,
+                      height: 24,
+                      border: "3px solid #ff6341",
+                      borderTopColor: "transparent",
+                      borderRadius: "50%",
+                      animation: "spin 0.6s linear infinite",
+                    }}
+                  />
+                  <p style={{ color: "#9ca3af", marginTop: "0.75rem", fontSize: "0.9rem" }}>
+                    Loading stats...
+                  </p>
+                  <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                </motion.div>
+              )}
+
+              {/* Active Matches */}
+              {activeMatches.length > 0 && (
+                <motion.div variants={fadeUp} className="game-card p-4">
+                  <h4
+                    style={{
+                      fontFamily: "Bungee",
+                      fontSize: "1rem",
+                      color: "#ff6341",
+                      marginBottom: "0.75rem",
+                    }}
+                  >
+                    Active Matches
+                  </h4>
                   <div className="space-y-2">
-                    {stats.topPlayers?.map((p: any) => (
-                      <div key={p.rank} className="flex items-center justify-between text-sm">
+                    {activeMatches.slice(0, 5).map((m: any) => (
+                      <div
+                        key={m.id}
+                        className="flex items-center justify-between py-2 px-3"
+                        style={{
+                          background: "#111",
+                          border: "1px solid #2a2a2a",
+                          borderRadius: "3px",
+                        }}
+                      >
                         <div className="flex items-center gap-2">
-                          <span className="text-outline w-5">#{p.rank}</span>
-                          <span className="text-on-surface">{p.displayName}</span>
+                          {m.status === "live" && <span className="live-badge">LIVE</span>}
+                          {m.status === "upcoming" && (
+                            <span className="info-pill" style={{ color: "#3b9eff" }}>
+                              UPCOMING
+                            </span>
+                          )}
+                          <span style={{ color: "#fff", fontWeight: 700, fontSize: "0.85rem" }}>
+                            {m.team1Short || m.team1?.slice(0, 3)} vs{" "}
+                            {m.team2Short || m.team2?.slice(0, 3)}
+                          </span>
                         </div>
-                        <div className="flex items-center gap-3">
-                          <span className="text-on-surface-variant text-xs">{p.accuracy}%</span>
-                          <span className="text-primary-container font-medium">{p.totalPoints} pts</span>
+                        <div className="flex items-center gap-1.5" style={{ color: "#9ca3af", fontSize: "0.8rem" }}>
+                          <IoPeople />
+                          <span style={{ fontWeight: 700 }}>{matchPlayers[m.id] || 0}</span>
                         </div>
                       </div>
                     ))}
                   </div>
-                </div>
-              </>
-            )}
+                </motion.div>
+              )}
+            </motion.div>
+          </TabsContent>
 
-            {/* Active matches with player counts */}
-            {matches.filter(m => m.status === "live" || m.status === "upcoming").length > 0 && (
-              <div className="bg-surface-container-low rounded-xl p-4 border border-white/5">
-                <h3 className="text-on-surface font-semibold mb-3">Active Matches</h3>
-                <div className="space-y-3">
-                  {matches.filter(m => m.status === "live" || m.status === "upcoming").slice(0, 5).map((m: any) => (
-                    <div key={m.id} className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        {m.status === "live" && (
-                          <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
-                        )}
-                        <span className="text-on-surface text-sm">
-                          {m.team1Short || m.team1?.slice(0, 3)} vs {m.team2Short || m.team2?.slice(0, 3)}
-                        </span>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                          m.status === "live" ? "bg-green-500/20 text-green-400" : "bg-surface-container-highest text-on-surface-variant"
-                        }`}>
-                          {m.status}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1 text-on-surface-variant text-sm">
-                        <IoPeople />
-                        <span>{matchPlayers[m.id] || 0}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {!stats && (
-              <p className="text-on-surface-variant text-center py-8">Loading stats...</p>
-            )}
-          </div>
-        )}
-
-        {/* Match Codes */}
-        {activeTab === "codes" && (
-          <div className="space-y-4">
-            <h3 className="text-on-surface font-semibold mb-2">Match Codes</h3>
-            <p className="text-on-surface-variant text-xs mb-4">Generate a 4-digit code for each match. Users must enter this code to join.</p>
-
-            {matches.filter(m => m.status === "live" || m.status === "upcoming").length === 0 && (
-              <p className="text-on-surface-variant text-center py-8">No upcoming or live matches</p>
-            )}
-
-            {matches.filter(m => m.status === "live" || m.status === "upcoming").map((match: any) => {
-              const startDate = match.startTime ? new Date(match.startTime) : null;
-              const timeStr = startDate ? startDate.toLocaleString("en-IN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
-              const code = matchCodes[match.id];
-
-              return (
-                <div key={match.id} className="bg-surface-container-low rounded-xl p-4 border border-white/5">
-                  {/* Match Info */}
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      {match.team1Img && (
-                        <img src={match.team1Img} alt="" className="w-8 h-8 rounded-full object-contain bg-surface-container-high" />
-                      )}
-                      <span className="text-on-surface font-medium text-sm">
-                        {match.team1Short || match.team1?.slice(0, 3)} vs {match.team2Short || match.team2?.slice(0, 3)}
-                      </span>
-                      {match.team2Img && (
-                        <img src={match.team2Img} alt="" className="w-8 h-8 rounded-full object-contain bg-surface-container-high" />
-                      )}
-                    </div>
-                    <div className="text-right">
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                        match.status === "live" ? "bg-green-500/20 text-green-400" : "bg-surface-container-highest text-on-surface-variant"
-                      }`}>
-                        {match.status}
-                      </span>
-                      {timeStr && <p className="text-outline text-[10px] mt-0.5">{timeStr}</p>}
-                    </div>
-                  </div>
-
-                  {/* Code Display / Generate */}
-                  {code ? (
-                    <div className="bg-surface-container-high rounded-xl p-4 text-center">
-                      <p className="text-on-surface-variant text-[10px] uppercase tracking-wider mb-1">Match Code</p>
-                      <div className="text-5xl font-black text-primary-container tracking-[0.3em] font-mono">
-                        {code}
-                      </div>
-                      <div className="flex items-center justify-center gap-2 mt-3">
-                        <span className="text-outline text-xs flex items-center gap-1">
-                          <IoPeople /> {matchPlayers[match.id] || 0} players
-                        </span>
-                        <button
-                          onClick={() => generateCode(match.id)}
-                          disabled={generatingCode === match.id}
-                          className="text-xs text-on-surface-variant hover:text-primary-container flex items-center gap-1 ml-3"
-                        >
-                          <IoRefresh /> Regenerate
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => generateCode(match.id)}
-                      disabled={generatingCode === match.id}
-                      className="w-full bg-primary-container hover:bg-primary-fixed-dim disabled:bg-surface-container-highest text-on-primary-container font-bold py-3 rounded-xl transition-colors shadow-[0_4px_20px_rgba(0,255,171,0.3)]"
-                    >
-                      {generatingCode === match.id ? "Generating..." : "Generate Code"}
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Redeem */}
-        {activeTab === "redeem" && (
-          <div>
-            <h3 className="text-on-surface font-semibold mb-4">Enter Winner's Code</h3>
-            <div className="flex gap-3 mb-4">
-              <input
-                type="text"
-                value={redeemCode}
-                onChange={(e) => setRedeemCode(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                placeholder="4-digit code"
-                className="flex-1 bg-surface-container-high text-on-surface text-center text-2xl font-bold px-4 py-4 rounded-xl outline-none focus:ring-2 focus:ring-primary-container tracking-widest"
-                maxLength={4}
-              />
-              <button
-                onClick={handleRedeem}
-                disabled={redeemCode.length !== 4}
-                className="bg-green-600 hover:bg-green-700 disabled:bg-surface-container-highest text-white font-bold px-6 rounded-xl transition-colors"
-              >
-                Redeem
-              </button>
-            </div>
-
-            {redeemResult && (
-              <motion.div
-                initial={{ y: 10, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                className={`p-4 rounded-xl border ${
-                  redeemResult.success
-                    ? "bg-green-500/10 border-green-500/30"
-                    : "bg-red-500/10 border-red-500/30"
-                }`}
-              >
-                {redeemResult.success ? (
-                  <div className="flex items-center gap-3">
-                    <IoCheckmarkCircle className="text-3xl text-green-400" />
-                    <div>
-                      <p className="text-green-400 font-semibold">Redeemed!</p>
-                      <p className="text-on-surface text-sm">{redeemResult.reward?.rewardText}</p>
-                      <p className="text-on-surface-variant text-xs">For: {redeemResult.reward?.user?.displayName}</p>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-error">{redeemResult.error}</p>
-                )}
+          {/* ============================================================ */}
+          {/*  TAB 2 — CODES                                               */}
+          {/* ============================================================ */}
+          <TabsContent value="codes">
+            <motion.div variants={stagger} initial="hidden" animate="show" className="space-y-4">
+              <motion.div variants={fadeUp}>
+                <h3
+                  style={{
+                    fontFamily: "Bungee",
+                    fontSize: "1.2rem",
+                    color: "#ff6341",
+                    marginBottom: "0.25rem",
+                  }}
+                >
+                  Match Codes
+                </h3>
+                <p style={{ color: "#9ca3af", fontSize: "0.8rem", fontWeight: 600, marginBottom: "1rem" }}>
+                  Generate a 4-digit code for each match. Users must enter this code to join from your venue.
+                </p>
               </motion.div>
-            )}
-          </div>
-        )}
 
-        {/* Winners list */}
-        {activeTab === "rewards" && (
-          <div className="space-y-2">
-            <h3 className="text-on-surface font-semibold mb-4">All Rewards</h3>
-            {rewards.map((r: any) => (
-              <div key={r.id} className="flex items-center justify-between bg-surface-container-low p-3 rounded-xl border border-white/5">
-                <div>
-                  <p className="text-on-surface text-sm font-medium">{r.user?.displayName || "Player"}</p>
-                  <p className="text-on-surface-variant text-xs">{r.rewardText} — Code: {r.code}</p>
-                </div>
-                <span className={`text-xs px-2 py-1 rounded-full ${
-                  r.status === "active" ? "bg-green-500/20 text-green-400" :
-                  r.status === "redeemed" ? "bg-blue-500/20 text-blue-400" :
-                  "bg-red-500/20 text-error"
-                }`}>
-                  {r.status}
-                </span>
-              </div>
-            ))}
-            {rewards.length === 0 && (
-              <p className="text-on-surface-variant text-center py-8">No rewards generated yet</p>
-            )}
-          </div>
-        )}
+              {activeMatches.length === 0 && (
+                <motion.div variants={fadeUp} className="game-card p-8 text-center">
+                  <IoKeypad style={{ fontSize: "2rem", color: "#4b5563", margin: "0 auto 0.5rem" }} />
+                  <p style={{ color: "#9ca3af", fontSize: "0.9rem" }}>No upcoming or live matches</p>
+                </motion.div>
+              )}
 
-        {/* Setup */}
-        {activeTab === "setup" && (
-          <div className="space-y-6">
-            {/* Cafe URL */}
-            {venue?.slug && (
-              <div className="bg-surface-container-low rounded-xl p-4 border border-primary-container/30">
-                <h3 className="text-primary-container font-semibold mb-2">Your Cafe URL</h3>
-                <p className="text-on-surface-variant text-xs mb-3">Share this link with customers. They scan/tap to enter your arena.</p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 text-primary-container text-sm break-all bg-surface-container-high p-3 rounded-lg">
-                    {cafeUrl}
-                  </code>
+              {activeMatches.map((match: any) => {
+                const startDate = match.startTime ? new Date(match.startTime) : null;
+                const timeStr = startDate
+                  ? startDate.toLocaleString("en-IN", {
+                      month: "short",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
+                  : "";
+                const code = matchCodes[match.id];
+
+                return (
+                  <motion.div key={match.id} variants={fadeUp} className="game-card p-4">
+                    {/* Match Header */}
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        {match.team1Img && (
+                          <img
+                            src={match.team1Img}
+                            alt=""
+                            className="w-8 h-8 rounded-full object-contain"
+                            style={{ background: "#0d0d0d" }}
+                          />
+                        )}
+                        <span style={{ color: "#fff", fontWeight: 800, fontSize: "0.95rem" }}>
+                          {match.team1Short || match.team1?.slice(0, 3)} vs{" "}
+                          {match.team2Short || match.team2?.slice(0, 3)}
+                        </span>
+                        {match.team2Img && (
+                          <img
+                            src={match.team2Img}
+                            alt=""
+                            className="w-8 h-8 rounded-full object-contain"
+                            style={{ background: "#0d0d0d" }}
+                          />
+                        )}
+                      </div>
+                      <div className="text-right">
+                        {match.status === "live" ? (
+                          <span className="live-badge">LIVE</span>
+                        ) : (
+                          <span className="info-pill" style={{ color: "#3b9eff" }}>
+                            {match.status}
+                          </span>
+                        )}
+                        {timeStr && (
+                          <p style={{ color: "#6b7280", fontSize: "0.7rem", marginTop: "4px" }}>
+                            {timeStr}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Code Display or Generate */}
+                    {code ? (
+                      <div
+                        className="text-center py-4 px-3"
+                        style={{
+                          background: "#0d0d0d",
+                          border: "2px solid #2a2a2a",
+                          borderRadius: "4px",
+                        }}
+                      >
+                        <p
+                          style={{
+                            fontSize: "0.65rem",
+                            fontWeight: 800,
+                            color: "#6b7280",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.1em",
+                            marginBottom: "6px",
+                          }}
+                        >
+                          Match Code
+                        </p>
+                        <motion.div
+                          key={code}
+                          initial={{ scale: 0.8, opacity: 0 }}
+                          animate={{ scale: 1, opacity: 1 }}
+                          style={{
+                            fontFamily: "Bungee",
+                            fontSize: "3rem",
+                            color: "#ff6341",
+                            letterSpacing: "0.3em",
+                            lineHeight: 1,
+                          }}
+                        >
+                          {code}
+                        </motion.div>
+                        <div
+                          className="flex items-center justify-center gap-4 mt-3"
+                          style={{ fontSize: "0.8rem" }}
+                        >
+                          <span
+                            className="info-pill flex items-center gap-1"
+                            style={{ color: "#9ca3af" }}
+                          >
+                            <IoPeople /> {matchPlayers[match.id] || 0} players
+                          </span>
+                          <button
+                            onClick={() => generateCode(match.id)}
+                            disabled={generatingCode === match.id}
+                            className="btn-secondary px-3 py-1 text-xs flex items-center gap-1"
+                          >
+                            <IoRefresh /> Regenerate
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => generateCode(match.id)}
+                        disabled={generatingCode === match.id}
+                        className="btn-sticker btn-orange w-full py-3 text-sm"
+                      >
+                        {generatingCode === match.id ? "Generating..." : "Generate Code"}
+                      </button>
+                    )}
+                  </motion.div>
+                );
+              })}
+            </motion.div>
+          </TabsContent>
+
+          {/* ============================================================ */}
+          {/*  TAB 3 — REDEEM                                              */}
+          {/* ============================================================ */}
+          <TabsContent value="redeem">
+            <motion.div
+              variants={stagger}
+              initial="hidden"
+              animate="show"
+              className="space-y-5"
+            >
+              <motion.div variants={fadeUp}>
+                <h3
+                  style={{
+                    fontFamily: "Bungee",
+                    fontSize: "1.2rem",
+                    color: "#22c55e",
+                    marginBottom: "0.5rem",
+                  }}
+                >
+                  Redeem Reward
+                </h3>
+                <p style={{ color: "#9ca3af", fontSize: "0.8rem", fontWeight: 600, marginBottom: "1.5rem" }}>
+                  Enter the winner&apos;s 4-digit reward code to mark it as redeemed.
+                </p>
+              </motion.div>
+
+              <motion.div variants={fadeUp} className="game-card p-6">
+                <div className="flex flex-col items-center gap-4">
+                  <input
+                    type="text"
+                    value={redeemCode}
+                    onChange={(e) =>
+                      setRedeemCode(e.target.value.replace(/\D/g, "").slice(0, 4))
+                    }
+                    placeholder="0000"
+                    maxLength={4}
+                    className="nb-input text-center w-full max-w-[240px] py-4"
+                    style={{
+                      fontFamily: "Bungee",
+                      fontSize: "2.5rem",
+                      letterSpacing: "0.4em",
+                      background: "#0d0d0d",
+                      border: "2px solid #555",
+                      borderRadius: "4px",
+                      color: "#fff",
+                      boxShadow: "3px 3px 0 0 #22c55e",
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && redeemCode.length === 4 && handleRedeem()}
+                  />
                   <button
-                    onClick={copyLink}
-                    className="bg-surface-container-high hover:bg-surface-container-highest text-on-surface p-3 rounded-lg transition-colors flex-shrink-0"
+                    onClick={handleRedeem}
+                    disabled={redeemCode.length !== 4}
+                    className="btn-sticker btn-green px-8 py-3 text-base"
                   >
-                    <IoCopy className={copied ? "text-green-400" : ""} />
+                    Redeem
                   </button>
                 </div>
-                {copied && <p className="text-green-400 text-xs mt-1">Copied!</p>}
+              </motion.div>
 
-                {/* QR Code placeholder using a simple SVG-based approach */}
-                <div className="mt-4 bg-white rounded-xl p-4 flex items-center justify-center">
-                  <div className="text-center">
-                    <img
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(cafeUrl)}`}
-                      alt="QR Code"
-                      className="w-48 h-48 mx-auto"
-                    />
-                    <p className="text-outline-variant text-xs mt-2">{venue.slug}</p>
-                  </div>
-                </div>
-              </div>
-            )}
+              {/* Redeem Result */}
+              <AnimatePresence>
+                {redeemResult && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -12 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    {redeemResult.success ? (
+                      <div className="card-green p-5">
+                        <div className="flex items-center gap-3">
+                          <IoCheckmarkCircle style={{ fontSize: "2.5rem", color: "#22c55e", flexShrink: 0 }} />
+                          <div>
+                            <p
+                              style={{
+                                fontFamily: "Bungee",
+                                fontSize: "1rem",
+                                color: "#22c55e",
+                                marginBottom: "4px",
+                              }}
+                            >
+                              Redeemed Successfully!
+                            </p>
+                            <p style={{ color: "#fff", fontWeight: 700, fontSize: "0.9rem" }}>
+                              {redeemResult.reward?.rewardText}
+                            </p>
+                            <p style={{ color: "#9ca3af", fontSize: "0.8rem", marginTop: "2px" }}>
+                              Player: {redeemResult.reward?.user?.displayName || redeemResult.player?.displayName || "Unknown"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="card-orange p-5">
+                        <div className="flex items-center gap-3">
+                          <IoCloseCircle style={{ fontSize: "2rem", color: "#ff6341", flexShrink: 0 }} />
+                          <p style={{ color: "#ff6341", fontWeight: 700, fontSize: "0.9rem" }}>
+                            {redeemResult.error}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.div>
+          </TabsContent>
 
-            {/* Reward Config */}
-            <div>
-              <h3 className="text-on-surface font-semibold mb-4">Round Rewards (Top 3 each round)</h3>
-              {["top1", "top2", "top3"].map((key, i) => (
-                <div key={key} className="flex items-center gap-3 mb-3">
-                  <span className="text-sm text-on-surface-variant w-8">#{i + 1}</span>
-                  <input
-                    type="text"
-                    value={(rewardConfig.roundReward as any)[key]}
-                    onChange={(e) =>
-                      setRewardConfig({
-                        ...rewardConfig,
-                        roundReward: { ...rewardConfig.roundReward, [key]: e.target.value },
-                      })
-                    }
-                    className="flex-1 bg-surface-container-high text-on-surface px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-primary-container text-sm"
-                    placeholder={`Reward for #${i + 1}`}
-                  />
-                </div>
-              ))}
-            </div>
-
-            <div>
-              <h3 className="text-on-surface font-semibold mb-4">Grand Prize (Match winner)</h3>
-              {["top1", "top2", "top3"].map((key, i) => (
-                <div key={key} className="flex items-center gap-3 mb-3">
-                  <span className="text-sm text-on-surface-variant w-8">#{i + 1}</span>
-                  <input
-                    type="text"
-                    value={(rewardConfig.grandPrize as any)[key]}
-                    onChange={(e) =>
-                      setRewardConfig({
-                        ...rewardConfig,
-                        grandPrize: { ...rewardConfig.grandPrize, [key]: e.target.value },
-                      })
-                    }
-                    className="flex-1 bg-surface-container-high text-on-surface px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-primary-container text-sm"
-                    placeholder={`Grand prize for #${i + 1}`}
-                  />
-                </div>
-              ))}
-            </div>
-
-            <button
-              onClick={handleUpdateRewards}
-              className="w-full bg-primary-container hover:bg-primary-fixed-dim text-on-primary-container font-bold py-3 rounded-xl transition-colors shadow-[0_4px_20px_rgba(0,255,171,0.3)]"
+          {/* ============================================================ */}
+          {/*  TAB 4 — WINNERS                                             */}
+          {/* ============================================================ */}
+          <TabsContent value="winners">
+            <motion.div
+              variants={stagger}
+              initial="hidden"
+              animate="show"
+              className="space-y-3"
             >
-              Save Rewards
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+              <motion.div variants={fadeUp}>
+                <h3
+                  style={{
+                    fontFamily: "Bungee",
+                    fontSize: "1.2rem",
+                    color: "#ffd60a",
+                    marginBottom: "1rem",
+                  }}
+                >
+                  All Rewards
+                </h3>
+              </motion.div>
 
-function StatCard({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="bg-surface-container-low rounded-xl p-4 border border-white/5 text-center">
-      <div className="text-2xl font-bold text-on-surface">{value}</div>
-      <div className="text-xs text-on-surface-variant">{label}</div>
+              {rewards.length === 0 && (
+                <motion.div variants={fadeUp} className="game-card p-8 text-center">
+                  <IoTrophy style={{ fontSize: "2rem", color: "#4b5563", margin: "0 auto 0.5rem" }} />
+                  <p style={{ color: "#9ca3af", fontSize: "0.9rem" }}>No rewards generated yet</p>
+                </motion.div>
+              )}
+
+              {rewards.map((r: any, i: number) => {
+                const statusColor =
+                  r.status === "active"
+                    ? "#ff6341"
+                    : r.status === "redeemed"
+                    ? "#22c55e"
+                    : "#6b7280";
+                const statusBg =
+                  r.status === "active"
+                    ? "card-orange"
+                    : r.status === "redeemed"
+                    ? "card-green"
+                    : "game-card";
+
+                return (
+                  <motion.div
+                    key={r.id ?? i}
+                    variants={fadeUp}
+                    className={`${statusBg} p-4 flex items-center justify-between`}
+                  >
+                    <div>
+                      <p className="player-name" style={{ fontSize: "0.9rem" }}>
+                        {r.user?.displayName || "Player"}
+                      </p>
+                      <p style={{ color: "#9ca3af", fontSize: "0.8rem", fontWeight: 600, marginTop: "2px" }}>
+                        {r.rewardText}
+                      </p>
+                      <p
+                        style={{
+                          color: "#6b7280",
+                          fontSize: "0.7rem",
+                          fontWeight: 700,
+                          fontFamily: "monospace",
+                          marginTop: "4px",
+                        }}
+                      >
+                        Code: {r.code}
+                      </p>
+                    </div>
+                    <span
+                      style={{
+                        background: statusColor,
+                        color: r.status === "expired" ? "#fff" : "#000",
+                        padding: "4px 12px",
+                        borderRadius: "2px",
+                        border: "2px solid #000",
+                        fontSize: "0.7rem",
+                        fontWeight: 900,
+                        textTransform: "uppercase",
+                        boxShadow: "2px 2px 0 0 #000",
+                      }}
+                    >
+                      {r.status}
+                    </span>
+                  </motion.div>
+                );
+              })}
+            </motion.div>
+          </TabsContent>
+
+          {/* ============================================================ */}
+          {/*  TAB 5 — SETUP                                               */}
+          {/* ============================================================ */}
+          <TabsContent value="setup">
+            <motion.div
+              variants={stagger}
+              initial="hidden"
+              animate="show"
+              className="space-y-6"
+            >
+              {/* Cafe URL + QR */}
+              {venue?.slug && (
+                <motion.div variants={fadeUp} className="card-orange p-5">
+                  <h4
+                    style={{
+                      fontFamily: "Bungee",
+                      fontSize: "1rem",
+                      color: "#ff6341",
+                      marginBottom: "0.5rem",
+                    }}
+                  >
+                    Your Cafe URL
+                  </h4>
+                  <p style={{ color: "#9ca3af", fontSize: "0.75rem", fontWeight: 600, marginBottom: "0.75rem" }}>
+                    Share this link with customers. They scan or tap to enter your arena.
+                  </p>
+
+                  <div className="flex items-center gap-2 mb-4">
+                    <code
+                      style={{
+                        flex: 1,
+                        background: "#0d0d0d",
+                        color: "#ff6341",
+                        padding: "10px 14px",
+                        borderRadius: "3px",
+                        border: "2px solid #2a2a2a",
+                        fontSize: "0.8rem",
+                        fontWeight: 700,
+                        wordBreak: "break-all",
+                      }}
+                    >
+                      {cafeUrl}
+                    </code>
+                    <button
+                      onClick={copyLink}
+                      className="btn-sticker btn-orange px-3 py-2.5 text-sm flex items-center gap-1"
+                    >
+                      <IoCopy /> {copied ? "Copied!" : "Copy"}
+                    </button>
+                  </div>
+
+                  {/* QR Code */}
+                  <div
+                    className="flex items-center justify-center p-4"
+                    style={{
+                      background: "#ffffff",
+                      borderRadius: "4px",
+                      border: "3px solid #000",
+                      boxShadow: "4px 4px 0 0 #000",
+                    }}
+                  >
+                    <div className="text-center">
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(cafeUrl)}`}
+                        alt="QR Code"
+                        style={{ width: 180, height: 180, margin: "0 auto" }}
+                      />
+                      <p
+                        style={{
+                          color: "#333",
+                          fontSize: "0.7rem",
+                          fontWeight: 700,
+                          marginTop: "8px",
+                          fontFamily: "monospace",
+                        }}
+                      >
+                        {venue.slug}
+                      </p>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Round Rewards Config */}
+              <motion.div variants={fadeUp} className="game-card p-5">
+                <h4
+                  style={{
+                    fontFamily: "Bungee",
+                    fontSize: "1rem",
+                    color: "#ffd60a",
+                    marginBottom: "1rem",
+                  }}
+                >
+                  Round Rewards
+                </h4>
+                <p style={{ color: "#9ca3af", fontSize: "0.75rem", fontWeight: 600, marginBottom: "1rem" }}>
+                  Set rewards for the top 3 players each round.
+                </p>
+                {(["top1", "top2", "top3"] as const).map((key, i) => (
+                  <div key={key} className="flex items-center gap-3 mb-3">
+                    <span
+                      className={i === 0 ? "rank-badge" : "rank-badge-gray"}
+                      style={{ fontSize: "0.8rem", padding: "2px 10px", minWidth: "42px", textAlign: "center" }}
+                    >
+                      #{i + 1}
+                    </span>
+                    <input
+                      type="text"
+                      value={(rewardConfig.roundReward as any)[key]}
+                      onChange={(e) =>
+                        setRewardConfig({
+                          ...rewardConfig,
+                          roundReward: { ...rewardConfig.roundReward, [key]: e.target.value },
+                        })
+                      }
+                      placeholder={`Reward for #${i + 1} (e.g. Free coffee)`}
+                      className="nb-input flex-1 px-3 py-2.5 text-sm"
+                    />
+                  </div>
+                ))}
+              </motion.div>
+
+              {/* Grand Prize Config */}
+              <motion.div variants={fadeUp} className="game-card p-5">
+                <h4
+                  style={{
+                    fontFamily: "Bungee",
+                    fontSize: "1rem",
+                    color: "#3b9eff",
+                    marginBottom: "1rem",
+                  }}
+                >
+                  Grand Prize
+                </h4>
+                <p style={{ color: "#9ca3af", fontSize: "0.75rem", fontWeight: 600, marginBottom: "1rem" }}>
+                  Set grand prizes for the overall match winners.
+                </p>
+                {(["top1", "top2", "top3"] as const).map((key, i) => (
+                  <div key={key} className="flex items-center gap-3 mb-3">
+                    <span
+                      className={i === 0 ? "rank-badge" : "rank-badge-gray"}
+                      style={{ fontSize: "0.8rem", padding: "2px 10px", minWidth: "42px", textAlign: "center" }}
+                    >
+                      #{i + 1}
+                    </span>
+                    <input
+                      type="text"
+                      value={(rewardConfig.grandPrize as any)[key]}
+                      onChange={(e) =>
+                        setRewardConfig({
+                          ...rewardConfig,
+                          grandPrize: { ...rewardConfig.grandPrize, [key]: e.target.value },
+                        })
+                      }
+                      placeholder={`Grand prize for #${i + 1}`}
+                      className="nb-input flex-1 px-3 py-2.5 text-sm"
+                    />
+                  </div>
+                ))}
+              </motion.div>
+
+              {/* Save Button */}
+              <motion.div variants={fadeUp}>
+                <button
+                  onClick={handleUpdateRewards}
+                  className="btn-sticker btn-orange w-full py-3 text-base"
+                >
+                  Save Rewards
+                </button>
+              </motion.div>
+            </motion.div>
+          </TabsContent>
+        </Tabs>
+      </div>
     </div>
   );
 }
