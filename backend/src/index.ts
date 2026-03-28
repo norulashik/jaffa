@@ -22,13 +22,13 @@ const server = http.createServer(app);
 
 const io = new SocketIOServer(server, {
   cors: {
-    origin: process.env.CORS_ORIGIN || "http://localhost:3001",
+    origin: process.env.CORS_ORIGIN || "http://localhost:3000",
     methods: ["GET", "POST"],
   },
 });
 
 // Middleware
-app.use(cors({ origin: process.env.CORS_ORIGIN || "http://localhost:3001" }));
+app.use(cors({ origin: process.env.CORS_ORIGIN || "http://localhost:3000" }));
 app.use(express.json());
 
 // Make io accessible in routes
@@ -190,21 +190,33 @@ async function start() {
     await sequelize.sync({ force: false });
     console.log("Database synced");
 
-    server.listen(PORT, () => {
-      console.log(`JAFFA backend running on port ${PORT}`);
-
-      // Sportsmonk: poll every 5 seconds for live score updates
-      const POLL_INTERVAL = 5 * 1000;
-      setInterval(async () => {
-        try {
-          await pollSportsmonkUpdates(io);
-        } catch (err) {
-          console.error("Sportsmonk poll error:", err);
-        }
-      }, POLL_INTERVAL);
-      console.log(`Sportsmonk live polling enabled (every ${POLL_INTERVAL / 1000}s)`);
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(PORT, () => {
+        server.off("error", reject);
+        resolve();
+      });
     });
+
+    console.log(`JAFFA backend running on port ${PORT}`);
+
+    // Sportsmonk: poll every 5 seconds for live score updates
+    const POLL_INTERVAL = 5 * 1000;
+    setInterval(async () => {
+      try {
+        await pollSportsmonkUpdates(io);
+      } catch (err) {
+        console.error("Sportsmonk poll error:", err);
+      }
+    }, POLL_INTERVAL);
+    console.log(`Sportsmonk live polling enabled (every ${POLL_INTERVAL / 1000}s)`);
   } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "EADDRINUSE") {
+      console.error(`Port ${PORT} is already in use.`);
+      console.error("A JAFFA backend may already be running on http://localhost:5000/api/health");
+      console.error("Stop the existing process before starting a new one.");
+      process.exit(1);
+    }
     console.error("Failed to start server:", error);
     process.exit(1);
   }

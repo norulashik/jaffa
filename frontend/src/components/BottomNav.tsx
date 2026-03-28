@@ -3,7 +3,8 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { GiCastle, GiPodiumWinner, GiTrophyCup, GiMeeple } from "react-icons/gi";
+import { GiCastle, GiPodiumWinner, GiTrophyCup } from "react-icons/gi";
+import { GiAlarmClock } from "react-icons/gi";
 import { cafeUrl } from "@/lib/navigation";
 import { useGame } from "@/context/GameContext";
 
@@ -11,7 +12,7 @@ const navItems = [
   { key: "home", href: "/lobby", icon: GiCastle, label: "Home" },
   { key: "leaderboard", href: "/leaderboard", icon: GiPodiumWinner, label: "Ranks" },
   { key: "rewards", href: "/rewards", icon: GiTrophyCup, label: "Rewards" },
-  { key: "profile", href: "/profile", icon: GiMeeple, label: "Profile" },
+  { key: "my-picks", href: "/my-picks", icon: GiAlarmClock, label: "My Picks" },
 ];
 
 export default function BottomNav() {
@@ -42,6 +43,8 @@ export default function BottomNav() {
             item.key === "home"
               ? normalizedPathname?.startsWith("/match/") ||
                 (!activeMatchId && normalizedPathname === "/lobby")
+              : item.key === "my-picks"
+              ? normalizedPathname === "/my-picks"
               : normalizedPathname === item.href || normalizedPathname?.startsWith(item.href + "/");
 
           const Icon = item.icon;

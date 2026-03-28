@@ -1022,13 +1022,6 @@ export default function AdminDashboard() {
                           >
                             <IoPeople /> {matchPlayers[match.id] || 0} players
                           </span>
-                          <button
-                            onClick={() => generateCode(match.id)}
-                            disabled={generatingCode === match.id}
-                            className="btn-secondary px-3 py-1 text-xs flex items-center gap-1"
-                          >
-                            <IoRefresh /> Regenerate
-                          </button>
                         </div>
                       </div>
                     ) : (

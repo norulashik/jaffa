@@ -13,6 +13,17 @@ export interface PointsResult {
   newStreak: number;
 }
 
+export interface RecomputeScope {
+  matchId?: string;
+  venueId?: string;
+  userId?: string;
+}
+
+export interface RecomputeSummary {
+  participantsRecomputed: number;
+  userPredictionsRecomputed: number;
+}
+
 export function calculatePoints(
   prediction: Prediction,
   selectedOption: string,
@@ -59,6 +70,16 @@ export async function resolvePrediction(
   correctOption: string,
   io: SocketIOServer
 ): Promise<void> {
+  if (prediction.status === "resolved") {
+    if (prediction.correctOption === correctOption) {
+      return;
+    }
+
+    throw new Error(
+      `Prediction ${prediction.id} is already resolved with ${prediction.correctOption}, cannot change to ${correctOption}`
+    );
+  }
+
   // Update prediction with correct answer
   await prediction.update({ correctOption, status: "resolved" });
 
@@ -170,6 +191,123 @@ export async function resolvePrediction(
       round: prediction.round,
     });
   }
+}
+
+function initialRoundPoints(): Record<string, number> {
+  return {
+    round1Points: 0,
+    round2Points: 0,
+    round3Points: 0,
+    round4Points: 0,
+    round5Points: 0,
+    round6Points: 0,
+  };
+}
+
+export async function recomputeParticipantScores(
+  scope: RecomputeScope = {}
+): Promise<RecomputeSummary> {
+  const participantWhere: Record<string, string> = {};
+  if (scope.matchId) participantWhere.matchId = scope.matchId;
+  if (scope.venueId) participantWhere.venueId = scope.venueId;
+  if (scope.userId) participantWhere.userId = scope.userId;
+
+  const participants = await MatchParticipant.findAll({
+    where: participantWhere,
+    order: [["createdAt", "ASC"]],
+  });
+
+  let userPredictionsRecomputed = 0;
+
+  for (const participant of participants) {
+    const answers = await UserPrediction.findAll({
+      where: {
+        userId: participant.userId,
+        matchId: participant.matchId,
+        venueId: participant.venueId,
+      },
+      include: [{ model: Prediction, as: "prediction" }],
+      order: [["answeredAt", "ASC"], ["createdAt", "ASC"]],
+    });
+
+    let totalPoints = 0;
+    let currentStreak = 0;
+    let bestStreak = 0;
+    let correctPredictions = 0;
+    const roundPoints = initialRoundPoints();
+    const currentRound = participant.currentRound || 0;
+    const boostsUsedRound = answers.filter((up: any) => {
+      const prediction = up.prediction as Prediction | undefined;
+      return up.boostType === "boost" && prediction?.round === currentRound;
+    }).length;
+    const allInUsed = answers.some((up) => up.boostType === "all_in");
+
+    for (const up of answers as Array<UserPrediction & { prediction?: Prediction }>) {
+      const prediction = up.prediction;
+      let isCorrect: boolean | null = null;
+      let pointsEarned = 0;
+
+      if (prediction?.status === "resolved" && prediction.correctOption) {
+        const result = calculatePoints(
+          prediction,
+          up.selectedOption,
+          up.boostType,
+          currentStreak
+        );
+
+        isCorrect = result.isCorrect;
+        pointsEarned = result.totalPoints;
+
+        if (result.isCorrect) {
+          totalPoints += result.totalPoints;
+          if (prediction.round >= 1 && prediction.round <= 6) {
+            const roundField = `round${prediction.round}Points`;
+            roundPoints[roundField] = (roundPoints[roundField] || 0) + result.totalPoints;
+          }
+          currentStreak = result.newStreak;
+          bestStreak = Math.max(bestStreak, currentStreak);
+          correctPredictions += 1;
+        } else {
+          currentStreak = 0;
+          if (result.totalPoints < 0) {
+            totalPoints = Math.max(0, totalPoints + result.totalPoints);
+            if (prediction.round >= 1 && prediction.round <= 6) {
+              const roundField = `round${prediction.round}Points`;
+              roundPoints[roundField] = Math.max(
+                0,
+                (roundPoints[roundField] || 0) + result.totalPoints
+              );
+            }
+          }
+        }
+      }
+
+      const nextIsCorrect = isCorrect === null ? null : isCorrect;
+      if (up.isCorrect !== nextIsCorrect || up.pointsEarned !== pointsEarned) {
+        await up.update({
+          isCorrect: nextIsCorrect as boolean | null,
+          pointsEarned,
+        } as any);
+        userPredictionsRecomputed += 1;
+      }
+    }
+
+    await participant.update({
+      totalPoints,
+      ...roundPoints,
+      currentStreak,
+      bestStreak,
+      totalPredictions: answers.length,
+      correctPredictions,
+      boostsUsedRound,
+      allInUsed,
+    } as Partial<MatchParticipant>);
+  }
+
+  return {
+    participantsRecomputed: participants.length,
+    userPredictionsRecomputed,
+  };
 }
 
 function generatePulseMessage(correctCount: number, totalCount: number, question: string): string {

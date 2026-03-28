@@ -141,6 +141,19 @@ router.post("/import/:fixtureId", async (req: Request, res: Response): Promise<v
       await Prediction.create(q as any);
     }
 
+    // Set toss question to expire 30 min before match start
+    if (match.startTime) {
+      const tossLockTime = new Date(new Date(match.startTime).getTime() - 30 * 60_000);
+      const tossPreds = await Prediction.findAll({
+        where: { matchId: match.id, category: "pre_match" },
+      });
+      for (const pred of tossPreds) {
+        if (pred.question.toLowerCase().includes("toss")) {
+          await pred.update({ expiresAt: tossLockTime });
+        }
+      }
+    }
+
     console.log(`[Auto-Import] ${match.team1Short} vs ${match.team2Short} imported (${preMatchQuestions.length} predictions)`);
     res.status(201).json({ match });
   } catch (error) {
@@ -217,6 +230,35 @@ router.post("/:matchId/join", authenticateUser, async (req: AuthRequest, res: Re
   } catch (error) {
     console.error("Join match error:", error);
     res.status(500).json({ error: "Failed to join match" });
+  }
+});
+
+// Get ball-by-ball log for display panel
+router.get("/:matchId/balls", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const matchId = req.params.matchId as string;
+    const match = await Match.findByPk(matchId);
+    if (!match) { res.status(404).json({ error: "Match not found" }); return; }
+
+    const sd = (match.scoreData as Record<string, unknown>) || {};
+    const currentInnings = (sd.currentInnings as number) || 1;
+
+    // Collect all stored over ball chips into an ordered array
+    const overs: { overNumber: number; innings: number; balls: { label: string; type: string }[] }[] = [];
+    for (let inn = 1; inn <= currentInnings; inn++) {
+      const maxOvers = 20;
+      for (let ov = 1; ov <= maxOvers; ov++) {
+        const key = `innings${inn}_over${ov}_balls`;
+        if (sd[key]) {
+          overs.push({ overNumber: ov, innings: inn, balls: sd[key] as { label: string; type: string }[] });
+        }
+      }
+    }
+
+    res.json({ overs, currentInnings, currentOver: sd.currentOver });
+  } catch (error) {
+    console.error("Get balls error:", error);
+    res.status(500).json({ error: "Failed to get ball data" });
   }
 });
 

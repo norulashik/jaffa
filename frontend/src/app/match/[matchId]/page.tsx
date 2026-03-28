@@ -17,6 +17,7 @@ import {
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
 import CorrectAnswerFeedback from "@/components/CorrectAnswerFeedback";
+import OverBallsPanel from "@/components/OverBallsPanel";
 import { api } from "@/lib/api";
 import { connectSocket, joinVenueMatch, disconnectSocket } from "@/lib/socket";
 import { useGame } from "@/context/GameContext";
@@ -37,7 +38,6 @@ type Phase = "loading" | "prematch" | "live";
 
 const QUESTION_LABELS = [
   "Match Winner",
-  "Man of the Match",
   "Toss Call",
   "Six Showdown",
   "First Wicket",
@@ -75,6 +75,7 @@ export default function MatchDashboard() {
   const [picksExpanded, setPicksExpanded] = useState(true);
   const [userRank, setUserRank] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [scoreVersion, setScoreVersion] = useState(0);
   const { state: gameState, dispatch } = useGame();
 
   const [venueId, setVenueId] = useState("");
@@ -182,6 +183,7 @@ export default function MatchDashboard() {
           currentInnings: data.innings ?? prev?.currentInnings,
           currentOver: data.over ?? prev?.currentOver,
         }));
+        setScoreVersion((v) => v + 1);
       }
     });
 
@@ -539,7 +541,8 @@ export default function MatchDashboard() {
           const innings2 = sd.innings2;
 
           // Determine batting/bowling teams — batting always left, bowling always right
-          const battingFirstShort = sd.battingFirstShort || matchData?.team1Short || "T1";
+          // innings1.teamShort = who batted first (set by backend from Sportsmonk runs data)
+          const battingFirstShort = innings1?.teamShort || matchData?.team1Short || "T1";
           const bowlingFirstShort = battingFirstShort === (matchData?.team1Short || "T1")
             ? (matchData?.team2Short || "T2") : (matchData?.team1Short || "T1");
           const battingTeam = currInn === 1 ? battingFirstShort : bowlingFirstShort;
@@ -694,11 +697,14 @@ export default function MatchDashboard() {
           const nextOver = currentOver + 1;
           if (currentOver > 0 && nextOver <= 20) {
             return (
-              <div className="text-center py-2">
-                <p className="text-sm text-[#ff6341] font-bold uppercase">
-                  Make predictions for Over {nextOver} before this over ends!
-                </p>
-              </div>
+              <>
+                <div className="text-center py-2">
+                  <p className="text-sm text-[#ff6341] font-bold uppercase">
+                    Make predictions for Over {nextOver} before this over ends!
+                  </p>
+                </div>
+                <OverBallsPanel matchId={matchId} scoreVersion={scoreVersion} />
+              </>
             );
           }
           return null;
@@ -706,7 +712,21 @@ export default function MatchDashboard() {
 
         {/* Predict Tabs */}
         {(() => {
-          const unanswered = predictions.filter((p: any) => p.status === "open" && !selectedAnswers[p.id] && !p.userAnswer?.selectedOption);
+          const sd = matchData?.scoreData || {};
+          const currInn = sd.currentInnings || matchData?.currentInnings || 1;
+          const currOv = sd.currentOver || matchData?.currentOver || 0;
+          // Innings 2 has started (at least 1 ball bowled) — hide rivalry_call predictions
+          const innings2Started = currInn === 2 && currOv >= 1;
+
+          const unanswered = predictions.filter((p: any) => {
+            if (p.status !== "open") return false;
+            if (selectedAnswers[p.id] || p.userAnswer?.selectedOption) return false;
+            // Hide rivalry_call once innings 2 overs begin (they were for innings break only)
+            if (innings2Started && p.category === "rivalry_call") return false;
+            // Never show pre_match in live feed
+            if (p.category === "pre_match") return false;
+            return true;
+          });
           const openPreds = unanswered.filter((p: any) => !p.expiresAt || new Date(p.expiresAt).getTime() > now);
           const missedPreds = unanswered.filter((p: any) => p.expiresAt && new Date(p.expiresAt).getTime() <= now);
           const answeredPreds = predictions.filter((p: any) => selectedAnswers[p.id] || p.userAnswer?.selectedOption);

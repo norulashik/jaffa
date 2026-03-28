@@ -1,6 +1,6 @@
 import { Prediction } from "../models";
 
-// Pre-match question templates (5 questions)
+// Pre-match question templates (4 questions)
 export function generatePreMatchPredictions(
   matchId: string,
   team1: string,
@@ -16,25 +16,6 @@ export function generatePreMatchPredictions(
   question: string;
   options: { key: string; label: string; points: number; image?: string; team?: string; color?: string }[];
 }> {
-  // Pick 3 star players from each team for MOTM
-  const team1Stars = team1Players.slice(0, 3).map((player) => ({
-    key: player.toLowerCase().replace(/\s+/g, "_"),
-    label: player,
-    points: 75,
-    image: `/players/${player.toLowerCase().replace(/\s+/g, "_")}.png`,
-    team: team1Short,
-    color: IPL_TEAM_COLORS[team1Short] || "#f97316",
-  }));
-
-  const team2Stars = team2Players.slice(0, 3).map((player) => ({
-    key: player.toLowerCase().replace(/\s+/g, "_"),
-    label: player,
-    points: 75,
-    image: `/players/${player.toLowerCase().replace(/\s+/g, "_")}.png`,
-    team: team2Short,
-    color: IPL_TEAM_COLORS[team2Short] || "#3b82f6",
-  }));
-
   return [
     // Q1: Who wins tonight?
     {
@@ -61,15 +42,7 @@ export function generatePreMatchPredictions(
         },
       ],
     },
-    // Q2: Man of the match
-    {
-      matchId,
-      category: "pre_match",
-      round: 0,
-      question: "Pick your man of the match — who steals the show tonight?",
-      options: [...team1Stars, ...team2Stars],
-    },
-    // Q3: Toss + decision
+    // Q2: Toss + decision
     {
       matchId,
       category: "pre_match",
@@ -82,7 +55,7 @@ export function generatePreMatchPredictions(
         { key: `${team2Short.toLowerCase()}_field`, label: `${team2Short} wins, fields first`, points: 20, team: team2Short, color: IPL_TEAM_COLORS[team2Short] || "#3b82f6" },
       ],
     },
-    // Q4: Which team hits more sixes?
+    // Q3: Which team hits more sixes?
     {
       matchId,
       category: "pre_match",
@@ -107,7 +80,7 @@ export function generatePreMatchPredictions(
         },
       ],
     },
-    // Q5: First wicket — how does it fall?
+    // Q4: First wicket — how does it fall?
     {
       matchId,
       category: "pre_match",
@@ -139,9 +112,11 @@ const IPL_TEAM_COLORS: Record<string, string> = {
 };
 
 // Per-over question pool (10 templates)
+// semanticGroup: questions in the same group cannot appear together in the same over
 const perOverPool = [
   {
     key: "runs_this_over",
+    semanticGroup: "runs",
     question: (over: number) => `Over ${over} — how many runs?`,
     options: [
       { key: "low", label: "0-5 runs", points: 10 },
@@ -151,6 +126,7 @@ const perOverPool = [
   },
   {
     key: "wicket_this_over",
+    semanticGroup: "wicket",
     question: (over: number) => `Wicket in over ${over}?`,
     options: [
       { key: "yes", label: "Yes", points: 15 },
@@ -159,6 +135,7 @@ const perOverPool = [
   },
   {
     key: "sixes_this_over",
+    semanticGroup: "six",
     question: (over: number) => `Sixes in over ${over}?`,
     options: [
       { key: "zero", label: "0 — bowlers on top", points: 10 },
@@ -169,6 +146,7 @@ const perOverPool = [
   },
   {
     key: "boundary_first_ball",
+    semanticGroup: "boundary",
     question: (over: number) => `Boundary off the first ball of over ${over}?`,
     options: [
       { key: "yes", label: "Yes", points: 20 },
@@ -177,6 +155,7 @@ const perOverPool = [
   },
   {
     key: "dot_balls",
+    semanticGroup: "dots",
     question: (over: number) => `Dot balls in over ${over}?`,
     options: [
       { key: "few", label: "0-2 dots", points: 10 },
@@ -186,6 +165,7 @@ const perOverPool = [
   },
   {
     key: "last_ball_outcome",
+    semanticGroup: "last_ball",
     question: (over: number) => `How does over ${over} end — last ball?`,
     options: [
       { key: "dot", label: "Dot ball", points: 10 },
@@ -195,16 +175,8 @@ const perOverPool = [
     ],
   },
   {
-    key: "over_score_10_plus",
-    question: (over: number, _batterName?: string) =>
-      `Will over ${over} score 10+ total runs?`,
-    options: [
-      { key: "yes", label: "Yes — big over", points: 20 },
-      { key: "no", label: "No — under 10", points: 10 },
-    ],
-  },
-  {
     key: "multiple_boundaries",
+    semanticGroup: "boundary",  // same group as boundary_first_ball
     question: (over: number) => `More than 2 boundaries in over ${over}?`,
     options: [
       { key: "yes", label: "Yes — boundary fest", points: 20 },
@@ -213,19 +185,21 @@ const perOverPool = [
   },
   {
     key: "maiden_over",
-    question: (over: number) => `Maiden over in over ${over}? 👀`,
+    semanticGroup: "maiden",
+    question: (over: number) => `Maiden over in over ${over}?`,
     options: [
       { key: "yes", label: "Yes — bowler dominance", points: 30 },
       { key: "no", label: "No", points: 5 },
     ],
   },
   {
-    key: "last_ball_runs",
-    question: (over: number) => `Last ball of over ${over} — runs?`,
+    key: "extras_this_over",
+    semanticGroup: "extras",
+    question: (over: number) => `How many extras in over ${over}?`,
     options: [
-      { key: "zero", label: "0 (dot ball)", points: 10 },
-      { key: "single_double", label: "1-2 runs", points: 10 },
-      { key: "three_plus", label: "3+ runs", points: 10 },
+      { key: "none", label: "None (0)", points: 15 },
+      { key: "one_two", label: "1-2 extras", points: 10 },
+      { key: "three_plus", label: "3+", points: 20 },
     ],
   },
 ];
@@ -251,13 +225,26 @@ export function generatePerOverPredictions(
 
   // Always include "how many runs" question
   const runsQuestion = perOverPool.find((q) => q.key === "runs_this_over")!;
+  const usedGroups = new Set<string>([runsQuestion.semanticGroup]);
 
-  // Pick 2 random from remaining pool (excluding runs_this_over), with dedup
+  // Pick 2 random from remaining pool (excluding runs_this_over),
+  // with dedup (no repeat within 6 overs) AND no semantic group conflicts
   const remainingPool = perOverPool.filter((q) => q.key !== "runs_this_over");
-  const available = remainingPool.filter((q) => !recent.includes(q.key));
-  const pool = available.length >= 2 ? available : remainingPool;
-  const shuffled = [...pool].sort(() => Math.random() - 0.5);
-  const randomPicks = shuffled.slice(0, 2);
+  const available = remainingPool.filter(
+    (q) => !recent.includes(q.key) && !usedGroups.has(q.semanticGroup)
+  );
+  const pool = available.length >= 2 ? available.filter((q) => !usedGroups.has(q.semanticGroup)) : remainingPool.filter((q) => !usedGroups.has(q.semanticGroup));
+  const shuffled = [...(pool.length >= 2 ? pool : remainingPool.filter((q) => !usedGroups.has(q.semanticGroup)))].sort(() => Math.random() - 0.5);
+
+  const randomPicks: typeof perOverPool = [];
+  for (const candidate of shuffled) {
+    if (randomPicks.length >= 2) break;
+    if (!usedGroups.has(candidate.semanticGroup)) {
+      randomPicks.push(candidate);
+      usedGroups.add(candidate.semanticGroup);
+    }
+  }
+
   const selected = [runsQuestion, ...randomPicks];
 
   // Only track the 2 random picks in dedup (runs_this_over is always used)
@@ -269,7 +256,7 @@ export function generatePerOverPredictions(
     category: "per_over" as const,
     round,
     overNumber,
-    question: template.question(overNumber, currentBatter),
+    question: template.question(overNumber),
     options: template.options,
   }));
 }
@@ -299,22 +286,22 @@ export function generateHotTake(
     }),
     // Round 2: 1st Innings Middle (Overs 7-15)
     2: () => ({
-      question: "Highest partnership this innings — how big will it be?",
-      options: [
-        { key: "under_30", label: "Under 30 — wickets keep falling", points: 25 },
-        { key: "30_50", label: "30-50 — decent but nothing special", points: 20 },
-        { key: "50_75", label: "50-75 — solid partnership", points: 20 },
-        { key: "75_plus", label: "75+ — match-defining stand", points: 30 },
-      ],
-    }),
-    // Round 3: 1st Innings Death (Overs 16-20)
-    3: () => ({
       question: "Total first innings score — what's your gut say?",
       options: [
         { key: "low", label: "Under 150 — batting collapse", points: 25 },
         { key: "par", label: "150-175 — competitive total", points: 25 },
         { key: "high", label: "175-200 — strong batting", points: 25 },
         { key: "massive", label: "200+ — absolute carnage", points: 25 },
+      ],
+    }),
+    // Round 3: 1st Innings Death (Overs 16-20)
+    3: () => ({
+      question: "Total boundaries in the second innings — how many?",
+      options: [
+        { key: "under_10", label: "Under 10 — bowlers dominate", points: 25 },
+        { key: "10_20", label: "10-20 — balanced chase", points: 20 },
+        { key: "20_30", label: "20-30 — batters on top", points: 20 },
+        { key: "30_plus", label: "30+ — boundary fest", points: 30 },
       ],
     }),
     // Round 4: Chase Powerplay (Overs 1-6)
@@ -390,21 +377,19 @@ export function generateRivalryCalls(
     },
   ];
 
-  // Q2: Who hits the winning runs?
-  if (team2Players.length >= 4) {
-    const candidates = team2Players.slice(0, 5);
-    predictions.push({
-      matchId,
-      category: "rivalry_call",
-      round: 4, // assigned to chase powerplay round for points tracking
-      question: "Who hits the winning runs?",
-      options: candidates.map((player) => ({
-        key: player.toLowerCase().replace(/\s+/g, "_"),
-        label: player,
-        points: 50,
-      })),
-    });
-  }
+  // Q2: How many runs in the chase powerplay?
+  predictions.push({
+    matchId,
+    category: "rivalry_call",
+    round: 4,
+    question: "How many runs in the chase powerplay (overs 1-6)?",
+    options: [
+      { key: "under_30", label: "Under 30 — tight start", points: 25 },
+      { key: "30_45", label: "30-45 — steady", points: 20 },
+      { key: "45_60", label: "45-60 — aggressive", points: 25 },
+      { key: "60_plus", label: "60+ — flying start", points: 35 },
+    ],
+  });
 
   return predictions;
 }

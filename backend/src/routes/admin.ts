@@ -43,6 +43,19 @@ router.post("/match", async (req: any, res: Response): Promise<void> => {
       await Prediction.create(q as any);
     }
 
+    // Set toss question to expire 30 min before match start
+    if (startTime) {
+      const tossLockTime = new Date(new Date(startTime).getTime() - 30 * 60_000);
+      const tossPreds = await Prediction.findAll({
+        where: { matchId: match.id, category: "pre_match" },
+      });
+      for (const pred of tossPreds) {
+        if (pred.question.toLowerCase().includes("toss")) {
+          await pred.update({ expiresAt: tossLockTime });
+        }
+      }
+    }
+
     res.status(201).json({ match, predictionsGenerated: preMatchQuestions.length });
   } catch (error) {
     console.error("Create match error:", error);
@@ -82,12 +95,24 @@ router.post("/match/:matchId/start", async (req: any, res: Response): Promise<vo
       await Prediction.create({ ...hotTake, expiresAt: hotTakeExpiresAt } as any);
     }
 
+    // Lock all pre-match predictions — match is now live
+    const preMatchPreds = await Prediction.findAll({
+      where: { matchId, category: "pre_match", status: "open" },
+    });
+    for (const pred of preMatchPreds) {
+      await pred.update({ status: "locked" });
+    }
+    if (preMatchPreds.length > 0) {
+      io.emit("predictionsLocked", { matchId, type: "pre_match" });
+    }
+
     io.emit("newPrediction", { matchId, type: "per_over", overNumber: 1, round });
     io.emit("matchStarted", { matchId });
 
     res.json({
       message: "Match started! Over 1 predictions are live.",
       predictionsGenerated: overPreds.length + (hotTake ? 1 : 0),
+      preMatchLocked: preMatchPreds.length,
       currentPhase: "innings1_powerplay",
     });
   } catch (error) {
@@ -301,7 +326,8 @@ router.post("/match/:matchId/innings-break", async (req: any, res: Response): Pr
       chasingTeamPlayers
     );
 
-    const rivalryExpiresAt = new Date(Date.now() + 120_000);
+    // 8 minutes — enough time for innings break; backend locks them at first ball of innings 2
+    const rivalryExpiresAt = new Date(Date.now() + 480_000);
     for (const rc of rivalryCalls) {
       await Prediction.create({ ...rc, expiresAt: rivalryExpiresAt } as any);
     }
@@ -522,6 +548,19 @@ router.post("/cricket/import/:fixtureId", async (req: any, res: Response): Promi
       await Prediction.create(q as any);
     }
 
+    // Set toss question to expire 30 min before match start
+    if (match.startTime) {
+      const tossLockTime = new Date(new Date(match.startTime).getTime() - 30 * 60_000);
+      const tossPreds = await Prediction.findAll({
+        where: { matchId: match.id, category: "pre_match" },
+      });
+      for (const pred of tossPreds) {
+        if (pred.question.toLowerCase().includes("toss")) {
+          await pred.update({ expiresAt: tossLockTime });
+        }
+      }
+    }
+
     res.status(201).json({
       message: "Match imported",
       match: {
@@ -558,6 +597,7 @@ router.post("/cricket/poll", async (req: any, res: Response): Promise<void> => {
 // ── Match Code Management ──────────────────────────────────────────
 
 // Generate match code for a match at this venue
+// Idempotent: returns existing code if one already exists (codes never change once set)
 router.post("/match-code", authenticateVenue, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const venueId = req.venueId!;
@@ -568,13 +608,14 @@ router.post("/match-code", authenticateVenue, async (req: AuthRequest, res: Resp
       return;
     }
 
-    // Deactivate any previous codes for this venue+match
-    await MatchCode.update(
-      { isActive: false },
-      { where: { venueId, matchId } }
-    );
+    // Return existing active code — never regenerate automatically
+    const existing = await MatchCode.findOne({ where: { venueId, matchId, isActive: true } });
+    if (existing) {
+      res.json({ matchCode: { id: existing.id, code: existing.code, matchId, isActive: true } });
+      return;
+    }
 
-    // Generate random 4-digit code
+    // Generate random 4-digit code (only if none exists yet)
     const code = String(Math.floor(1000 + Math.random() * 9000));
 
     const matchCode = await MatchCode.create({

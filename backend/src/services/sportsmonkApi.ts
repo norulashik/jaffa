@@ -1,11 +1,15 @@
 import { Match, Prediction, MatchParticipant } from "../models";
 import { generatePerOverPredictions, generateHotTake, generateRivalryCalls, getCurrentRound } from "./predictionEngine";
-import { resolvePrediction, generateRoundRewards } from "./pointsEngine";
+import { resolvePrediction, generateRoundRewards, recomputeParticipantScores } from "./pointsEngine";
 import { Server as SocketIOServer } from "socket.io";
 
 const API_BASE = "https://cricket.sportmonks.com/api/v2.0";
 // Read at call time, not module load time, so dotenv has loaded
 const getApiToken = () => process.env.SPORTSMONK_API_KEY || "";
+const SPORTSMONK_HEADERS = {
+  accept: "application/json",
+  "user-agent": "JaffaBackend/1.0",
+};
 
 // ── Team cache ─────────────────────────────────────────────────────
 interface CachedTeam {
@@ -21,7 +25,7 @@ export async function fetchTeamData(teamId: number): Promise<CachedTeam> {
 
   try {
     const url = `${API_BASE}/teams/${teamId}?api_token=${getApiToken()}`;
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: SPORTSMONK_HEADERS });
     const data: any = await res.json();
     const team: CachedTeam = {
       name: data.data?.name || `Team ${teamId}`,
@@ -115,7 +119,7 @@ interface OverStats {
 async function fetchFixtureWithRuns(fixtureId: number): Promise<any> {
   try {
     const url = `${API_BASE}/fixtures/${fixtureId}?api_token=${getApiToken()}&include=runs`;
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: SPORTSMONK_HEADERS });
     const data: any = await res.json();
     return data.data || null;
   } catch (error) {
@@ -128,7 +132,7 @@ async function fetchFixtureWithRuns(fixtureId: number): Promise<any> {
 async function fetchFixtureWithBalls(fixtureId: number): Promise<any> {
   try {
     const url = `${API_BASE}/fixtures/${fixtureId}?api_token=${getApiToken()}&include=balls,runs`;
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: SPORTSMONK_HEADERS });
     const data: any = await res.json();
     return data.data || null;
   } catch (error) {
@@ -137,11 +141,328 @@ async function fetchFixtureWithBalls(fixtureId: number): Promise<any> {
   }
 }
 
+async function fetchFixtureFromLivescores(
+  fixtureId: number,
+  include: string
+): Promise<any | null> {
+  const filterVariants = [
+    `filter[fixture]=${fixtureId}`,
+    `filter[fixtures]=${fixtureId}`,
+    `filter[id]=${fixtureId}`,
+  ];
+
+  for (const filter of filterVariants) {
+    try {
+      const url = `${API_BASE}/livescores?api_token=${getApiToken()}&include=${include}&${filter}`;
+      const res = await fetch(url, { headers: SPORTSMONK_HEADERS });
+      const data: any = await res.json();
+      const fixtures = data.data || [];
+      const fixture = fixtures.find((item: any) => Number(item.id) === fixtureId);
+      if (fixture) {
+        return fixture;
+      }
+    } catch (error) {
+      console.error(`[Sportsmonk] Livescores fetch failed for ${fixtureId} (${filter}):`, error);
+    }
+  }
+
+  return null;
+}
+
+async function fetchLiveFixtureDetail(
+  fixtureId: number,
+  includeBalls = false
+): Promise<any | null> {
+  if (includeBalls) {
+    const fixture = await fetchFixtureWithBalls(fixtureId);
+    const ballCount = fixture?.balls?.data?.length || (Array.isArray(fixture?.balls) ? fixture.balls.length : 0);
+    if (fixture && ballCount > 0) {
+      return fixture;
+    }
+  } else {
+    const fixture = await fetchFixtureWithRuns(fixtureId);
+    const runCount = fixture?.runs?.data?.length || (Array.isArray(fixture?.runs) ? fixture.runs.length : 0);
+    if (fixture && runCount > 0) {
+      return fixture;
+    }
+  }
+
+  const include = includeBalls ? "balls,runs" : "runs";
+  const liveFixture = await fetchFixtureFromLivescores(fixtureId, include);
+  if (liveFixture) {
+    return liveFixture;
+  }
+
+  return includeBalls ? fetchFixtureWithBalls(fixtureId) : fetchFixtureWithRuns(fixtureId);
+}
+
+function getPredictionInnings(prediction: Prediction): number {
+  return prediction.round <= 3 ? 1 : 2;
+}
+
+function getCompletedOverLimit(rawOvers: number, currentOver: number): number {
+  if (rawOvers <= 0) return 0;
+  if (rawOvers === Math.floor(rawOvers)) {
+    return Math.max(currentOver, 0);
+  }
+  return Math.max(currentOver - 1, 0);
+}
+
+function isPredictionCompleted(
+  prediction: Prediction,
+  currentInnings: number,
+  completedOverLimit: number
+): boolean {
+  const predictionInnings = getPredictionInnings(prediction);
+  const predictionOver = prediction.overNumber || 0;
+
+  if (predictionOver <= 0) return false;
+  if (predictionInnings < currentInnings) return true;
+  if (predictionInnings > currentInnings) return false;
+  return predictionOver <= completedOverLimit;
+}
+
+function createNoopIo(): SocketIOServer {
+  const noopRoom = {
+    emit: () => noopRoom,
+  };
+
+  return {
+    to: () => noopRoom,
+    emit: () => noopRoom,
+  } as unknown as SocketIOServer;
+}
+
+async function getTrackingSeed(match: Match): Promise<{ innings: number; over: number; resolved: number }> {
+  const lastResolvedPrediction = await Prediction.findOne({
+    where: {
+      matchId: match.id,
+      category: "per_over",
+      status: "resolved",
+    },
+    order: [["round", "DESC"], ["overNumber", "DESC"], ["updatedAt", "DESC"]],
+  });
+
+  return {
+    innings: match.currentInnings || 0,
+    over: match.currentOver || 0,
+    resolved: lastResolvedPrediction?.overNumber || 0,
+  };
+}
+
+async function resolveOverPredictionsForOver(
+  match: Match,
+  innings: number,
+  overNumber: number,
+  balls: BallData[],
+  io: SocketIOServer
+): Promise<number> {
+  if (overNumber <= 0) return 0;
+
+  const inningsStr = innings === 1 ? "S1" : "S2";
+  const round = getCurrentRound(innings, overNumber);
+  const overStats = computeOverStats(balls, overNumber, inningsStr);
+
+  if (balls.length === 0 || overStats.currentBatsman === "" && overStats.runs === 0 && overStats.wickets === 0 && overStats.sixes === 0 && overStats.dots === 0 && overStats.boundaries === 0 && overStats.wides === 0 && overStats.noballs === 0) {
+    const ballChips = extractOverBallChips(balls, overNumber, inningsStr);
+    if (ballChips.length === 0) {
+      return 0;
+    }
+  }
+
+  const overPredictions = await Prediction.findAll({
+    where: {
+      matchId: match.id,
+      overNumber,
+      round,
+      category: "per_over",
+      status: ["open", "locked"],
+    },
+  });
+
+  let resolvedCount = 0;
+
+  for (const pred of overPredictions) {
+    if (pred.status === "open") {
+      await pred.update({ status: "locked" });
+    }
+  }
+
+  for (const pred of overPredictions) {
+    const correctOption = resolveOverPredictionFromStats(pred, overStats);
+    if (!correctOption) {
+      console.warn(`[Sportsmonk] Could not resolve prediction "${pred.question}" (id=${pred.id})`);
+      continue;
+    }
+
+    await resolvePrediction(pred, correctOption, io);
+    resolvedCount += 1;
+  }
+
+  if (resolvedCount > 0) {
+    const ballKey = `innings${innings}_over${overNumber}_balls`;
+    const statsKey = `innings${innings}_over${overNumber}`;
+    await match.update({
+      scoreData: {
+        ...((match.scoreData as Record<string, unknown>) || {}),
+        [statsKey]: overStats,
+        [ballKey]: extractOverBallChips(balls, overNumber, inningsStr),
+      },
+    });
+  }
+
+  return resolvedCount;
+}
+
+async function catchUpPreMatchPredictions(
+  match: Match,
+  fixture: any,
+  allBalls: BallData[],
+  io: SocketIOServer
+): Promise<void> {
+  const openPreMatch = await Prediction.findAll({
+    where: { matchId: match.id, category: "pre_match", status: "open" },
+  });
+
+  for (const pred of openPreMatch) {
+    await pred.update({ status: "locked" });
+  }
+
+  if (fixture.toss_won_team_id && fixture.elected) {
+    const tossPreds = await Prediction.findAll({
+      where: { matchId: match.id, category: "pre_match", status: ["open", "locked"] },
+    });
+
+    for (const pred of tossPreds) {
+      if (!pred.question.toLowerCase().includes("toss")) continue;
+      const correctOption = resolvePreMatchPrediction(pred, fixture, match, allBalls);
+      if (correctOption) {
+        await resolvePrediction(pred, correctOption, io);
+      }
+    }
+  }
+
+  const firstWicketPreds = await Prediction.findAll({
+    where: { matchId: match.id, category: "pre_match", status: ["open", "locked"] },
+  });
+  const hasWicket = allBalls.some((b) => b.score?.is_wicket || b.score?.out || b.batsmanout_id);
+  if (hasWicket) {
+    for (const pred of firstWicketPreds) {
+      if (!pred.question.toLowerCase().includes("first wicket")) continue;
+      const correctOption = resolvePreMatchPrediction(pred, fixture, match, allBalls);
+      if (correctOption) {
+        await resolvePrediction(pred, correctOption, io);
+      }
+    }
+  }
+}
+
+async function catchUpUnresolvedPredictions(
+  match: Match,
+  fixtureId: number,
+  currentInnings: number,
+  completedOverLimit: number,
+  io: SocketIOServer
+): Promise<number> {
+  const unresolvedPredictions = await Prediction.findAll({
+    where: {
+      matchId: match.id,
+      category: "per_over",
+      status: ["open", "locked"],
+    },
+    order: [["round", "ASC"], ["overNumber", "ASC"], ["createdAt", "ASC"]],
+  });
+
+  const completedTargets = new Map<number, Set<number>>();
+  for (const pred of unresolvedPredictions) {
+    if (!isPredictionCompleted(pred, currentInnings, completedOverLimit)) continue;
+    const innings = getPredictionInnings(pred);
+    const over = pred.overNumber || 0;
+    if (!completedTargets.has(innings)) {
+      completedTargets.set(innings, new Set<number>());
+    }
+    completedTargets.get(innings)!.add(over);
+  }
+
+  if (completedTargets.size === 0) {
+    return 0;
+  }
+
+  const liveFixture = await fetchLiveFixtureDetail(fixtureId, true);
+  // Handle both {data:[]} and direct array formats from Sportsmonk
+  const balls: BallData[] = liveFixture?.balls?.data || (Array.isArray(liveFixture?.balls) ? liveFixture.balls : []);
+  if (balls.length === 0) {
+    console.warn(`[Sportsmonk] No ball data available for catch-up on match ${match.id}`);
+    return 0;
+  }
+
+  let resolvedCount = 0;
+  for (const [innings, overs] of completedTargets.entries()) {
+    for (const over of Array.from(overs).sort((a, b) => a - b)) {
+      resolvedCount += await resolveOverPredictionsForOver(match, innings, over, balls, io);
+    }
+  }
+
+  await catchUpPreMatchPredictions(match, liveFixture, balls, io);
+  return resolvedCount;
+}
+
+async function resolveRemainingPredictionsAtMatchEnd(
+  match: Match,
+  fixture: any,
+  runs: any[],
+  allBalls: BallData[],
+  io: SocketIOServer
+): Promise<void> {
+  const preMatchPreds = await Prediction.findAll({
+    where: { matchId: match.id, category: "pre_match", status: ["open", "locked"] },
+  });
+
+  for (const pred of preMatchPreds) {
+    const correctOption = resolvePreMatchPrediction(pred, fixture, match, allBalls);
+    if (correctOption) {
+      await resolvePrediction(pred, correctOption, io);
+    }
+  }
+
+  const unresolvedOverPreds = await Prediction.findAll({
+    where: { matchId: match.id, category: "per_over", status: ["open", "locked"] },
+    order: [["round", "ASC"], ["overNumber", "ASC"]],
+  });
+
+  const completedTargets = new Map<number, Set<number>>();
+  for (const pred of unresolvedOverPreds) {
+    const innings = getPredictionInnings(pred);
+    const over = pred.overNumber || 0;
+    if (!completedTargets.has(innings)) {
+      completedTargets.set(innings, new Set<number>());
+    }
+    completedTargets.get(innings)!.add(over);
+  }
+
+  for (const [innings, overs] of completedTargets.entries()) {
+    for (const over of Array.from(overs).sort((a, b) => a - b)) {
+      await resolveOverPredictionsForOver(match, innings, over, allBalls, io);
+    }
+  }
+
+  const otherOpenPreds = await Prediction.findAll({
+    where: { matchId: match.id, category: ["hot_take", "rivalry_call"], status: ["open", "locked"] },
+  });
+
+  for (const pred of otherOpenPreds) {
+    const correctOption = resolveEndOfMatchPrediction(pred, fixture, match, runs, allBalls);
+    if (correctOption) {
+      await resolvePrediction(pred, correctOption, io);
+    }
+  }
+}
+
 // Fetch live scores
 export async function fetchSportsmonkLiveScores(): Promise<any[]> {
   try {
     const url = `${API_BASE}/livescores?api_token=${getApiToken()}&include=balls,runs,localteam,visitorteam`;
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: SPORTSMONK_HEADERS });
     const data: any = await res.json();
     const fixtures = data.data || [];
     await enrichFixturesWithTeams(fixtures);
@@ -160,7 +481,7 @@ async function fetchAllPages(baseUrl: string): Promise<any[]> {
   while (true) {
     const separator = baseUrl.includes("?") ? "&" : "?";
     const url = `${baseUrl}${separator}page=${page}`;
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: SPORTSMONK_HEADERS });
     const data: any = await res.json();
     const fixtures = data.data || [];
     allFixtures.push(...fixtures);
@@ -292,7 +613,7 @@ function getCurrentOver(balls: BallData[], innings: string): number {
 }
 
 // Track last processed over per match to avoid duplicate processing
-const lastProcessedOver: Map<string, { innings: number; over: number }> = new Map();
+const lastProcessedOver: Map<string, { innings: number; over: number; resolved: number }> = new Map();
 
 // Track last known score per match to detect ball-by-ball changes (for locking predictions)
 const lastKnownScore: Map<string, { innings: number; score: number; wickets: number; overs: number }> = new Map();
@@ -328,15 +649,12 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
 
     // Initialize lastProcessedOver from DB state on first encounter (survives server restarts)
     if (!lastProcessedOver.has(match.id) && match.status === "live") {
-      lastProcessedOver.set(match.id, {
-        innings: match.currentInnings || 0,
-        over: match.currentOver || 0,
-      });
+      lastProcessedOver.set(match.id, await getTrackingSeed(match));
       console.log(`[Sportsmonk] Initialized tracking for ${match.team1Short} vs ${match.team2Short}: innings=${match.currentInnings}, over=${match.currentOver}`);
     }
 
     // Fast fetch: runs only (for score updates)
-    const fixture = await fetchFixtureWithRuns(fixtureId);
+    const fixture = await fetchLiveFixtureDetail(fixtureId, false);
     if (!fixture) {
       console.log(`[Sportsmonk] No fixture data for ${fixtureId}`);
       continue;
@@ -376,6 +694,18 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           await Prediction.create({ ...hotTake, expiresAt: hotTakeExpiresAt } as any);
         }
 
+        // Lock all pre-match predictions — match is now live
+        const preMatchPreds = await Prediction.findAll({
+          where: { matchId: match.id, category: "pre_match", status: "open" },
+        });
+        for (const pred of preMatchPreds) {
+          await pred.update({ status: "locked" });
+        }
+        if (preMatchPreds.length > 0) {
+          io.emit("predictionsLocked", { matchId: match.id, type: "pre_match" });
+          console.log(`[Sportsmonk] Locked ${preMatchPreds.length} pre-match predictions (match going live)`);
+        }
+
         io.emit("newPrediction", { matchId: match.id, type: "per_over", overNumber: 1, round: 1 });
         io.emit("matchStarted", { matchId: match.id });
 
@@ -392,13 +722,15 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
     const innings1Runs = runs.find((r: any) => r.inning === 1);
     const currentInnings = innings2Runs ? 2 : 1;
     const currentInningsStr = currentInnings === 2 ? "S2" : "S1";
-    const rawOver = currentInnings === 2
-      ? Math.ceil(innings2Runs?.overs || 0)
-      : Math.ceil(innings1Runs?.overs || 0);
-    // Ensure currentOver is at least 1 (over 0 doesn't exist in cricket)
-    const currentOver = Math.max(rawOver, 1);
+    const rawOvers = currentInnings === 2
+      ? Number(innings2Runs?.overs || 0)
+      : Number(innings1Runs?.overs || 0);
+    // rawOvers format: 5.0 = 5 overs complete (over 6 starting), 5.3 = 3 balls into over 6
+    // Math.floor(rawOvers) + 1 correctly gives the CURRENT over being bowled in all cases
+    const currentOver = rawOvers <= 0 ? 1 : Math.min(Math.floor(rawOvers) + 1, 20);
+    const completedOverLimit = Math.max(currentOver - 1, 0);
 
-    const lastProcessed = lastProcessedOver.get(match.id) || { innings: 0, over: 0 };
+    const lastProcessed = lastProcessedOver.get(match.id) || { innings: 0, over: 0, resolved: 0 };
 
     // === ALWAYS update live score on every poll (every 30s) ===
     const liveScore: Record<string, unknown> = {
@@ -422,7 +754,12 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
       };
     }
 
-    await match.update({ scoreData: liveScore });
+    await match.update({
+      currentInnings,
+      currentOver,
+      currentPhase: getPhase(currentInnings, currentOver) as any,
+      scoreData: liveScore,
+    });
     io.emit("scoreUpdate", {
       matchId: match.id,
       innings: currentInnings,
@@ -437,6 +774,23 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
     const scoreLog2 = inn2 ? ` | Inn2: ${inn2.score}/${inn2.wickets} (${inn2.overs} ov)` : "";
     console.log(`[Sportsmonk] ${match.team1Short} vs ${match.team2Short} — Inn1: ${scoreLog}${scoreLog2} | Over ${currentOver}`);
 
+    // === CATCH-UP RESOLVER: resolve any locked predictions for already-completed overs ===
+    // This handles server restarts, missed polls, and over-transition edge cases
+    try {
+      const resolvedCount = await catchUpUnresolvedPredictions(
+        match,
+        fixtureId,
+        currentInnings,
+        completedOverLimit,
+        io
+      );
+      if (resolvedCount > 0) {
+        console.log(`[CatchUp] Resolved ${resolvedCount} missed per-over predictions for ${match.team1Short} vs ${match.team2Short}`);
+      }
+    } catch (catchUpErr) {
+      console.error("[CatchUp] Error in catch-up resolver:", catchUpErr);
+    }
+
     // Lock per-over predictions once a ball is bowled in the current over
     const currentInnRuns = currentInnings === 2 ? innings2Runs : innings1Runs;
     const prevScore = lastKnownScore.get(match.id);
@@ -444,7 +798,9 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
     const nowWickets = currentInnRuns ? currentInnRuns.wickets : 0;
     const nowOvers = currentInnRuns ? currentInnRuns.overs : 0;
 
-    if (prevScore && prevScore.innings === currentInnings && Math.ceil(prevScore.overs) === currentOver) {
+    // Use same formula as currentOver so "same over" detection is consistent
+    const prevCurrentOver = !prevScore || prevScore.overs <= 0 ? 0 : Math.min(Math.floor(prevScore.overs) + 1, 20);
+    if (prevScore && prevScore.innings === currentInnings && prevCurrentOver === currentOver) {
       // Same over — check if score/wickets/overs changed (ball was bowled)
       const ballBowled = nowScore !== prevScore.score || nowWickets !== prevScore.wickets || nowOvers !== prevScore.overs;
       if (ballBowled) {
@@ -458,6 +814,30 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           }
           io.emit("predictionsLocked", { matchId: match.id, overNumber: currentOver });
           console.log(`[Sportsmonk] Locked ${openOverPreds.length} predictions for over ${currentOver} (ball detected)`);
+        }
+
+        // Lock any remaining pre-match predictions if still open (fallback for edge cases)
+        const openPreMatch = await Prediction.findAll({
+          where: { matchId: match.id, category: "pre_match", status: "open" },
+        });
+        for (const pred of openPreMatch) {
+          await pred.update({ status: "locked" });
+        }
+        if (openPreMatch.length > 0) {
+          console.log(`[Sportsmonk] Locked ${openPreMatch.length} pre-match predictions (ball detected fallback)`);
+        }
+
+        // When 2nd innings starts (ball bowled in innings 2), lock all open rivalry_call
+        if (currentInnings === 2 && prevScore.innings === 1) {
+          const staleOpen = await Prediction.findAll({
+            where: { matchId: match.id, category: ["rivalry_call", "pre_match"], status: "open" },
+          });
+          for (const pred of staleOpen) {
+            await pred.update({ status: "locked" });
+          }
+          if (staleOpen.length > 0) {
+            console.log(`[Sportsmonk] Locked ${staleOpen.length} rivalry_call/pre_match predictions (innings 2 started)`);
+          }
         }
 
         // Generate next over's predictions (to be answered during current over)
@@ -488,51 +868,9 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
         // === Resolve pre-match predictions using Sportmonks data ===
         try {
           // Fetch full fixture data for resolution (balls needed for sixes/wicket type)
-          const fullFixture = await fetchFixtureWithBalls(fixtureId);
+          const fullFixture = await fetchLiveFixtureDetail(fixtureId, true);
           const allBalls: BallData[] = fullFixture?.balls?.data || [];
-
-          const preMatchPreds = await Prediction.findAll({
-            where: { matchId: match.id, category: "pre_match", status: "open" },
-          });
-
-          for (const pred of preMatchPreds) {
-            const correctOption = resolvePreMatchPrediction(
-              pred, fixture, match, allBalls
-            );
-            if (correctOption) {
-              await resolvePrediction(pred, correctOption, io);
-              console.log(`[Sportsmonk] Pre-match resolved: "${pred.question}" → ${correctOption}`);
-            }
-          }
-
-          // Resolve any remaining open per-over predictions (last over)
-          const openOverPreds = await Prediction.findAll({
-            where: { matchId: match.id, category: "per_over", status: "open" },
-          });
-          for (const pred of openOverPreds) {
-            const overNum = pred.overNumber || 0;
-            if (overNum > 0) {
-              const innings = pred.round <= 3 ? "S1" : "S2";
-              const overStats = computeOverStats(allBalls, overNum, innings);
-              const correctOption = resolveOverPredictionFromStats(pred, overStats);
-              if (correctOption) {
-                await resolvePrediction(pred, correctOption, io);
-                console.log(`[Sportsmonk] End-match over ${overNum} resolved: "${pred.question}" → ${correctOption}`);
-              }
-            }
-          }
-
-          // Also resolve any open hot_take and rivalry_call predictions
-          const otherOpenPreds = await Prediction.findAll({
-            where: { matchId: match.id, category: ["hot_take", "rivalry_call"], status: "open" },
-          });
-          for (const pred of otherOpenPreds) {
-            const correctOption = resolveEndOfMatchPrediction(pred, fixture, match, runs, allBalls);
-            if (correctOption) {
-              await resolvePrediction(pred, correctOption, io);
-              console.log(`[Sportsmonk] End-match resolved: "${pred.question}" → ${correctOption}`);
-            }
-          }
+          await resolveRemainingPredictionsAtMatchEnd(match, fixture, runs, allBalls, io);
         } catch (resolveErr) {
           console.error("[Sportsmonk] Error resolving pre-match predictions:", resolveErr);
         }
@@ -576,7 +914,8 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           const rivalryCalls = generateRivalryCalls(
             match.id, target, chasingTeamShort, chasingTeamPlayers
           );
-          const rivalryExpiresAt = new Date(Date.now() + 120_000);
+          // 8 minutes — enough for innings break; locked at first ball of innings 2
+          const rivalryExpiresAt = new Date(Date.now() + 480_000);
           for (const rc of rivalryCalls) {
             await Prediction.create({ ...rc, expiresAt: rivalryExpiresAt } as any);
           }
@@ -593,9 +932,9 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
         }
 
         // Resolve hot take predictions that depend on first innings data
-        // Match by round 3 (1st innings death) — more reliable than text matching
+        // Round 2 = "Total first innings score" (after R2/R3 swap)
         const hotTakePreds = await Prediction.findAll({
-          where: { matchId: match.id, category: "hot_take", status: "open", round: 3 },
+          where: { matchId: match.id, category: "hot_take", status: ["open", "locked"], round: 2 },
         });
         for (const pred of hotTakePreds) {
           const score = innings1Runs.score;
@@ -607,6 +946,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           await resolvePrediction(pred, correctOption, io);
           console.log(`[Sportsmonk] Innings break hot take resolved: "${pred.question}" → ${correctOption}`);
         }
+        // Round 3 = "Total boundaries in second innings" — resolved at match end (needs S2 data)
 
         // Generate Over 1 (2nd innings) per-over predictions — locked when 1st ball of innings 2 is bowled
         const inn2Round = getCurrentRound(2, 1); // = 4
@@ -640,38 +980,47 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           team1Wickets: innings1Runs.wickets,
         });
 
-        // Resolve last over of innings 1 predictions
+        // Resolve all remaining 1st innings per-over predictions at innings break
         try {
-          const completedOver = lastProcessed.over;
-          if (completedOver > 0) {
-            const fixtureWithBalls = await fetchFixtureWithBalls(fixtureId);
-            const balls: BallData[] = fixtureWithBalls?.balls?.data || [];
-            const overStats = computeOverStats(balls, completedOver, "S1");
-            const completedRound = getCurrentRound(1, completedOver);
-            const overPredictions = await Prediction.findAll({
-              where: { matchId: match.id, overNumber: completedOver, round: completedRound, status: "open" },
-            });
-            // Lock predictions first to prevent late submissions
-            for (const pred of overPredictions) {
-              await pred.update({ status: "locked" });
+          const fixtureWithBalls = await fetchFixtureWithBalls(fixtureId);
+          const balls: BallData[] = fixtureWithBalls?.balls?.data || (Array.isArray(fixtureWithBalls?.balls) ? fixtureWithBalls.balls : []);
+
+          // Sweep ALL unresolved 1st innings predictions (rounds 1-3), not just the last over
+          // Status must include "locked" — ball detection locks them before innings break fires
+          const allInn1Preds = await Prediction.findAll({
+            where: { matchId: match.id, category: "per_over", round: [1, 2, 3], status: ["open", "locked"] },
+          });
+
+          if (allInn1Preds.length > 0) {
+            // Lock any still-open ones first
+            for (const pred of allInn1Preds) {
+              if (pred.status === "open") await pred.update({ status: "locked" });
             }
-            io.emit("predictionsLocked", { matchId: match.id, overNumber: completedOver });
-            for (const pred of overPredictions) {
+            io.emit("predictionsLocked", { matchId: match.id, type: "innings1_all" });
+
+            for (const pred of allInn1Preds) {
+              const overNum = pred.overNumber || 0;
+              if (overNum <= 0) continue;
+              const overStats = computeOverStats(balls, overNum, "S1");
               const correctOption = resolveOverPredictionFromStats(pred, overStats);
               if (correctOption) {
                 await resolvePrediction(pred, correctOption, io);
               } else {
-                console.warn(`[Sportsmonk] Could not resolve prediction "${pred.question}" (id=${pred.id}) — no matching rule`);
+                console.warn(`[Sportsmonk] Inn-break: could not resolve "${pred.question}" (id=${pred.id})`);
               }
             }
-            console.log(`[Sportsmonk] Resolved innings 1 over ${completedOver} predictions`);
+            console.log(`[Sportsmonk] Innings break: resolved ${allInn1Preds.length} 1st innings predictions`);
           }
         } catch (err) {
-          console.error("[Sportsmonk] Error resolving last over of innings 1:", err);
+          console.error("[Sportsmonk] Error resolving innings 1 predictions at innings break:", err);
         }
 
         // Update tracking so over-completion block doesn't re-run
-        lastProcessedOver.set(match.id, { innings: currentInnings, over: currentOver });
+        lastProcessedOver.set(match.id, {
+          innings: currentInnings,
+          over: currentOver,
+          resolved: Math.max(lastProcessed.resolved || 0, lastProcessed.over),
+        });
 
         console.log(`[Sportsmonk] Innings break — target: ${target}`);
       }
@@ -695,11 +1044,11 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
             console.log(`[Sportsmonk] Fixed rivalry call: "${fixedQuestion}"`);
           }
         }
-        // Catch-up: resolve round 3 hot takes (1st innings score) by round number
-        const round3HotTakes = await Prediction.findAll({
-          where: { matchId: match.id, category: "hot_take", status: "open", round: 3 },
+        // Catch-up: resolve round 2 hot takes (1st innings score) by round number
+        const round2HotTakes = await Prediction.findAll({
+          where: { matchId: match.id, category: "hot_take", status: ["open", "locked"], round: 2 },
         });
-        for (const pred of round3HotTakes) {
+        for (const pred of round2HotTakes) {
           const score = innings1Runs.score;
           let correctOption: string;
           if (score < 150) correctOption = "low";
@@ -709,6 +1058,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           await resolvePrediction(pred, correctOption, io);
           console.log(`[Sportsmonk] Catch-up resolved: "${pred.question}" → ${correctOption}`);
         }
+        // Round 3 hot take ("Total boundaries in second innings") needs S2 data — resolved at match end
         // Catch-up: resolve round 1 hot takes (powerplay first 3 vs last 3)
         const round1HotTakes = await Prediction.findAll({
           where: { matchId: match.id, category: "hot_take", status: "open", round: 1 },
@@ -742,11 +1092,22 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           console.log(`[Sportsmonk] Over ${completedOver} completed — fetching ball-by-ball data...`);
 
           // Slow fetch: get ball-by-ball data only when an over completes
-          const fixtureWithBalls = await fetchFixtureWithBalls(fixtureId);
-          const balls: BallData[] = fixtureWithBalls?.balls?.data || [];
+          const fixtureWithBalls = await fetchLiveFixtureDetail(fixtureId, true);
+          const balls: BallData[] = fixtureWithBalls?.balls?.data || (Array.isArray(fixtureWithBalls?.balls) ? fixtureWithBalls.balls : []);
 
           const prevInningsStr = currentInnings > lastProcessed.innings ? "S1" : currentInningsStr;
           const overStats = computeOverStats(balls, completedOver, prevInningsStr);
+
+          // Store ball chips for the completed over in scoreData
+          const ballChips = extractOverBallChips(balls, completedOver, prevInningsStr);
+          const inningsNum = prevInningsStr === "S1" ? 1 : 2;
+          const ballKey = `innings${inningsNum}_over${completedOver}_balls`;
+          await match.update({
+            scoreData: {
+              ...(match.scoreData as Record<string, unknown> || {}),
+              [ballKey]: ballChips,
+            },
+          });
 
           console.log(`[Sportsmonk] Over ${completedOver}: ${overStats.runs} runs, ${overStats.wickets} wkts, ${overStats.sixes} sixes`);
 
@@ -784,12 +1145,26 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
             io.emit("predictionsLocked", { matchId: match.id, overNumber: nextOverNum });
           }
 
-          // Update match state
+          // Update match state + store over stats for catch-up resolution
           const newPhase = getPhase(currentInnings, currentOver);
+          const statsKey = `innings${inningsNum}_over${completedOver}`;
           await match.update({
             currentOver,
             currentInnings,
             currentPhase: newPhase as any,
+            scoreData: {
+              ...(match.scoreData as Record<string, unknown> || {}),
+              [statsKey]: overStats,
+              [ballKey]: ballChips,
+            },
+          });
+
+          // Re-emit scoreUpdate with updated scoreData (includes ball chips now)
+          io.emit("scoreUpdate", {
+            matchId: match.id,
+            innings: currentInnings,
+            over: currentOver,
+            scoreData: match.scoreData,
           });
 
           // Check round change
@@ -871,9 +1246,43 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
       }
 
       // Update tracking
-      lastProcessedOver.set(match.id, { innings: currentInnings, over: currentOver });
+      lastProcessedOver.set(match.id, {
+        innings: currentInnings,
+        over: currentOver,
+        resolved: Math.max(lastProcessed.resolved || 0, completedOverLimit),
+      });
     }
   }
+}
+
+// Convert raw BallData for an over into displayable ball chips
+function extractOverBallChips(balls: BallData[], overNumber: number, innings: string): { label: string; type: string }[] {
+  const overPrefix = (overNumber - 1).toString();
+  const overBalls = balls.filter(
+    (b) => b.scoreboard === innings && String(b.ball).split(".")[0] === overPrefix
+  );
+
+  return overBalls.map((b) => {
+    const s = b.score;
+    const isWide = s.name?.toLowerCase().includes("wide");
+    const isNoball = s.noball > 0 || s.noball_runs > 0;
+
+    if (s.is_wicket || b.batsmanout_id) return { label: "W", type: "wicket" };
+    if (isWide) {
+      const extra = s.runs > 0 ? `wd+${s.runs}` : "wd";
+      return { label: extra, type: "wide" };
+    }
+    if (isNoball) {
+      const extra = s.runs > 0 ? `nb+${s.runs}` : "nb";
+      return { label: extra, type: "noball" };
+    }
+    if (s.leg_bye > 0) return { label: `lb${s.leg_bye}`, type: "extra" };
+    if (s.bye > 0) return { label: `b${s.bye}`, type: "extra" };
+    if (s.six) return { label: "6", type: "six" };
+    if (s.four) return { label: "4", type: "boundary" };
+    if (s.runs === 0) return { label: "•", type: "dot" };
+    return { label: String(s.runs), type: "runs" };
+  });
 }
 
 function getPhase(innings: number, over: number): string {
@@ -925,10 +1334,6 @@ export function resolveOverPredictionFromStats(prediction: Prediction, stats: Ov
     return "dot";
   }
 
-  if (q.includes("score 10+") || q.includes("10+ total runs")) {
-    return stats.runs >= 10 ? "yes" : "no";
-  }
-
   if (q.includes("more than 2 boundaries")) {
     return stats.boundaries > 2 ? "yes" : "no";
   }
@@ -938,13 +1343,105 @@ export function resolveOverPredictionFromStats(prediction: Prediction, stats: Ov
     return (stats.runs === 0 && stats.wides === 0 && stats.noballs === 0) ? "yes" : "no";
   }
 
-  if (q.includes("last ball of over") && q.includes("runs")) {
-    if (stats.lastBallRuns === 0) return "zero";
-    if (stats.lastBallRuns <= 2) return "single_double";
+  if (q.includes("how many extras")) {
+    const extras = stats.wides + stats.noballs;
+    if (extras === 0) return "none";
+    if (extras <= 2) return "one_two";
     return "three_plus";
   }
 
   return null;
+}
+
+export interface RepairPerOverPredictionsScope {
+  matchId?: string;
+}
+
+export interface RepairPerOverPredictionsSummary {
+  matchesChecked: number;
+  predictionsChecked: number;
+  predictionsCorrected: number;
+  participantsRecomputed: number;
+  userPredictionsRecomputed: number;
+}
+
+export async function repairPerOverPredictions(
+  scope: RepairPerOverPredictionsScope = {}
+): Promise<RepairPerOverPredictionsSummary> {
+  const matchWhere: Record<string, string> = {};
+  if (scope.matchId) {
+    matchWhere.id = scope.matchId;
+  }
+
+  const matches = await Match.findAll({
+    where: matchWhere,
+    order: [["updatedAt", "DESC"]],
+  });
+
+  let predictionsChecked = 0;
+  let predictionsCorrected = 0;
+  let participantsRecomputed = 0;
+  let userPredictionsRecomputed = 0;
+  const io = createNoopIo();
+
+  for (const match of matches) {
+    if (!match.externalId) continue;
+
+    const fixtureId = Number(match.externalId);
+    if (!Number.isFinite(fixtureId)) continue;
+
+    const fullFixture = await fetchLiveFixtureDetail(fixtureId, true);
+    const allBalls: BallData[] = fullFixture?.balls?.data || [];
+    if (allBalls.length === 0) {
+      console.warn(
+        `[Sportsmonk Repair] Skipping match ${match.id} (${match.externalId}) because no ball-by-ball data was returned`
+      );
+      continue;
+    }
+
+    const unresolvedPredictions = await Prediction.findAll({
+      where: {
+        matchId: match.id,
+        category: "per_over",
+        status: ["open", "locked"],
+      },
+      order: [["round", "ASC"], ["overNumber", "ASC"], ["createdAt", "ASC"]],
+    });
+
+    const targets = new Map<number, Set<number>>();
+    for (const pred of unresolvedPredictions) {
+      predictionsChecked += 1;
+      const innings = getPredictionInnings(pred);
+      const over = pred.overNumber || 0;
+      if (!targets.has(innings)) {
+        targets.set(innings, new Set<number>());
+      }
+      targets.get(innings)!.add(over);
+    }
+
+    let correctedThisMatch = 0;
+    for (const [innings, overs] of targets.entries()) {
+      for (const over of Array.from(overs).sort((a, b) => a - b)) {
+        correctedThisMatch += await resolveOverPredictionsForOver(match, innings, over, allBalls, io);
+      }
+    }
+
+    predictionsCorrected += correctedThisMatch;
+
+    if (correctedThisMatch > 0) {
+      const summary = await recomputeParticipantScores({ matchId: match.id });
+      participantsRecomputed += summary.participantsRecomputed;
+      userPredictionsRecomputed += summary.userPredictionsRecomputed;
+    }
+  }
+
+  return {
+    matchesChecked: matches.length,
+    predictionsChecked,
+    predictionsCorrected,
+    participantsRecomputed,
+    userPredictionsRecomputed,
+  };
 }
 
 // Resolve pre-match predictions when match finishes
@@ -955,8 +1452,6 @@ function resolvePreMatchPrediction(
   allBalls: BallData[]
 ): string | null {
   const q = prediction.question.toLowerCase();
-  const options = prediction.options;
-
   // Q1: "Who wins tonight?"
   if (q.includes("who wins")) {
     const winnerTeamId = fixture.winner_team_id;
@@ -991,19 +1486,7 @@ function resolvePreMatchPrediction(
     return null;
   }
 
-  // Q2: "Pick your man of the match"
-  if (q.includes("man of the match") || q.includes("steals the show")) {
-    const motmId = fixture.man_of_match_id;
-    if (!motmId) return null;
-
-    // Try to match MOTM player from options by checking all players
-    // Since we store player names as keys, we need to check Sportmonks MOTM
-    // For now, return null if we can't match (MOTM name not easily available from fixture alone)
-    // We'd need to fetch the player endpoint — skip for now unless we have the name
-    return null;
-  }
-
-  // Q3: "Toss time — who wins and what do they pick?"
+  // Q2: "Toss time — who wins and what do they pick?"
   if (q.includes("toss")) {
     const tossWinnerId = fixture.toss_won_team_id;
     const elected = fixture.elected; // "batting" or "bowling"
@@ -1023,7 +1506,7 @@ function resolvePreMatchPrediction(
     return null;
   }
 
-  // Q4: "Which team hits more sixes?"
+  // Q3: "Which team hits more sixes?"
   if (q.includes("more sixes")) {
     let team1Sixes = 0;
     let team2Sixes = 0;
@@ -1052,7 +1535,7 @@ function resolvePreMatchPrediction(
     }
   }
 
-  // Q5: "First wicket — how does it fall?"
+  // Q4: "First wicket — how does it fall?"
   if (q.includes("first wicket")) {
     // Find the first ball with a wicket
     const wicketBall = allBalls.find((b) => b.score?.is_wicket || b.score?.out || b.batsmanout_id);
@@ -1147,6 +1630,32 @@ function resolveEndOfMatchPrediction(
     if (maxOverRuns <= 15) return "10_15";
     if (maxOverRuns <= 20) return "16_20";
     return "20_plus";
+  }
+
+  // "Total boundaries in the second innings"
+  if (q.includes("total boundaries in the second innings")) {
+    const s2Balls = allBalls.filter((b) => b.scoreboard === "S2");
+    let boundaries = 0;
+    for (const b of s2Balls) {
+      if (b.score?.four || b.score?.six) boundaries++;
+    }
+    if (boundaries < 10) return "under_10";
+    if (boundaries <= 20) return "10_20";
+    if (boundaries <= 30) return "20_30";
+    return "30_plus";
+  }
+
+  // "How many runs in the chase powerplay?"
+  if (q.includes("chase powerplay")) {
+    let ppRuns = 0;
+    for (const b of allBalls) {
+      if (b.scoreboard !== "S2") continue;
+      if (Math.floor(b.ball) < 6) ppRuns += b.score?.runs || 0;
+    }
+    if (ppRuns < 30) return "under_30";
+    if (ppRuns <= 45) return "30_45";
+    if (ppRuns <= 60) return "45_60";
+    return "60_plus";
   }
 
   // "Chase done in which phase?"
