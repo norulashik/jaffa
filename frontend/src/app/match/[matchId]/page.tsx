@@ -715,8 +715,9 @@ export default function MatchDashboard() {
           const sd = matchData?.scoreData || {};
           const currInn = sd.currentInnings || matchData?.currentInnings || 1;
           const currOv = sd.currentOver || matchData?.currentOver || 0;
-          // Innings 2 has started (at least 1 ball bowled) — hide rivalry_call predictions
-          const innings2Started = currInn === 2 && currOv >= 1;
+          // Only hide rivalry calls when innings 2 actually has balls bowled (overs > 0)
+          const inn2Overs = Number(sd?.innings2?.overs || 0);
+          const innings2Started = currInn === 2 && inn2Overs > 0;
 
           const unanswered = predictions.filter((p: any) => {
             if (p.status !== "open") return false;

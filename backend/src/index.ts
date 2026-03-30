@@ -20,15 +20,21 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
+// Parse CORS origins — supports comma-separated list in env
+const corsOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim())
+  : ["http://localhost:3000"];
+
 const io = new SocketIOServer(server, {
   cors: {
-    origin: process.env.CORS_ORIGIN || "http://localhost:3000",
+    origin: corsOrigins,
     methods: ["GET", "POST"],
+    credentials: true,
   },
 });
 
 // Middleware
-app.use(cors({ origin: process.env.CORS_ORIGIN || "http://localhost:3000" }));
+app.use(cors({ origin: corsOrigins, credentials: true }));
 app.use(express.json());
 
 // Make io accessible in routes

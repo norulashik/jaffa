@@ -1,6 +1,6 @@
 import { Match, Prediction, MatchParticipant } from "../models";
 import { generatePerOverPredictions, generateHotTake, generateRivalryCalls, getCurrentRound } from "./predictionEngine";
-import { resolvePrediction, generateRoundRewards, recomputeParticipantScores } from "./pointsEngine";
+import { resolvePrediction, reResolvePrediction, generateRoundRewards, recomputeParticipantScores } from "./pointsEngine";
 import { Server as SocketIOServer } from "socket.io";
 
 const API_BASE = "https://cricket.sportmonks.com/api/v2.0";
@@ -618,6 +618,10 @@ const lastProcessedOver: Map<string, { innings: number; over: number; resolved: 
 // Track last known score per match to detect ball-by-ball changes (for locking predictions)
 const lastKnownScore: Map<string, { innings: number; score: number; wickets: number; overs: number }> = new Map();
 
+// Cache ball data per match to detect umpire review changes
+// Key: matchId, Value: Map of "S1-0.1" => { runs, is_wicket, four, six, noball, name }
+const cachedBallData: Map<string, Map<string, { runs: number; is_wicket: boolean; four: boolean; six: boolean; noball: number; name?: string }>> = new Map();
+
 // Concurrency guard — prevent overlapping polls
 let isPolling = false;
 
@@ -798,6 +802,82 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
     const nowWickets = currentInnRuns ? currentInnRuns.wickets : 0;
     const nowOvers = currentInnRuns ? currentInnRuns.overs : 0;
 
+    // === BALL CHANGE DETECTION: detect umpire reviews / signal reversals ===
+    // Only fetch ball data when we know score changed (to minimize API calls)
+    if (prevScore && (nowScore !== prevScore.score || nowWickets !== prevScore.wickets || nowOvers !== prevScore.overs)) {
+      try {
+        const fixtureWithBalls = await fetchFixtureWithBalls(fixtureId);
+        const currentBalls: BallData[] = fixtureWithBalls?.balls?.data || (Array.isArray(fixtureWithBalls?.balls) ? fixtureWithBalls.balls : []);
+
+        if (currentBalls.length > 0) {
+          const prevCache = cachedBallData.get(match.id);
+          const newCache = new Map<string, { runs: number; is_wicket: boolean; four: boolean; six: boolean; noball: number; name?: string }>();
+          const changedOvers = new Set<string>(); // "S1-3" format
+
+          for (const b of currentBalls) {
+            const key = `${b.scoreboard}-${b.ball}`;
+            const ballInfo = {
+              runs: b.score.runs,
+              is_wicket: b.score.is_wicket || !!b.batsmanout_id,
+              four: b.score.four,
+              six: b.score.six,
+              noball: b.score.noball || 0,
+              name: b.score.name,
+            };
+            newCache.set(key, ballInfo);
+
+            if (prevCache) {
+              const prev = prevCache.get(key);
+              if (prev && (
+                prev.runs !== ballInfo.runs ||
+                prev.is_wicket !== ballInfo.is_wicket ||
+                prev.four !== ballInfo.four ||
+                prev.six !== ballInfo.six ||
+                prev.noball !== ballInfo.noball
+              )) {
+                const overPrefix = String(b.ball).split(".")[0];
+                const overNumber = Number(overPrefix) + 1;
+                changedOvers.add(`${b.scoreboard}-${overNumber}`);
+                console.log(`[BallChange] ${match.team1Short} vs ${match.team2Short}: Ball ${key} changed — runs:${prev.runs}→${ballInfo.runs} wicket:${prev.is_wicket}→${ballInfo.is_wicket} four:${prev.four}→${ballInfo.four} six:${prev.six}→${ballInfo.six}`);
+              }
+            }
+          }
+
+          cachedBallData.set(match.id, newCache);
+
+          // Re-resolve affected predictions for completed overs only
+          if (changedOvers.size > 0) {
+            let reResolved = 0;
+            for (const overKey of changedOvers) {
+              const [inningsStr, overNumStr] = overKey.split("-");
+              const overNum = Number(overNumStr);
+              // Only re-resolve already-completed overs (not the current in-progress over)
+              if (overNum >= currentOver) continue;
+              const overStats = computeOverStats(currentBalls, overNum, inningsStr);
+
+              const affectedPreds = await Prediction.findAll({
+                where: { matchId: match.id, category: "per_over", overNumber: overNum, status: "resolved" },
+              });
+
+              for (const pred of affectedPreds) {
+                const newCorrectOption = resolveOverPredictionFromStats(pred, overStats);
+                if (newCorrectOption && newCorrectOption !== pred.correctOption) {
+                  const changed = await reResolvePrediction(pred, newCorrectOption, io);
+                  if (changed) reResolved++;
+                }
+              }
+            }
+            if (reResolved > 0) {
+              await recomputeParticipantScores({ matchId: match.id });
+              console.log(`[BallChange] Re-resolved ${reResolved} predictions for ${match.team1Short} vs ${match.team2Short}`);
+            }
+          }
+        }
+      } catch (ballChangeErr) {
+        console.error("[BallChange] Error in ball change detection:", ballChangeErr);
+      }
+    }
+
     // Use same formula as currentOver so "same over" detection is consistent
     const prevCurrentOver = !prevScore || prevScore.overs <= 0 ? 0 : Math.min(Math.floor(prevScore.overs) + 1, 20);
     if (prevScore && prevScore.innings === currentInnings && prevCurrentOver === currentOver) {
@@ -914,8 +994,8 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           const rivalryCalls = generateRivalryCalls(
             match.id, target, chasingTeamShort, chasingTeamPlayers
           );
-          // 8 minutes — enough for innings break; locked at first ball of innings 2
-          const rivalryExpiresAt = new Date(Date.now() + 480_000);
+          // 15 minutes — covers full IPL innings break; locked at first ball of innings 2
+          const rivalryExpiresAt = new Date(Date.now() + 900_000);
           for (const rc of rivalryCalls) {
             await Prediction.create({ ...rc, expiresAt: rivalryExpiresAt } as any);
           }
@@ -1399,15 +1479,20 @@ export async function repairPerOverPredictions(
       continue;
     }
 
-    const unresolvedPredictions = await Prediction.findAll({
+    // Include resolved predictions so we can detect and fix incorrect evaluations
+    const allPredictions = await Prediction.findAll({
       where: {
         matchId: match.id,
         category: "per_over",
-        status: ["open", "locked"],
+        status: ["open", "locked", "resolved"],
       },
       order: [["round", "ASC"], ["overNumber", "ASC"], ["createdAt", "ASC"]],
     });
 
+    const unresolvedPredictions = allPredictions.filter((p) => p.status !== "resolved");
+    const resolvedPredictions = allPredictions.filter((p) => p.status === "resolved");
+
+    // Resolve unresolved predictions as before
     const targets = new Map<number, Set<number>>();
     for (const pred of unresolvedPredictions) {
       predictionsChecked += 1;
@@ -1423,6 +1508,24 @@ export async function repairPerOverPredictions(
     for (const [innings, overs] of targets.entries()) {
       for (const over of Array.from(overs).sort((a, b) => a - b)) {
         correctedThisMatch += await resolveOverPredictionsForOver(match, innings, over, allBalls, io);
+      }
+    }
+
+    // Re-check resolved predictions for changed ball data
+    for (const pred of resolvedPredictions) {
+      predictionsChecked += 1;
+      const innings = getPredictionInnings(pred);
+      const over = pred.overNumber || 0;
+      if (over <= 0) continue;
+      const inningsStr = innings === 1 ? "S1" : "S2";
+      const overStats = computeOverStats(allBalls, over, inningsStr);
+      const newCorrectOption = resolveOverPredictionFromStats(pred, overStats);
+      if (newCorrectOption && newCorrectOption !== pred.correctOption) {
+        const changed = await reResolvePrediction(pred, newCorrectOption, io);
+        if (changed) {
+          correctedThisMatch += 1;
+          console.log(`[Sportsmonk Repair] Re-resolved prediction ${pred.id}: "${pred.question}" from "${pred.correctOption}" to "${newCorrectOption}"`);
+        }
       }
     }
 

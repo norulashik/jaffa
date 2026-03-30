@@ -193,6 +193,85 @@ export async function resolvePrediction(
   }
 }
 
+/**
+ * Re-resolve an already-resolved prediction when the correct answer changes
+ * (e.g., umpire review reversal, ball result update from API).
+ * Reverses old points and applies new ones for all user predictions.
+ */
+export async function reResolvePrediction(
+  prediction: Prediction,
+  newCorrectOption: string,
+  io: SocketIOServer
+): Promise<boolean> {
+  if (prediction.correctOption === newCorrectOption) return false;
+
+  const oldCorrectOption = prediction.correctOption;
+  console.log(
+    `[ReResolve] Prediction ${prediction.id}: "${prediction.question}" changing from "${oldCorrectOption}" to "${newCorrectOption}"`
+  );
+
+  // Update prediction with new correct answer
+  await prediction.update({ correctOption: newCorrectOption });
+
+  // Get all user predictions for this question
+  const userPredictions = await UserPrediction.findAll({
+    where: { predictionId: prediction.id },
+  });
+
+  for (const up of userPredictions) {
+    const participant = await MatchParticipant.findOne({
+      where: { userId: up.userId, matchId: up.matchId, venueId: up.venueId },
+    });
+    if (!participant) continue;
+
+    const oldWasCorrect = up.selectedOption === oldCorrectOption;
+    const newIsCorrect = up.selectedOption === newCorrectOption;
+
+    if (oldWasCorrect === newIsCorrect) continue; // No change for this user
+
+    const roundField = `round${prediction.round}Points` as string;
+    const currentRoundPts = (participant as unknown as Record<string, number>)[roundField] || 0;
+
+    if (oldWasCorrect && !newIsCorrect) {
+      // Was correct, now wrong — reverse points
+      const oldPoints = up.pointsEarned || 0;
+      const penalty = up.boostType === "all_in" ? ALL_IN_PENALTY : 0;
+      await up.update({ isCorrect: false, pointsEarned: penalty } as any);
+      await participant.update({
+        totalPoints: Math.max(0, participant.totalPoints - oldPoints + penalty),
+        [roundField]: Math.max(0, currentRoundPts - oldPoints + penalty),
+        correctPredictions: Math.max(0, participant.correctPredictions - 1),
+      } as Partial<MatchParticipant>);
+    } else if (!oldWasCorrect && newIsCorrect) {
+      // Was wrong, now correct — apply points
+      const result = calculatePoints(prediction, up.selectedOption, up.boostType, participant.currentStreak);
+      const oldPenalty = up.pointsEarned || 0; // negative if all-in penalty was applied
+      await up.update({ isCorrect: true, pointsEarned: result.totalPoints } as any);
+      await participant.update({
+        totalPoints: participant.totalPoints - oldPenalty + result.totalPoints,
+        [roundField]: currentRoundPts - oldPenalty + result.totalPoints,
+        correctPredictions: participant.correctPredictions + 1,
+      } as Partial<MatchParticipant>);
+    }
+  }
+
+  // Emit updates to frontends
+  const venues = [...new Set(userPredictions.map((up) => up.venueId))];
+  for (const venueId of venues) {
+    io.to(`venue:${venueId}:${prediction.matchId}`).emit("predictionResolved", {
+      matchId: prediction.matchId,
+      predictionId: prediction.id,
+      correctOption: newCorrectOption,
+      reResolved: true,
+    });
+    io.to(`venue:${venueId}:${prediction.matchId}`).emit("leaderboardUpdate", {
+      round: prediction.round,
+    });
+  }
+
+  return true;
+}
+
 function initialRoundPoints(): Record<string, number> {
   return {
     round1Points: 0,

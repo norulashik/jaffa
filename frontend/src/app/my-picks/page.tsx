@@ -27,6 +27,7 @@ export default function MyPicksPage() {
   const router = useRouter();
   const [predictions, setPredictions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeFilter, setActiveFilter] = useState<"correct" | "wrong" | "all" | "pending">("all");
 
   const matchId = state.matchId || (typeof window !== "undefined" ? localStorage.getItem("jaffa_match_id") : null);
   const venueId = state.venueId || (typeof window !== "undefined" ? localStorage.getItem("jaffa_venue_id") : null);
@@ -124,37 +125,58 @@ export default function MyPicksPage() {
           </div>
         ) : (
           <>
-            {/* Stats summary */}
+            {/* Filter buttons */}
             <div className="grid grid-cols-4 gap-2 mb-6">
-              <div className="card-green p-3 text-center">
+              <button
+                onClick={() => setActiveFilter("correct")}
+                className={`p-3 text-center cursor-pointer transition-all ${activeFilter === "correct" ? "card-green ring-2 ring-[#22c55e]" : "card-green"}`}
+              >
                 <div className="stat-number text-xl" style={{ color: "#22c55e" }}>
                   {correctCount}
                 </div>
                 <div className="text-[10px] text-[#6b7280] uppercase tracking-widest font-bold">Correct</div>
-              </div>
-              <div className="card-orange p-3 text-center">
+              </button>
+              <button
+                onClick={() => setActiveFilter("wrong")}
+                className={`p-3 text-center cursor-pointer transition-all ${activeFilter === "wrong" ? "card-orange ring-2 ring-[#ff6341]" : "card-orange"}`}
+              >
                 <div className="stat-number text-xl" style={{ color: "#ff6341" }}>
                   {wrongCount}
                 </div>
                 <div className="text-[10px] text-[#6b7280] uppercase tracking-widest font-bold">Wrong</div>
-              </div>
-              <div className="card-yellow p-3 text-center">
+              </button>
+              <button
+                onClick={() => setActiveFilter("all")}
+                className={`p-3 text-center cursor-pointer transition-all ${activeFilter === "all" ? "game-card ring-2 ring-[#ff6341]" : "game-card"}`}
+              >
+                <div className="stat-number text-xl" style={{ color: "#ffffff" }}>
+                  {allPicks.length}
+                </div>
+                <div className="text-[10px] text-[#6b7280] uppercase tracking-widest font-bold">All</div>
+              </button>
+              <button
+                onClick={() => setActiveFilter("pending")}
+                className={`p-3 text-center cursor-pointer transition-all ${activeFilter === "pending" ? "card-yellow ring-2 ring-[#ffd60a]" : "card-yellow"}`}
+              >
                 <div className="stat-number text-xl" style={{ color: "#ffd60a" }}>
                   {pendingCount}
                 </div>
                 <div className="text-[10px] text-[#6b7280] uppercase tracking-widest font-bold">Pending</div>
-              </div>
-              <div className="game-card p-3 text-center">
-                <div className="stat-number text-xl" style={{ color: "#6b7280" }}>
-                  {missedCount}
-                </div>
-                <div className="text-[10px] text-[#6b7280] uppercase tracking-widest font-bold">Missed</div>
-              </div>
+              </button>
             </div>
 
-            {/* All picks */}
+            {/* Filtered picks */}
             <div className="space-y-3">
-              {allPicks.map((pred: any) => {
+              {allPicks.filter((pred: any) => {
+                const selectedKey = pred.userAnswer?.selectedOption;
+                const isClosed = pred.status === "resolved";
+                switch (activeFilter) {
+                  case "correct": return isClosed && selectedKey && selectedKey === pred.correctOption;
+                  case "wrong": return isClosed && selectedKey && selectedKey !== pred.correctOption;
+                  case "pending": return selectedKey && !isClosed;
+                  case "all": return true;
+                }
+              }).map((pred: any) => {
                 const selectedKey = pred.userAnswer?.selectedOption;
                 const isMissed = !selectedKey;
                 const selectedLabel = isMissed ? null : getOptionLabel(pred, selectedKey);
