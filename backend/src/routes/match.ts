@@ -243,11 +243,14 @@ router.get("/:matchId/balls", async (req: Request, res: Response): Promise<void>
     const sd = (match.scoreData as Record<string, unknown>) || {};
     const currentInnings = (sd.currentInnings as number) || 1;
 
-    // Collect all stored over ball chips into an ordered array
+    // Collect all stored over ball chips into an ordered array (completed overs only)
     const overs: { overNumber: number; innings: number; balls: { label: string; type: string }[] }[] = [];
+    const currentOver = (sd.currentOver as number) || 1;
     for (let inn = 1; inn <= currentInnings; inn++) {
       const maxOvers = 20;
       for (let ov = 1; ov <= maxOvers; ov++) {
+        // Don't return the current in-progress over for the current innings
+        if (inn === currentInnings && ov >= currentOver) continue;
         const key = `innings${inn}_over${ov}_balls`;
         if (sd[key]) {
           overs.push({ overNumber: ov, innings: inn, balls: sd[key] as { label: string; type: string }[] });
