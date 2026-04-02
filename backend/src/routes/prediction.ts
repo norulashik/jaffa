@@ -23,13 +23,19 @@ router.get("/:matchId", authenticateUser, async (req: AuthRequest, res: Response
       order: [["createdAt", "ASC"]],
     });
 
+    // Hide predictions that haven't opened yet
+    const now = new Date();
+    const visible = predictions.filter(
+      (p) => !p.opensAt || new Date(p.opensAt) <= now
+    );
+
     const userAnswers = await UserPrediction.findAll({
       where: { userId, matchId, venueId },
     });
 
     const answeredMap = new Map(userAnswers.map((a) => [a.predictionId, a]));
 
-    const result = predictions.map((p) => ({
+    const result = visible.map((p) => ({
       ...p.toJSON(),
       userAnswer: answeredMap.get(p.id)?.toJSON() || null,
     }));
@@ -56,6 +62,11 @@ router.post("/:predictionId/answer", authenticateUser, async (req: AuthRequest, 
 
     if (prediction.status !== "open") {
       res.status(400).json({ error: "Prediction is no longer open" });
+      return;
+    }
+
+    if (prediction.opensAt && new Date() < new Date(prediction.opensAt)) {
+      res.status(400).json({ error: "Prediction is not yet available" });
       return;
     }
 

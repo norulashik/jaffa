@@ -698,17 +698,19 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           await Prediction.create({ ...hotTake, expiresAt: hotTakeExpiresAt } as any);
         }
 
-        // Lock all pre-match predictions — match is now live
-        const preMatchPreds = await Prediction.findAll({
-          where: { matchId: match.id, category: "pre_match", status: "open" },
+        // Toss detected: lock toss question, unlock the other 3 pre-match questions
+        const allPreMatch = await Prediction.findAll({
+          where: { matchId: match.id, category: "pre_match" },
         });
-        for (const pred of preMatchPreds) {
-          await pred.update({ status: "locked" });
+        for (const pred of allPreMatch) {
+          if (pred.question.toLowerCase().includes("toss")) {
+            await pred.update({ status: "locked" });
+          } else if (pred.status === "locked") {
+            await pred.update({ status: "open" });
+          }
         }
-        if (preMatchPreds.length > 0) {
-          io.emit("predictionsLocked", { matchId: match.id, type: "pre_match" });
-          console.log(`[Sportsmonk] Locked ${preMatchPreds.length} pre-match predictions (match going live)`);
-        }
+        io.emit("tossLocked", { matchId: match.id });
+        console.log(`[Sportsmonk] Toss locked; match winner / sixes / first wicket now open`);
 
         io.emit("newPrediction", { matchId: match.id, type: "per_over", overNumber: 1, round: 1 });
         io.emit("matchStarted", { matchId: match.id });

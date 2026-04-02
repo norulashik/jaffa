@@ -377,7 +377,7 @@ export default function HomeLiveMatches() {
                 </div>
               </div>
 
-              {startDate && (startDate.getTime() - now) <= 30 * 60 * 1000 ? (
+              {startDate && (startDate.getTime() - now) <= 45 * 60 * 1000 ? (
                 <button
                   onClick={() => handleJoin(match)}
                   disabled={importing === match.id}

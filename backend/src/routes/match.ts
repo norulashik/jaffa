@@ -141,15 +141,19 @@ router.post("/import/:fixtureId", async (req: Request, res: Response): Promise<v
       await Prediction.create(q as any);
     }
 
-    // Set toss question to expire 30 min before match start
+    // Pre-match question timing (same as admin.ts):
+    // - Toss question: opens 45 min before match, locked when toss is detected by Sportsmonk
+    // - Other 3 (winner, sixes, first wicket): start locked, unlocked after toss is detected
     if (match.startTime) {
-      const tossLockTime = new Date(new Date(match.startTime).getTime() - 30 * 60_000);
-      const tossPreds = await Prediction.findAll({
+      const opensAt = new Date(new Date(match.startTime).getTime() - 45 * 60_000);
+      const preMatchPreds = await Prediction.findAll({
         where: { matchId: match.id, category: "pre_match" },
       });
-      for (const pred of tossPreds) {
+      for (const pred of preMatchPreds) {
         if (pred.question.toLowerCase().includes("toss")) {
-          await pred.update({ expiresAt: tossLockTime });
+          await pred.update({ opensAt });
+        } else {
+          await pred.update({ status: "locked", opensAt });
         }
       }
     }

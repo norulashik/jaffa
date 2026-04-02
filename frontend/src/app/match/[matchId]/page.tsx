@@ -122,25 +122,21 @@ export default function MatchDashboard() {
           }
         }
 
-        // Check for unanswered pre-match questions (only if match hasn't started yet)
-        const isPreMatch = !match.status || match.status === "upcoming" || match.currentPhase === "pre_match";
-        if (isPreMatch) {
-          try {
-            const preds = await api.getPredictions(matchId, venueId, 0);
-            const unanswered = (preds || []).filter(
-              (p: any) => p.category === "pre_match" && !p.userAnswer && p.status === "open"
-            );
-            if (unanswered.length > 0) {
-              setPreMatchPredictions(unanswered);
-              setPhase("prematch");
-            } else {
-              setPhase("live");
-            }
-          } catch {
+        // Always check for unanswered open pre-match questions first.
+        // Even if match is already "live" (toss done), the 3 non-toss questions
+        // may have just been unlocked and the user hasn't answered them yet.
+        try {
+          const preds = await api.getPredictions(matchId, venueId, 0);
+          const unanswered = (preds || []).filter(
+            (p: any) => p.category === "pre_match" && !p.userAnswer && p.status === "open"
+          );
+          if (unanswered.length > 0) {
+            setPreMatchPredictions(unanswered);
+            setPhase("prematch");
+          } else {
             setPhase("live");
           }
-        } else {
-          // Match already live — skip pre-match questions, go straight to live dashboard
+        } catch {
           setPhase("live");
         }
       } catch {
@@ -151,6 +147,58 @@ export default function MatchDashboard() {
 
     initMatch();
   }, [matchId, venueId]);
+
+  // Phase 2: In prematch, listen for toss detection to reload unlocked questions
+  useEffect(() => {
+    if (phase !== "prematch" || !venueId || !matchId) return;
+
+    const socket = connectSocket();
+    joinVenueMatch(venueId, matchId);
+
+    // Toss detected: lock toss question, show the 3 newly unlocked questions
+    socket.on("tossLocked", async (data: any) => {
+      if (data.matchId !== matchId) return;
+      try {
+        const preds = await api.getPredictions(matchId, venueId, 0);
+        const unanswered = (preds || []).filter(
+          (p: any) => p.category === "pre_match" && !p.userAnswer && p.status === "open"
+        );
+        if (unanswered.length > 0) {
+          setPreMatchPredictions(unanswered);
+          setCurrentCardIndex(0);
+        } else {
+          setPhase("live");
+        }
+      } catch {
+        setPhase("live");
+      }
+    });
+
+    // First ball bowled or match manually started — all pre-match questions are now locked
+    const handleMatchOver = () => setPhase("live");
+    socket.on("matchStarted", (data: any) => {
+      if (data.matchId === matchId) handleMatchOver();
+    });
+    socket.on("predictionsLocked", async (data: any) => {
+      if (data.matchId !== matchId) return;
+      // Re-check: if no open pre-match questions remain, leave prematch phase
+      try {
+        const preds = await api.getPredictions(matchId, venueId, 0);
+        const stillOpen = (preds || []).filter(
+          (p: any) => p.category === "pre_match" && !p.userAnswer && p.status === "open"
+        );
+        if (stillOpen.length === 0) setPhase("live");
+      } catch {
+        setPhase("live");
+      }
+    });
+
+    return () => {
+      socket.off("tossLocked");
+      socket.off("matchStarted");
+      socket.off("predictionsLocked");
+    };
+  }, [phase, matchId, venueId]);
 
   // Phase 3: Connect socket when entering live phase
   useEffect(() => {
@@ -308,8 +356,21 @@ export default function MatchDashboard() {
           if (currentCardIndex < preMatchPredictions.length - 1) {
             setCurrentCardIndex((prev) => prev + 1);
           } else {
-            // All pre-match questions answered — go to live
-            setPhase("live");
+            // All current cards answered — re-fetch in case toss just unlocked 3 more questions
+            try {
+              const preds = await api.getPredictions(matchId, venueId, 0);
+              const unanswered = (preds || []).filter(
+                (p: any) => p.category === "pre_match" && !p.userAnswer && p.status === "open"
+              );
+              if (unanswered.length > 0) {
+                setPreMatchPredictions(unanswered);
+                setCurrentCardIndex(0);
+              } else {
+                setPhase("live");
+              }
+            } catch {
+              setPhase("live");
+            }
           }
         }, 300);
       }, 600);

@@ -14,12 +14,13 @@ interface PredictionAttributes {
   options: { key: string; label: string; points: number }[];
   correctOption?: string;
   status: PredictionStatus;
+  opensAt?: Date;
   expiresAt?: Date;
   createdAt?: Date;
   updatedAt?: Date;
 }
 
-interface PredictionCreationAttributes extends Optional<PredictionAttributes, "id" | "correctOption" | "status" | "overNumber" | "expiresAt"> {}
+interface PredictionCreationAttributes extends Optional<PredictionAttributes, "id" | "correctOption" | "status" | "overNumber" | "opensAt" | "expiresAt"> {}
 
 class Prediction extends Model<PredictionAttributes, PredictionCreationAttributes> implements PredictionAttributes {
   public id!: string;
@@ -31,6 +32,7 @@ class Prediction extends Model<PredictionAttributes, PredictionCreationAttribute
   public options!: { key: string; label: string; points: number }[];
   public correctOption!: string;
   public status!: PredictionStatus;
+  public opensAt!: Date;
   public expiresAt!: Date;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -76,6 +78,10 @@ Prediction.init(
     status: {
       type: DataTypes.STRING(10),
       defaultValue: "open",
+    },
+    opensAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
     },
     expiresAt: {
       type: DataTypes.DATE,
