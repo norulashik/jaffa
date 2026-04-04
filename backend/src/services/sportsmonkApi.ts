@@ -1,6 +1,12 @@
 import { Match, Prediction, MatchParticipant } from "../models";
 import { generatePerOverPredictions, generateHotTake, generateRivalryCalls, getCurrentRound } from "./predictionEngine";
-import { resolvePrediction, reResolvePrediction, generateRoundRewards, recomputeParticipantScores } from "./pointsEngine";
+import {
+  ALL_CORRECT_OPTION,
+  resolvePrediction,
+  reResolvePrediction,
+  generateRoundRewards,
+  recomputeParticipantScores,
+} from "./pointsEngine";
 import { Server as SocketIOServer } from "socket.io";
 
 const API_BASE = "https://cricket.sportmonks.com/api/v2.0";
@@ -103,6 +109,7 @@ interface BallData {
 
 interface OverStats {
   runs: number;
+  extras: number;
   wickets: number;
   sixes: number;
   boundaries: number;
@@ -261,6 +268,18 @@ function resolveDismissalType(scoreName?: string | null): string | null {
   if (normalized.includes("catch")) return "caught";
 
   return null;
+}
+
+function getBallTotalRuns(ball: BallData): number {
+  const score = ball.score;
+  const isWide = score.name?.toLowerCase().includes("wide");
+  return (
+    (score.runs || 0) +
+    (score.bye || 0) +
+    (score.leg_bye || 0) +
+    (score.noball > 0 ? 1 : 0) +
+    (isWide ? 1 : 0)
+  );
 }
 
 async function getTrackingSeed(match: Match): Promise<{ innings: number; over: number; resolved: number }> {
@@ -564,6 +583,7 @@ function computeOverStats(balls: BallData[], overNumber: number, innings: string
   );
 
   let runs = 0;
+  let extras = 0;
   let wickets = 0;
   let sixes = 0;
   let boundaries = 0;
@@ -583,10 +603,13 @@ function computeOverStats(balls: BallData[], overNumber: number, innings: string
 
     // s.runs = bat runs; extras (wides, noballs, byes, leg byes) are in separate fields
     const isWide = s.name?.toLowerCase().includes("wide");
-    const extraRuns = (s.bye || 0) + (s.leg_bye || 0)
-      + (s.noball > 0 ? 1 : 0)   // noball penalty run
-      + (isWide ? 1 : 0);         // wide penalty run
-    runs += s.runs + extraRuns;
+    const extraRuns =
+      (s.bye || 0) +
+      (s.leg_bye || 0) +
+      (s.noball > 0 ? 1 : 0) +
+      (isWide ? 1 : 0);
+    runs += getBallTotalRuns(b);
+    extras += extraRuns;
 
     if (s.is_wicket || b.batsmanout_id) wickets++;
     if (s.six) { sixes++; boundaries++; }
@@ -601,7 +624,7 @@ function computeOverStats(balls: BallData[], overNumber: number, innings: string
   // Last legal ball
   if (legalBalls.length > 0) {
     const lastBall = legalBalls[legalBalls.length - 1];
-    lastBallRuns = lastBall.score.runs;
+    lastBallRuns = getBallTotalRuns(lastBall);
     lastBallWicket = lastBall.score.is_wicket || lastBall.batsmanout_id !== null;
   }
 
@@ -613,6 +636,7 @@ function computeOverStats(balls: BallData[], overNumber: number, innings: string
 
   return {
     runs,
+    extras,
     wickets,
     sixes,
     boundaries,
@@ -1245,11 +1269,13 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           for (const b of allBalls) {
             if (b.scoreboard !== "S1") continue;
             const overIdx = Math.floor(b.ball);
-            if (overIdx < 3) first3 += b.score?.runs || 0;
-            else if (overIdx < 6) last3 += b.score?.runs || 0;
+            const ballRuns = getBallTotalRuns(b);
+            if (overIdx < 3) first3 += ballRuns;
+            else if (overIdx < 6) last3 += ballRuns;
           }
-          const correctOption = first3 >= last3 ? "first_3" : "last_3";
-          await resolvePrediction(pred, correctOption, io);
+    const correctOption =
+      first3 > last3 ? "first_3" : last3 > first3 ? "last_3" : ALL_CORRECT_OPTION;
+    await resolvePrediction(pred, correctOption, io);
           console.log(`[Sportsmonk] Catch-up resolved: "${pred.question}" → ${correctOption}`);
         }
       }
@@ -1519,9 +1545,8 @@ export function resolveOverPredictionFromStats(prediction: Prediction, stats: Ov
   }
 
   if (q.includes("how many extras")) {
-    const extras = stats.wides + stats.noballs;
-    if (extras === 0) return "none";
-    if (extras <= 2) return "one_two";
+    if (stats.extras === 0) return "none";
+    if (stats.extras <= 2) return "one_two";
     return "three_plus";
   }
 
@@ -1651,7 +1676,7 @@ function resolvePreMatchPrediction(
 ): string | null {
   const q = prediction.question.toLowerCase();
   // Q1: "Who wins tonight?"
-  if (q.includes("who wins")) {
+  if (q.includes("who wins") && !q.includes("toss")) {
     const winnerTeamId = fixture.winner_team_id;
     if (!winnerTeamId) return null;
 
@@ -1778,7 +1803,7 @@ function resolveEndOfMatchPrediction(
   if (q.includes("last over")) {
     const inn2 = runs.find((r: any) => r.inning === 2);
     if (!inn2) return "no";
-    return inn2.overs >= 19 ? "yes" : "no";
+    return inn2.overs > 19 ? "yes" : "no";
   }
 
   // "How many wickets fall in the chase by over 15?"
@@ -1803,10 +1828,11 @@ function resolveEndOfMatchPrediction(
     for (const b of allBalls) {
       if (b.scoreboard !== "S1") continue;
       const overIdx = Math.floor(b.ball);
-      if (overIdx < 3) first3 += b.score?.runs || 0;
-      else if (overIdx < 6) last3 += b.score?.runs || 0;
+      const ballRuns = getBallTotalRuns(b);
+      if (overIdx < 3) first3 += ballRuns;
+      else if (overIdx < 6) last3 += ballRuns;
     }
-    return first3 >= last3 ? "first_3" : "last_3";
+    return first3 > last3 ? "first_3" : last3 > first3 ? "last_3" : ALL_CORRECT_OPTION;
   }
 
   // "Biggest over in the death — how many runs?"
@@ -1818,7 +1844,7 @@ function resolveEndOfMatchPrediction(
       for (const b of allBalls) {
         if (b.scoreboard !== "S2") continue;
         if (String(b.ball).split(".")[0] === prefix) {
-          overRuns += b.score?.runs || 0;
+          overRuns += getBallTotalRuns(b);
         }
       }
       maxOverRuns = Math.max(maxOverRuns, overRuns);
@@ -1847,7 +1873,7 @@ function resolveEndOfMatchPrediction(
     let ppRuns = 0;
     for (const b of allBalls) {
       if (b.scoreboard !== "S2") continue;
-      if (Math.floor(b.ball) < 6) ppRuns += b.score?.runs || 0;
+      if (Math.floor(b.ball) < 6) ppRuns += getBallTotalRuns(b);
     }
     if (ppRuns < 30) return "under_30";
     if (ppRuns <= 45) return "30_45";

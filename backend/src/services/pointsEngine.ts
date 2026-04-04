@@ -4,6 +4,7 @@ import { Server as SocketIOServer } from "socket.io";
 const BOOST_MULTIPLIER = 2;
 const ALL_IN_MULTIPLIER = 3;
 const ALL_IN_PENALTY = -30;
+export const ALL_CORRECT_OPTION = "__all__";
 
 function getStreakBonus(streak: number): number {
   let bonus = 0;
@@ -33,13 +34,29 @@ export interface RecomputeSummary {
   userPredictionsRecomputed: number;
 }
 
+function isAllCorrectPrediction(prediction: Prediction): boolean {
+  return prediction.correctOption === ALL_CORRECT_OPTION;
+}
+
+function isSelectedOptionCorrect(prediction: Prediction, selectedOption: string): boolean {
+  return isAllCorrectPrediction(prediction) || prediction.correctOption === selectedOption;
+}
+
+function getResolvedLabel(prediction: Prediction, correctOption: string): string {
+  if (correctOption === ALL_CORRECT_OPTION) {
+    return "Tie - all answers correct";
+  }
+
+  return prediction.options.find((o) => o.key === correctOption)?.label || correctOption;
+}
+
 export function calculatePoints(
   prediction: Prediction,
   selectedOption: string,
   boostType: string,
   currentStreak: number
 ): PointsResult {
-  const isCorrect = prediction.correctOption === selectedOption;
+  const isCorrect = isSelectedOptionCorrect(prediction, selectedOption);
   const option = prediction.options.find((o) => o.key === selectedOption);
   const basePoints = option?.points || 0;
 
@@ -164,7 +181,7 @@ export async function resolvePrediction(
   const venues = [...new Set(userPredictions.map((up) => up.venueId))];
   for (const venueId of venues) {
     const venueAnswers = userPredictions.filter((up) => up.venueId === venueId);
-    const venueCorrect = venueAnswers.filter((up) => up.selectedOption === correctOption).length;
+    const venueCorrect = venueAnswers.filter((up) => isSelectedOptionCorrect(prediction, up.selectedOption)).length;
     const venueTotal = venueAnswers.length;
 
     io.to(`venue:${venueId}:${prediction.matchId}`).emit("predictionPulse", {
@@ -172,7 +189,7 @@ export async function resolvePrediction(
       matchId: prediction.matchId,
       question: prediction.question,
       correctOption,
-      correctLabel: prediction.options.find((o) => o.key === correctOption)?.label || correctOption,
+      correctLabel: getResolvedLabel(prediction, correctOption),
       totalAnswered: venueTotal,
       correctCount: venueCorrect,
       correctPercentage: venueTotal > 0 ? Math.round((venueCorrect / venueTotal) * 100) : 0,
@@ -210,8 +227,10 @@ export async function reResolvePrediction(
   });
 
   const changed = userPredictions.some((up) => {
-    const oldWasCorrect = up.selectedOption === oldCorrectOption;
-    const newIsCorrect = up.selectedOption === newCorrectOption;
+    const oldWasCorrect =
+      oldCorrectOption === ALL_CORRECT_OPTION || up.selectedOption === oldCorrectOption;
+    const newIsCorrect =
+      newCorrectOption === ALL_CORRECT_OPTION || up.selectedOption === newCorrectOption;
     return oldWasCorrect !== newIsCorrect;
   });
 
