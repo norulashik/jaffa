@@ -142,19 +142,15 @@ router.post("/import/:fixtureId", async (req: Request, res: Response): Promise<v
     }
 
     // Pre-match question timing (same as admin.ts):
-    // - Toss question: opens 45 min before match, locked when toss is detected by Sportsmonk
-    // - Other 3 (winner, sixes, first wicket): start locked, unlocked after toss is detected
+    // - All 4 questions open together 45 minutes before match time
+    // - Toss question locks when toss is detected; the other 3 stay open until first ball
     if (match.startTime) {
       const opensAt = new Date(new Date(match.startTime).getTime() - 45 * 60_000);
       const preMatchPreds = await Prediction.findAll({
         where: { matchId: match.id, category: "pre_match" },
       });
       for (const pred of preMatchPreds) {
-        if (pred.question.toLowerCase().includes("toss")) {
-          await pred.update({ opensAt });
-        } else {
-          await pred.update({ status: "locked", opensAt });
-        }
+        await pred.update({ opensAt });
       }
     }
 
@@ -252,18 +248,17 @@ router.get("/:matchId/balls", async (req: Request, res: Response): Promise<void>
     const sd = (match.scoreData as Record<string, unknown>) || {};
     const currentInnings = (sd.currentInnings as number) || 1;
 
-    // Collect all stored over ball chips into an ordered array (completed overs only)
+    // Collect all stored over ball chips into an ordered array (oldest to newest).
     const overs: { overNumber: number; innings: number; balls: { label: string; type: string }[] }[] = [];
     const currentOver = (sd.currentOver as number) || 1;
     for (let inn = 1; inn <= currentInnings; inn++) {
       const maxOvers = 20;
       for (let ov = 1; ov <= maxOvers; ov++) {
-        // Don't return the current in-progress over for the current innings
-        if (inn === currentInnings && ov >= currentOver) continue;
         const key = `innings${inn}_over${ov}_balls`;
         if (sd[key]) {
           overs.push({ overNumber: ov, innings: inn, balls: sd[key] as { label: string; type: string }[] });
         }
+        if (inn === currentInnings && ov >= currentOver) break;
       }
     }
 

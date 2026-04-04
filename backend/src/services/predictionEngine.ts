@@ -78,6 +78,12 @@ export function generatePreMatchPredictions(
           team: team2Short,
           color: IPL_TEAM_COLORS[team2Short] || "#3b82f6",
         },
+        {
+          key: "tie",
+          label: "Tie — same number of sixes",
+          points: 25,
+          color: "#94a3b8",
+        },
       ],
     },
     // Q4: First wicket — how does it fall?

@@ -6,6 +6,61 @@ import { generateAvatarConfig } from "../utils/avatarGenerator";
 
 const router = Router();
 
+// Direct phone login/register (no OTP)
+router.post("/phone-login", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { phone, displayName } = req.body;
+
+    if (!phone || !/^\+?[0-9]{10,15}$/.test(phone)) {
+      res.status(400).json({ error: "Invalid phone number" });
+      return;
+    }
+
+    let user = await User.findOne({ where: { phone } });
+    let isNewUser = false;
+
+    if (!user) {
+      if (!displayName || !String(displayName).trim()) {
+        res.status(400).json({ error: "Nickname is required for new users" });
+        return;
+      }
+
+      const avatarConfig = JSON.stringify(generateAvatarConfig(phone));
+      user = await User.create({
+        phone,
+        displayName: String(displayName).trim(),
+        avatarConfig,
+      });
+      isNewUser = true;
+    }
+
+    if (!user.avatarConfig) {
+      const avatarConfig = JSON.stringify(generateAvatarConfig(user.id));
+      await user.update({ avatarConfig });
+    }
+
+    const token = jwt.sign(
+      { userId: user.id, type: "user" },
+      process.env.JWT_SECRET || "dev-secret",
+      { expiresIn: "30d" }
+    );
+
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        phone: user.phone,
+        displayName: user.displayName,
+        avatarConfig: user.avatarConfig ? JSON.parse(user.avatarConfig) : null,
+      },
+      isNewUser,
+    });
+  } catch (error) {
+    console.error("Phone login error:", error);
+    res.status(500).json({ error: "Login failed" });
+  }
+});
+
 // Send OTP (mock for dev, real service for prod)
 router.post("/send-otp", async (req: Request, res: Response): Promise<void> => {
   try {

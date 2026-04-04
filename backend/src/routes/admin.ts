@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { Match, Prediction, MatchParticipant, Venue, User, Reward, MatchCode } from "../models";
 import { authenticateVenue, AuthRequest } from "../middleware/auth";
+import { UniqueConstraintError } from "sequelize";
 import {
   generatePreMatchPredictions,
   generatePerOverPredictions,
@@ -44,19 +45,15 @@ router.post("/match", async (req: any, res: Response): Promise<void> => {
     }
 
     // Pre-match question timing:
-    // - Toss question: opens 45 min before match, locked when toss is detected by Sportsmonk
-    // - Other 3 (winner, sixes, first wicket): start locked, unlocked after toss is detected
+    // - All 4 questions open together 45 minutes before match time
+    // - Toss question locks when toss is detected; the other 3 stay open until first ball
     if (startTime) {
       const opensAt = new Date(new Date(startTime).getTime() - 45 * 60_000);
       const preMatchPreds = await Prediction.findAll({
         where: { matchId: match.id, category: "pre_match" },
       });
       for (const pred of preMatchPreds) {
-        if (pred.question.toLowerCase().includes("toss")) {
-          await pred.update({ opensAt });
-        } else {
-          await pred.update({ status: "locked", opensAt });
-        }
+        await pred.update({ opensAt });
       }
     }
 
@@ -669,19 +666,15 @@ router.post("/cricket/import/:fixtureId", async (req: any, res: Response): Promi
     }
 
     // Pre-match question timing (same as admin.ts POST /match):
-    // - Toss question: opens 45 min before match, locked when toss detected by Sportsmonk
-    // - Other 3 (winner, sixes, first wicket): start locked, unlocked after toss detected
+    // - All 4 questions open together 45 minutes before match time
+    // - Toss question locks when toss is detected; the other 3 stay open until first ball
     if (match.startTime) {
       const opensAt = new Date(new Date(match.startTime).getTime() - 45 * 60_000);
       const preMatchPreds = await Prediction.findAll({
         where: { matchId: match.id, category: "pre_match" },
       });
       for (const pred of preMatchPreds) {
-        if (pred.question.toLowerCase().includes("toss")) {
-          await pred.update({ opensAt });
-        } else {
-          await pred.update({ status: "locked", opensAt });
-        }
+        await pred.update({ opensAt });
       }
     }
 
@@ -732,23 +725,36 @@ router.post("/match-code", authenticateVenue, async (req: AuthRequest, res: Resp
       return;
     }
 
-    // Return existing active code — never regenerate automatically
-    const existing = await MatchCode.findOne({ where: { venueId, matchId, isActive: true } });
-    if (existing) {
-      res.json({ matchCode: { id: existing.id, code: existing.code, matchId, isActive: true } });
-      return;
-    }
-
-    // Generate random 4-digit code (only if none exists yet)
     const code = String(Math.floor(1000 + Math.random() * 9000));
 
-    const matchCode = await MatchCode.create({
-      venueId,
-      matchId,
-      code,
-    });
+    try {
+      const [matchCode, created] = await MatchCode.findOrCreate({
+        where: { venueId, matchId, isActive: true },
+        defaults: {
+          venueId,
+          matchId,
+          code,
+          isActive: true,
+        },
+      });
 
-    res.status(201).json({ matchCode: { id: matchCode.id, code: matchCode.code, matchId, isActive: true } });
+      res.status(created ? 201 : 200).json({
+        matchCode: { id: matchCode.id, code: matchCode.code, matchId, isActive: true },
+      });
+      return;
+    } catch (error) {
+      if (error instanceof UniqueConstraintError) {
+        const existing = await MatchCode.findOne({
+          where: { venueId, matchId, isActive: true },
+          order: [["createdAt", "DESC"]],
+        });
+        if (existing) {
+          res.json({ matchCode: { id: existing.id, code: existing.code, matchId, isActive: true } });
+          return;
+        }
+      }
+      throw error;
+    }
   } catch (error) {
     console.error("Generate match code error:", error);
     res.status(500).json({ error: "Failed to generate code" });

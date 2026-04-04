@@ -51,6 +51,8 @@ const stagger = {
 /*  MAIN COMPONENT                                                     */
 /* ================================================================== */
 export default function AdminDashboard() {
+  type MatchCodeStatus = "loading" | "ready" | "empty";
+
   /* ── auth state ── */
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [token, setToken] = useState("");
@@ -61,6 +63,7 @@ export default function AdminDashboard() {
   const [rewards, setRewards] = useState<any[]>([]);
   const [matches, setMatches] = useState<any[]>([]);
   const [matchCodes, setMatchCodes] = useState<Record<string, string>>({});
+  const [matchCodeStatus, setMatchCodeStatus] = useState<Record<string, MatchCodeStatus>>({});
   const [matchPlayers, setMatchPlayers] = useState<Record<string, number>>({});
   const [generatingCode, setGeneratingCode] = useState<string | null>(null);
 
@@ -138,6 +141,7 @@ export default function AdminDashboard() {
 
   const loadMatchCode = useCallback(
     async (matchId: string) => {
+      setMatchCodeStatus((prev) => ({ ...prev, [matchId]: "loading" }));
       try {
         const res = await apiFetch(`${API_URL}/admin/match-code/${matchId}`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -146,9 +150,19 @@ export default function AdminDashboard() {
           const data = await res.json();
           if (data.matchCode) {
             setMatchCodes((prev) => ({ ...prev, [matchId]: data.matchCode.code }));
+            setMatchCodeStatus((prev) => ({ ...prev, [matchId]: "ready" }));
+          } else {
+            setMatchCodes((prev) => {
+              const next = { ...prev };
+              delete next[matchId];
+              return next;
+            });
+            setMatchCodeStatus((prev) => ({ ...prev, [matchId]: "empty" }));
           }
         }
-      } catch {}
+      } catch {
+        setMatchCodeStatus((prev) => ({ ...prev, [matchId]: "empty" }));
+      }
     },
     [token]
   );
@@ -176,6 +190,13 @@ export default function AdminDashboard() {
       if (res.ok) {
         const data = await res.json();
         setMatches(data || []);
+        setMatchCodeStatus((prev) => {
+          const next: Record<string, MatchCodeStatus> = {};
+          for (const match of data || []) {
+            next[match.id] = prev[match.id] === "ready" ? "ready" : "loading";
+          }
+          return next;
+        });
         for (const m of data || []) {
           loadMatchCode(m.id);
           loadPlayerCount(m.id);
@@ -298,6 +319,7 @@ export default function AdminDashboard() {
     setRewards([]);
     setMatches([]);
     setMatchCodes({});
+    setMatchCodeStatus({});
     setMatchPlayers({});
     toast("Logged out");
   };
@@ -307,6 +329,7 @@ export default function AdminDashboard() {
   /* ================================================================ */
   const generateCode = async (matchId: string) => {
     setGeneratingCode(matchId);
+    setMatchCodeStatus((prev) => ({ ...prev, [matchId]: "loading" }));
     try {
       const res = await apiFetch(`${API_URL}/admin/match-code`, {
         method: "POST",
@@ -319,10 +342,12 @@ export default function AdminDashboard() {
       const data = await res.json();
       if (res.ok) {
         setMatchCodes((prev) => ({ ...prev, [matchId]: data.matchCode.code }));
-        toast.success("Match code generated");
+        setMatchCodeStatus((prev) => ({ ...prev, [matchId]: "ready" }));
+        toast.success("Match code ready");
       }
     } catch (err) {
       console.error(err);
+      setMatchCodeStatus((prev) => ({ ...prev, [matchId]: prev[matchId] === "ready" ? "ready" : "empty" }));
       toast.error("Failed to generate code");
     } finally {
       setGeneratingCode(null);
@@ -933,6 +958,7 @@ export default function AdminDashboard() {
                     })
                   : "";
                 const code = matchCodes[match.id];
+                const codeStatus = matchCodeStatus[match.id] || "loading";
 
                 return (
                   <motion.div key={match.id} variants={fadeUp} className="game-card p-4">
@@ -977,7 +1003,28 @@ export default function AdminDashboard() {
                     </div>
 
                     {/* Code Display or Generate */}
-                    {code ? (
+                    {codeStatus === "loading" ? (
+                      <div
+                        className="text-center py-4 px-3"
+                        style={{
+                          background: "#0d0d0d",
+                          border: "2px solid #2a2a2a",
+                          borderRadius: "4px",
+                        }}
+                      >
+                        <p
+                          style={{
+                            fontSize: "0.75rem",
+                            fontWeight: 800,
+                            color: "#6b7280",
+                            textTransform: "uppercase",
+                            letterSpacing: "0.1em",
+                          }}
+                        >
+                          Loading code...
+                        </p>
+                      </div>
+                    ) : code ? (
                       <div
                         className="text-center py-4 px-3"
                         style={{

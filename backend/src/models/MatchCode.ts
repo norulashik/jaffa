@@ -52,7 +52,7 @@ MatchCode.init(
     tableName: "match_codes",
     timestamps: true,
     indexes: [
-      { fields: ["venueId", "matchId", "isActive"] },
+      { unique: true, fields: ["venueId", "matchId", "isActive"] },
     ],
   }
 );

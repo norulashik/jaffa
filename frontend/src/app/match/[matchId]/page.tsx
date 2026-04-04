@@ -96,6 +96,23 @@ export default function MatchDashboard() {
     return () => clearInterval(interval);
   }, []);
 
+  const refreshPreMatchState = useCallback(async () => {
+    const preds = await api.getPredictions(matchId, venueId, 0);
+    const unanswered = (preds || []).filter(
+      (p: any) => p.category === "pre_match" && !p.userAnswer && p.status === "open"
+    );
+
+    if (unanswered.length > 0) {
+      setPreMatchPredictions(unanswered);
+      setCurrentCardIndex(0);
+      setPhase("prematch");
+    } else {
+      setPreMatchPredictions([]);
+      setCurrentCardIndex(0);
+      setPhase("live");
+    }
+  }, [matchId, venueId]);
+
   // Phase 1: Join match and load pre-match predictions
   useEffect(() => {
     if (!matchId || !venueId) return;
@@ -126,16 +143,7 @@ export default function MatchDashboard() {
         // Even if match is already "live" (toss done), the 3 non-toss questions
         // may have just been unlocked and the user hasn't answered them yet.
         try {
-          const preds = await api.getPredictions(matchId, venueId, 0);
-          const unanswered = (preds || []).filter(
-            (p: any) => p.category === "pre_match" && !p.userAnswer && p.status === "open"
-          );
-          if (unanswered.length > 0) {
-            setPreMatchPredictions(unanswered);
-            setPhase("prematch");
-          } else {
-            setPhase("live");
-          }
+          await refreshPreMatchState();
         } catch {
           setPhase("live");
         }
@@ -146,7 +154,7 @@ export default function MatchDashboard() {
     };
 
     initMatch();
-  }, [matchId, venueId]);
+  }, [matchId, venueId, refreshPreMatchState]);
 
   // Phase 2: In prematch, listen for toss detection to reload unlocked questions
   useEffect(() => {
@@ -155,39 +163,25 @@ export default function MatchDashboard() {
     const socket = connectSocket();
     joinVenueMatch(venueId, matchId);
 
-    // Toss detected: lock toss question, show the 3 newly unlocked questions
+    // Toss detected: toss card disappears; any remaining open pre-match cards stay visible
     socket.on("tossLocked", async (data: any) => {
       if (data.matchId !== matchId) return;
       try {
-        const preds = await api.getPredictions(matchId, venueId, 0);
-        const unanswered = (preds || []).filter(
-          (p: any) => p.category === "pre_match" && !p.userAnswer && p.status === "open"
-        );
-        if (unanswered.length > 0) {
-          setPreMatchPredictions(unanswered);
-          setCurrentCardIndex(0);
-        } else {
-          setPhase("live");
-        }
+        await refreshPreMatchState();
       } catch {
         setPhase("live");
       }
     });
 
-    // First ball bowled or match manually started — all pre-match questions are now locked
-    const handleMatchOver = () => setPhase("live");
+    // Match start should not force live mode if open pre-match questions still exist.
     socket.on("matchStarted", (data: any) => {
-      if (data.matchId === matchId) handleMatchOver();
+      if (data.matchId !== matchId) return;
+      refreshPreMatchState().catch(() => setPhase("live"));
     });
     socket.on("predictionsLocked", async (data: any) => {
       if (data.matchId !== matchId) return;
-      // Re-check: if no open pre-match questions remain, leave prematch phase
       try {
-        const preds = await api.getPredictions(matchId, venueId, 0);
-        const stillOpen = (preds || []).filter(
-          (p: any) => p.category === "pre_match" && !p.userAnswer && p.status === "open"
-        );
-        if (stillOpen.length === 0) setPhase("live");
+        await refreshPreMatchState();
       } catch {
         setPhase("live");
       }
@@ -198,7 +192,7 @@ export default function MatchDashboard() {
       socket.off("matchStarted");
       socket.off("predictionsLocked");
     };
-  }, [phase, matchId, venueId]);
+  }, [phase, matchId, venueId, refreshPreMatchState]);
 
   // Phase 3: Connect socket when entering live phase
   useEffect(() => {
@@ -358,18 +352,9 @@ export default function MatchDashboard() {
           if (currentCardIndex < preMatchPredictions.length - 1) {
             setCurrentCardIndex((prev) => prev + 1);
           } else {
-            // All current cards answered — re-fetch in case toss just unlocked 3 more questions
+            // Re-check backend state in case more open pre-match cards remain.
             try {
-              const preds = await api.getPredictions(matchId, venueId, 0);
-              const unanswered = (preds || []).filter(
-                (p: any) => p.category === "pre_match" && !p.userAnswer && p.status === "open"
-              );
-              if (unanswered.length > 0) {
-                setPreMatchPredictions(unanswered);
-                setCurrentCardIndex(0);
-              } else {
-                setPhase("live");
-              }
+              await refreshPreMatchState();
             } catch {
               setPhase("live");
             }
@@ -381,7 +366,7 @@ export default function MatchDashboard() {
       setSelectedPreMatchOption(null);
       setPreMatchSubmitting(false);
     }
-  }, [preMatchSubmitting, selectedPreMatchOption, preMatchPredictions, currentCardIndex, venueId]);
+  }, [preMatchSubmitting, selectedPreMatchOption, preMatchPredictions, currentCardIndex, venueId, refreshPreMatchState]);
 
   // Live: handle option select
   const handleOptionSelect = (predictionId: string, optionKey: string) => {
@@ -794,7 +779,7 @@ export default function MatchDashboard() {
           const openPreds = unanswered.filter((p: any) => !p.expiresAt || new Date(p.expiresAt).getTime() > now);
           const missedPreds = unanswered.filter((p: any) => p.expiresAt && new Date(p.expiresAt).getTime() <= now);
           const answeredPreds = predictions.filter((p: any) => selectedAnswers[p.id] || p.userAnswer?.selectedOption);
-          const boostsRemaining = Math.max(0, 2 - (gameState.boostsUsedThisRound || 0));
+          const boostsRemaining = Math.max(0, 1 - (gameState.boostsUsedThisRound || 0));
           const allInAvailable = !gameState.allInUsed;
 
           const getCategoryLabel = (pred: any) => {

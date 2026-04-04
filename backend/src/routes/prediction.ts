@@ -103,7 +103,7 @@ router.post("/:predictionId/answer", authenticateUser, async (req: AuthRequest, 
         throw new Error("NOT_PARTICIPANT");
       }
 
-      if (boostType === "boost" && participant.boostsUsedRound >= 2) {
+      if (boostType === "boost" && participant.boostsUsedRound >= 1) {
         throw new Error("NO_BOOSTS");
       }
 

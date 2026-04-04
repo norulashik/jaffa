@@ -233,6 +233,36 @@ function createNoopIo(): SocketIOServer {
   } as unknown as SocketIOServer;
 }
 
+function resolveDismissalType(scoreName?: string | null): string | null {
+  const normalized = (scoreName || "").trim().toLowerCase();
+  if (!normalized) return null;
+
+  const exactMap: Record<string, string> = {
+    "catch out": "caught",
+    "catch out (sub)": "caught",
+    "clean bowled": "bowled",
+    "lbw out": "lbw",
+    "run out": "run_out",
+    "run out + 1": "run_out",
+    "run out + 2": "run_out",
+    "run out (subs)": "run_out",
+    "stump out": "stumped",
+  };
+
+  if (exactMap[normalized]) {
+    return exactMap[normalized];
+  }
+
+  // Fallback for spelling/format variation across feeds.
+  if (normalized.includes("run out")) return "run_out";
+  if (normalized.includes("stump")) return "stumped";
+  if (normalized.includes("lbw") || normalized.includes("leg before")) return "lbw";
+  if (normalized.includes("bowled")) return "bowled";
+  if (normalized.includes("catch")) return "caught";
+
+  return null;
+}
+
 async function getTrackingSeed(match: Match): Promise<{ innings: number; over: number; resolved: number }> {
   const lastResolvedPrediction = await Prediction.findOne({
     where: {
@@ -698,19 +728,22 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           await Prediction.create({ ...hotTake, expiresAt: hotTakeExpiresAt } as any);
         }
 
-        // Toss detected: lock toss question, unlock the other 3 pre-match questions
+        // Toss detected: resolve the toss question immediately; the other 3 remain open until first ball
         const allPreMatch = await Prediction.findAll({
           where: { matchId: match.id, category: "pre_match" },
         });
         for (const pred of allPreMatch) {
           if (pred.question.toLowerCase().includes("toss")) {
-            await pred.update({ status: "locked" });
-          } else if (pred.status === "locked") {
-            await pred.update({ status: "open" });
+            const correctOption = resolvePreMatchPrediction(pred, fixture, match, []);
+            if (correctOption) {
+              await resolvePrediction(pred, correctOption, io);
+            } else {
+              await pred.update({ status: "locked" });
+            }
           }
         }
         io.emit("tossLocked", { matchId: match.id });
-        console.log(`[Sportsmonk] Toss locked; match winner / sixes / first wicket now open`);
+        console.log(`[Sportsmonk] Toss resolved; remaining pre-match questions stay open until first ball`);
 
         io.emit("newPrediction", { matchId: match.id, type: "per_over", overNumber: 1, round: 1 });
         io.emit("matchStarted", { matchId: match.id });
@@ -812,6 +845,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
         const currentBalls: BallData[] = fixtureWithBalls?.balls?.data || (Array.isArray(fixtureWithBalls?.balls) ? fixtureWithBalls.balls : []);
 
         if (currentBalls.length > 0) {
+          const currentBallChips = extractOverBallChips(currentBalls, currentOver, currentInningsStr);
           const prevCache = cachedBallData.get(match.id);
           const newCache = new Map<string, { runs: number; is_wicket: boolean; four: boolean; six: boolean; noball: number; name?: string }>();
           const changedOvers = new Set<string>(); // "S1-3" format
@@ -846,6 +880,23 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           }
 
           cachedBallData.set(match.id, newCache);
+
+          if (currentBallChips.length > 0) {
+            const liveBallKey = `innings${currentInnings}_over${currentOver}_balls`;
+            const updatedScoreData: Record<string, unknown> = {
+              ...(((match.scoreData as Record<string, unknown>) || {})),
+              [liveBallKey]: currentBallChips,
+            };
+
+            await match.update({ scoreData: updatedScoreData });
+
+            io.emit("scoreUpdate", {
+              matchId: match.id,
+              innings: currentInnings,
+              over: currentOver,
+              scoreData: updatedScoreData,
+            });
+          }
 
           // Re-resolve affected predictions for completed overs only
           if (changedOvers.size > 0) {
@@ -887,8 +938,15 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
       const ballBowled = nowScore !== prevScore.score || nowWickets !== prevScore.wickets || nowOvers !== prevScore.overs;
       if (ballBowled) {
         // Lock current over's predictions (e.g., Over 1 predictions lock when 1st ball of Over 1 is bowled)
+        const currentRound = getCurrentRound(currentInnings, currentOver);
         const openOverPreds = await Prediction.findAll({
-          where: { matchId: match.id, overNumber: currentOver, category: "per_over", status: "open" },
+          where: {
+            matchId: match.id,
+            overNumber: currentOver,
+            round: currentRound,
+            category: "per_over",
+            status: "open",
+          },
         });
         if (openOverPreds.length > 0) {
           for (const pred of openOverPreds) {
@@ -937,6 +995,41 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
             io.emit("newPrediction", { matchId: match.id, type: "per_over", overNumber: nextOverNum, round: nextOverRound });
             console.log(`[Sportsmonk] Generated over ${nextOverNum} predictions (during over ${currentOver})`);
           }
+        }
+      }
+    }
+
+    // First ball of innings 2 arrives on the same update that flips innings, so the
+    // generic "same over" lock path above does not run for chase over 1.
+    if (prevScore && prevScore.innings === 1 && currentInnings === 2) {
+      // SportsMonk can expose the innings 2 score row at 0.0 during the break.
+      // Only lock chase over 1 once innings 2 has actual ball progress.
+      const innings2FirstBallBowled = nowOvers > 0;
+
+      if (innings2FirstBallBowled) {
+        const innings2Round1 = getCurrentRound(2, 1);
+        const openInn2Over1Preds = await Prediction.findAll({
+          where: {
+            matchId: match.id,
+            overNumber: 1,
+            round: innings2Round1,
+            category: "per_over",
+            status: "open",
+          },
+        });
+
+        if (openInn2Over1Preds.length > 0) {
+          for (const pred of openInn2Over1Preds) {
+            await pred.update({ status: "locked" });
+          }
+          io.emit("predictionsLocked", {
+            matchId: match.id,
+            overNumber: 1,
+            round: innings2Round1,
+          });
+          console.log(
+            `[Sportsmonk] Locked ${openInn2Over1Preds.length} predictions for innings 2 over 1 (first ball detected)`
+          );
         }
       }
     }
@@ -1626,17 +1719,18 @@ function resolvePreMatchPrediction(
     // Team batting first in S1 — map to team short names
     const scoreData = match.scoreData as any;
     const inn1TeamId = scoreData?.innings1?.teamId;
+    const hasTieOption = prediction.options.some((option) => option.key === "tie");
 
     if (inn1TeamId === fixture.localteam_id) {
       // team1 batted first (S1), team2 batted second (S2)
-      return team1Sixes >= team2Sixes
-        ? match.team1Short.toLowerCase()
-        : match.team2Short.toLowerCase();
+      if (team1Sixes > team2Sixes) return match.team1Short.toLowerCase();
+      if (team2Sixes > team1Sixes) return match.team2Short.toLowerCase();
+      return hasTieOption ? "tie" : null;
     } else {
       // team2 batted first (S1), team1 batted second (S2)
-      return team2Sixes >= team1Sixes
-        ? match.team1Short.toLowerCase()
-        : match.team2Short.toLowerCase();
+      if (team2Sixes > team1Sixes) return match.team1Short.toLowerCase();
+      if (team1Sixes > team2Sixes) return match.team2Short.toLowerCase();
+      return hasTieOption ? "tie" : null;
     }
   }
 
@@ -1646,16 +1740,14 @@ function resolvePreMatchPrediction(
     const wicketBall = allBalls.find((b) => b.score?.is_wicket || b.score?.out || b.batsmanout_id);
     if (!wicketBall) return null;
 
-    const dismissalName = (wicketBall.score?.name || "").toLowerCase();
+    console.log("[Sportsmonk] First wicket raw dismissal:", {
+      scoreName: wicketBall.score?.name || null,
+      scoreboard: wicketBall.scoreboard,
+      ball: wicketBall.ball,
+      batsmanOutId: wicketBall.batsmanout_id,
+    });
 
-    if (dismissalName.includes("run out")) return "run_out";
-    if (dismissalName.includes("stumped") || dismissalName.includes("stumping")) return "stumped";
-    if (dismissalName.includes("lbw") || dismissalName.includes("leg before")) return "lbw";
-    if (dismissalName.includes("bowled")) return "bowled";
-    if (dismissalName.includes("caught")) return "caught";
-
-    // Default to caught if we can't determine
-    return "caught";
+    return resolveDismissalType(wicketBall.score?.name);
   }
 
   return null;

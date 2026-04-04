@@ -30,7 +30,7 @@ export default function LiveGame({ matchId, venueId, match }: LiveGameProps) {
   const [answeredIds, setAnsweredIds] = useState<Set<string>>(new Set());
   const localAnsweredRef = useRef<Set<string>>(new Set());
 
-  const boostsRemaining = 2 - (state.boostsUsedThisRound || 0);
+  const boostsRemaining = 1 - (state.boostsUsedThisRound || 0);
   const allInAvailable = !state.allInUsed;
 
   // Load predictions
@@ -331,7 +331,7 @@ export default function LiveGame({ matchId, venueId, match }: LiveGameProps) {
                                 boxShadow: "2px 2px 0 0 #3b9eff",
                               }}
                             >
-                              2X ({boostsRemaining} left)
+                              2X BOOST
                             </button>
                           )}
                           {allInAvailable && (

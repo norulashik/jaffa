@@ -36,6 +36,13 @@ function chipStyle(type: string): { bg: string; text: string; border: string } {
 export default function OverBallsPanel({ matchId, scoreVersion }: OverBallsPanelProps) {
   const [overs, setOvers] = useState<OverGroup[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const hasInitializedScrollRef = useRef(false);
+  const shouldFollowLiveEdgeRef = useRef(true);
+
+  const isNearRightEdge = useCallback((element: HTMLDivElement) => {
+    const threshold = 48;
+    return element.scrollLeft + element.clientWidth >= element.scrollWidth - threshold;
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -48,10 +55,35 @@ export default function OverBallsPanel({ matchId, scoreVersion }: OverBallsPanel
 
   useEffect(() => { load(); }, [load, scoreVersion]);
 
-  // Auto-scroll to the rightmost (newest) over on data update
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+    const element = scrollRef.current;
+    if (!element) return;
+
+    const handleScroll = () => {
+      shouldFollowLiveEdgeRef.current = isNearRightEdge(element);
+    };
+
+    handleScroll();
+    element.addEventListener("scroll", handleScroll, { passive: true });
+    return () => element.removeEventListener("scroll", handleScroll);
+  }, [isNearRightEdge]);
+
+  // Overs render oldest-to-newest left-to-right.
+  // Open on the latest over, then only keep following that live edge
+  // while the user stays near it.
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element || overs.length === 0) return;
+
+    if (!hasInitializedScrollRef.current) {
+      element.scrollLeft = element.scrollWidth;
+      hasInitializedScrollRef.current = true;
+      shouldFollowLiveEdgeRef.current = true;
+      return;
+    }
+
+    if (shouldFollowLiveEdgeRef.current) {
+      element.scrollLeft = element.scrollWidth;
     }
   }, [overs]);
 
@@ -59,20 +91,21 @@ export default function OverBallsPanel({ matchId, scoreVersion }: OverBallsPanel
 
   return (
     <div
+      className="over-strip-scroll"
       style={{
         background: "#0d0d0d",
         border: "2px solid #2a2a2a",
         borderRadius: "4px",
-        padding: "8px 4px",
+        padding: "10px 6px 12px",
         overflowX: "auto",
         WebkitOverflowScrolling: "touch",
-        boxShadow: "0 2px 0 0 #000",
+        boxShadow: "0 2px 0 0 #000, inset 0 0 0 1px rgba(255,255,255,0.03)",
       }}
       ref={scrollRef}
     >
       <div style={{ display: "flex", gap: "12px", paddingLeft: "8px", paddingRight: "8px", minWidth: "max-content" }}>
         {/* Show newest overs on left — reverse the array */}
-        {[...overs].reverse().map((over) => (
+        {overs.map((over) => (
           <div key={`${over.innings}-${over.overNumber}`} style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
             {/* Over label */}
             <span

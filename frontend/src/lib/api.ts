@@ -36,12 +36,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export const api = {
   // Auth
-  sendOTP: (phone: string) => request("/auth/send-otp", { method: "POST", body: JSON.stringify({ phone }) }),
-
-  verifyOTP: (phone: string, code: string, displayName?: string) =>
-    request<{ token: string; user: { id: string; phone: string; displayName: string; avatarConfig?: any }; isNewUser: boolean; needsDisplayName?: boolean }>(
-      "/auth/verify-otp",
-      { method: "POST", body: JSON.stringify({ phone, code, displayName }) }
+  loginWithPhone: (phone: string, displayName: string) =>
+    request<{ token: string; user: { id: string; phone: string; displayName: string; avatarConfig?: any }; isNewUser: boolean }>(
+      "/auth/phone-login",
+      { method: "POST", body: JSON.stringify({ phone, displayName }) }
     ),
 
   getMe: () => request<{ id: string; phone: string; displayName: string }>("/auth/me"),

@@ -5,9 +5,18 @@ const BOOST_MULTIPLIER = 2;
 const ALL_IN_MULTIPLIER = 3;
 const ALL_IN_PENALTY = -30;
 
+function getStreakBonus(streak: number): number {
+  let bonus = 0;
+  if (streak >= 3) bonus += 5;
+  if (streak >= 5) bonus += 10;
+  if (streak >= 10) bonus += 20;
+  return bonus;
+}
+
 export interface PointsResult {
   basePoints: number;
   multiplier: number;
+  streakBonus: number;
   totalPoints: number;
   isCorrect: boolean;
   newStreak: number;
@@ -38,6 +47,7 @@ export function calculatePoints(
     return {
       basePoints: 0,
       multiplier: 1,
+      streakBonus: 0,
       totalPoints: boostType === "all_in" ? ALL_IN_PENALTY : 0,
       isCorrect: false,
       newStreak: 0,
@@ -46,7 +56,6 @@ export function calculatePoints(
 
   const newStreak = currentStreak + 1;
 
-  // Only Boost and All-In affect multiplier — streak is display-only
   let multiplier = 1;
   if (boostType === "boost") {
     multiplier = BOOST_MULTIPLIER;
@@ -54,11 +63,13 @@ export function calculatePoints(
     multiplier = ALL_IN_MULTIPLIER;
   }
 
-  const totalPoints = Math.round(basePoints * multiplier);
+  const streakBonus = getStreakBonus(newStreak);
+  const totalPoints = Math.round(basePoints * multiplier) + streakBonus;
 
   return {
     basePoints,
     multiplier,
+    streakBonus,
     totalPoints,
     isCorrect,
     newStreak,
@@ -80,19 +91,15 @@ export async function resolvePrediction(
     );
   }
 
-  // Update prediction with correct answer
   await prediction.update({ correctOption, status: "resolved" });
 
-  // Get all user predictions for this question
   const userPredictions = await UserPrediction.findAll({
     where: { predictionId: prediction.id },
   });
 
   let correctCount = 0;
-  let totalCount = userPredictions.length;
 
   for (const up of userPredictions) {
-    // Get participant
     const participant = await MatchParticipant.findOne({
       where: { userId: up.userId, matchId: up.matchId, venueId: up.venueId },
     });
@@ -101,7 +108,6 @@ export async function resolvePrediction(
 
     const result = calculatePoints(prediction, up.selectedOption, up.boostType, participant.currentStreak);
 
-    // Update user prediction
     await up.update({
       isCorrect: result.isCorrect,
       pointsEarned: result.totalPoints,
@@ -110,7 +116,6 @@ export async function resolvePrediction(
     if (result.isCorrect) {
       correctCount++;
 
-      // Update participant points
       const roundField = `round${prediction.round}Points` as string;
       const updateData: Record<string, unknown> = {
         totalPoints: participant.totalPoints + result.totalPoints,
@@ -122,7 +127,6 @@ export async function resolvePrediction(
 
       await participant.update(updateData as Partial<MatchParticipant>);
 
-      // Emit streak hype moment
       if (result.newStreak >= 5) {
         const { User } = await import("../models");
         const user = await User.findByPk(up.userId);
@@ -133,11 +137,9 @@ export async function resolvePrediction(
         });
       }
     } else {
-      // Reset streak + apply All-In penalty if applicable
       const updateData: Record<string, unknown> = { currentStreak: 0 };
 
       if (result.totalPoints < 0) {
-        // All-In penalty: deduct points but floor at 0
         const roundField = `round${prediction.round}Points` as string;
         const newTotal = Math.max(0, participant.totalPoints + result.totalPoints);
         const currentRoundPts = (participant as unknown as Record<string, number>)[roundField] || 0;
@@ -146,7 +148,6 @@ export async function resolvePrediction(
         updateData.totalPoints = newTotal;
         updateData[roundField] = newRoundPts;
 
-        // Emit hype moment for failed All-In
         const { User } = await import("../models");
         const user = await User.findByPk(up.userId);
         io.to(`venue:${up.venueId}:${up.matchId}`).emit("hypeEvent", {
@@ -160,7 +161,6 @@ export async function resolvePrediction(
     }
   }
 
-  // Emit prediction pulse
   const venues = [...new Set(userPredictions.map((up) => up.venueId))];
   for (const venueId of venues) {
     const venueAnswers = userPredictions.filter((up) => up.venueId === venueId);
@@ -179,25 +179,18 @@ export async function resolvePrediction(
       pulse: generatePulseMessage(venueCorrect, venueTotal, prediction.question),
     });
 
-    // Emit predictionResolved so match page updates status
     io.to(`venue:${venueId}:${prediction.matchId}`).emit("predictionResolved", {
       matchId: prediction.matchId,
       predictionId: prediction.id,
       correctOption,
     });
 
-    // Emit updated leaderboard
     io.to(`venue:${venueId}:${prediction.matchId}`).emit("leaderboardUpdate", {
       round: prediction.round,
     });
   }
 }
 
-/**
- * Re-resolve an already-resolved prediction when the correct answer changes
- * (e.g., umpire review reversal, ball result update from API).
- * Reverses old points and applies new ones for all user predictions.
- */
 export async function reResolvePrediction(
   prediction: Prediction,
   newCorrectOption: string,
@@ -210,52 +203,22 @@ export async function reResolvePrediction(
     `[ReResolve] Prediction ${prediction.id}: "${prediction.question}" changing from "${oldCorrectOption}" to "${newCorrectOption}"`
   );
 
-  // Update prediction with new correct answer
   await prediction.update({ correctOption: newCorrectOption });
 
-  // Get all user predictions for this question
   const userPredictions = await UserPrediction.findAll({
     where: { predictionId: prediction.id },
   });
 
-  for (const up of userPredictions) {
-    const participant = await MatchParticipant.findOne({
-      where: { userId: up.userId, matchId: up.matchId, venueId: up.venueId },
-    });
-    if (!participant) continue;
-
+  const changed = userPredictions.some((up) => {
     const oldWasCorrect = up.selectedOption === oldCorrectOption;
     const newIsCorrect = up.selectedOption === newCorrectOption;
+    return oldWasCorrect !== newIsCorrect;
+  });
 
-    if (oldWasCorrect === newIsCorrect) continue; // No change for this user
+  if (!changed) return false;
 
-    const roundField = `round${prediction.round}Points` as string;
-    const currentRoundPts = (participant as unknown as Record<string, number>)[roundField] || 0;
+  await recomputeParticipantScores({ matchId: prediction.matchId });
 
-    if (oldWasCorrect && !newIsCorrect) {
-      // Was correct, now wrong — reverse points
-      const oldPoints = up.pointsEarned || 0;
-      const penalty = up.boostType === "all_in" ? ALL_IN_PENALTY : 0;
-      await up.update({ isCorrect: false, pointsEarned: penalty } as any);
-      await participant.update({
-        totalPoints: Math.max(0, participant.totalPoints - oldPoints + penalty),
-        [roundField]: Math.max(0, currentRoundPts - oldPoints + penalty),
-        correctPredictions: Math.max(0, participant.correctPredictions - 1),
-      } as Partial<MatchParticipant>);
-    } else if (!oldWasCorrect && newIsCorrect) {
-      // Was wrong, now correct — apply points
-      const result = calculatePoints(prediction, up.selectedOption, up.boostType, participant.currentStreak);
-      const oldPenalty = up.pointsEarned || 0; // negative if all-in penalty was applied
-      await up.update({ isCorrect: true, pointsEarned: result.totalPoints } as any);
-      await participant.update({
-        totalPoints: participant.totalPoints - oldPenalty + result.totalPoints,
-        [roundField]: currentRoundPts - oldPenalty + result.totalPoints,
-        correctPredictions: participant.correctPredictions + 1,
-      } as Partial<MatchParticipant>);
-    }
-  }
-
-  // Emit updates to frontends
   const venues = [...new Set(userPredictions.map((up) => up.venueId))];
   for (const venueId of venues) {
     io.to(`venue:${venueId}:${prediction.matchId}`).emit("predictionResolved", {
@@ -456,7 +419,6 @@ export async function generateRoundRewards(
   const venue = await Venue.findByPk(venueId);
   if (!venue) return;
 
-  // Grand prize (round 0) orders by totalPoints, regular rounds by roundXPoints
   const orderField = round === 0 ? "totalPoints" : `round${round}Points`;
 
   const topPlayers = await MatchParticipant.findAll({
@@ -469,8 +431,6 @@ export async function generateRoundRewards(
   if (topPlayers.length === 0) return;
 
   const rewardConfig = round === 0 ? venue.rewardConfig.grandPrize : venue.rewardConfig.roundReward;
-
-  // Calculate expiry: end of next round (~40 mins) or end of match for grand prize
   const expiresAt = new Date(Date.now() + (round === 0 ? 60 : 40) * 60 * 1000);
 
   const winners = [];
@@ -480,8 +440,6 @@ export async function generateRoundRewards(
     const position = i + 1;
     const rewardKey = `top${position}` as keyof typeof rewardConfig;
     const rewardText = rewardConfig[rewardKey] || "Reward";
-
-    // Generate unique 4-digit code
     const code = Math.floor(1000 + Math.random() * 9000).toString();
 
     await Reward.create({
@@ -504,7 +462,6 @@ export async function generateRoundRewards(
     });
   }
 
-  // Emit round winner announcement
   io.to(`venue:${venueId}:${matchId}`).emit("roundWinner", {
     round,
     winners,
