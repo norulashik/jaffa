@@ -190,10 +190,7 @@ async function start() {
     await sequelize.authenticate();
     console.log("Database connected");
 
-    // Use force:false to create missing tables without touching existing ones.
-    // This avoids SQLite's simulate-ALTER issues (FK constraints, duplicate data).
-    // To apply schema changes in dev: delete jaffa.db and restart.
-    await sequelize.sync({ force: false });
+    await sequelize.sync({ alter: true });
     console.log("Database synced");
 
     await new Promise<void>((resolve, reject) => {

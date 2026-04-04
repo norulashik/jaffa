@@ -318,8 +318,10 @@ export default function MatchDashboard() {
             },
           });
         }
+        const storedUser = localStorage.getItem("jaffa_user");
+        const currentUserId = storedUser ? JSON.parse(storedUser).id : gameState.user?.id;
         const myIndex = lb.leaderboard.findIndex(
-          (e: any) => e.userId === gameState.user?.id
+          (e: any) => e.userId === currentUserId
         );
         setUserRank(myIndex >= 0 ? myIndex + 1 : null);
       } catch {
@@ -347,7 +349,7 @@ export default function MatchDashboard() {
       setTimeout(() => {
         setCardExiting(true);
 
-        setTimeout(() => {
+        setTimeout(async () => {
           setShowPreMatchResult(false);
           setSelectedPreMatchOption(null);
           setPreMatchSubmitting(false);

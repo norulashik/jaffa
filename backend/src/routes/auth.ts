@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import jwt from "jsonwebtoken";
-import { User, OTP } from "../models";
+import { User, OTP, MatchParticipant } from "../models";
 import { Op } from "sequelize";
 import { generateAvatarConfig } from "../utils/avatarGenerator";
 
@@ -148,6 +148,34 @@ router.get("/me", async (req: Request, res: Response): Promise<void> => {
       displayName: user.displayName,
       avatarConfig: user.avatarConfig ? JSON.parse(user.avatarConfig) : null,
     });
+  } catch {
+    res.status(401).json({ error: "Invalid token" });
+  }
+});
+
+// Get user stats (accuracy, matches played)
+router.get("/stats", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const token = req.headers.authorization?.replace("Bearer ", "");
+    if (!token) {
+      res.status(401).json({ error: "No token" });
+      return;
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || "dev-secret") as { userId: string };
+
+    const participants = await MatchParticipant.findAll({
+      where: { userId: decoded.userId },
+    });
+
+    const matchesPlayed = participants.length;
+    const totalCorrect = participants.reduce((sum, p) => sum + (p.correctPredictions || 0), 0);
+    const totalPredictions = participants.reduce((sum, p) => sum + (p.totalPredictions || 0), 0);
+    const accuracy = totalPredictions > 0
+      ? Math.round((totalCorrect / totalPredictions) * 100)
+      : 0;
+
+    res.json({ matchesPlayed, totalCorrect, totalPredictions, accuracy });
   } catch {
     res.status(401).json({ error: "Invalid token" });
   }

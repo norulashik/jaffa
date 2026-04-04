@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import { Match, MatchParticipant, Prediction, MatchCode } from "../models";
 import { authenticateUser, AuthRequest } from "../middleware/auth";
 import { fetchUpcomingFixtures, fetchSportsmonkLiveScores, fetchTeamData } from "../services/sportsmonkApi";
-import { generatePreMatchPredictions } from "../services/predictionEngine";
+import { generatePreMatchPredictions, getCurrentRound } from "../services/predictionEngine";
 
 const router = Router();
 
@@ -220,10 +220,15 @@ router.post("/:matchId/join", authenticateUser, async (req: AuthRequest, res: Re
       return;
     }
 
+    const currentRound = match.status === "live"
+      ? getCurrentRound(match.currentInnings || 1, match.currentOver || 1)
+      : 0;
+
     const participant = await MatchParticipant.create({
       userId,
       matchId,
       venueId,
+      currentRound,
     });
 
     const io = req.app.get("io");
@@ -294,6 +299,12 @@ router.get("/:matchId/state", authenticateUser, async (req: AuthRequest, res: Re
     const playerCount = await MatchParticipant.count({
       where: { matchId, venueId },
     });
+
+    // Derive currentRound from match state if participant's round is stale
+    if (participant && participant.currentRound === 0 && match.status === "live") {
+      const derivedRound = getCurrentRound(match.currentInnings || 1, match.currentOver || 1);
+      participant.currentRound = derivedRound;
+    }
 
     res.json({ match, participant, openPredictions, playerCount });
   } catch (error) {

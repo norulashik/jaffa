@@ -83,6 +83,12 @@ router.post("/match/:matchId/start", async (req: any, res: Response): Promise<vo
       currentOver: 1,
       currentInnings: 1,
       currentPhase: "innings1_powerplay",
+      scoreData: {
+        ...match.scoreData,
+        currentInnings: 1,
+        currentOver: 1,
+        innings1: { score: 0, wickets: 0, overs: 0 },
+      },
     });
 
     // Generate Over 1 predictions (locked when 1st ball is bowled)
@@ -144,15 +150,44 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
     const newPhase = innings === 1
       ? nextOver <= 6 ? "innings1_powerplay" : nextOver <= 15 ? "innings1_middle" : "innings1_death"
       : nextOver <= 6 ? "innings2_powerplay" : nextOver <= 15 ? "innings2_middle" : "innings2_death";
+    // Compute aggregated innings totals from all stored over results
+    const updatedScoreData: Record<string, any> = {
+      ...match.scoreData,
+      [`innings${innings}_over${overNumber}`]: overResults,
+    };
+    let inningsScore = 0;
+    let inningsWickets = 0;
+    for (let ov = 1; ov <= overNumber; ov++) {
+      const ovData = updatedScoreData[`innings${innings}_over${ov}`];
+      if (ovData) {
+        inningsScore += ovData.runs || 0;
+        inningsWickets += ovData.wickets || 0;
+      }
+    }
+    const inningsKey = `innings${innings}`;
+    updatedScoreData[inningsKey] = {
+      ...(updatedScoreData[inningsKey] || {}),
+      score: inningsScore,
+      wickets: inningsWickets,
+      overs: overNumber,
+    };
+    updatedScoreData.currentInnings = innings;
+    updatedScoreData.currentOver = nextOver;
+
     await match.update({
       status: "live",
       currentOver: nextOver,
       currentInnings: innings,
       currentPhase: newPhase,
-      scoreData: {
-        ...match.scoreData,
-        [`innings${innings}_over${overNumber}`]: overResults,
-      },
+      scoreData: updatedScoreData,
+    });
+
+    // Emit score update so frontend gets live scores immediately
+    io.emit("scoreUpdate", {
+      matchId,
+      innings,
+      over: nextOver,
+      scoreData: updatedScoreData,
     });
 
     // Resolve per-over predictions for this over (filter by round to avoid cross-innings collision)
@@ -225,23 +260,95 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
     const twoAhead = nextOver + 1;
     const twoAheadRound = getCurrentRound(innings, twoAhead);
     if (twoAhead <= 20) {
-      // Sum total wickets from all stored over results for this innings
-      const sd = match.scoreData as Record<string, any> || {};
-      let totalWickets = 0;
-      let totalScore = 0;
-      for (let ov = 1; ov <= overNumber; ov++) {
-        const ovData = sd[`innings${innings}_over${ov}`];
-        if (ovData) {
-          totalWickets += ovData.wickets || 0;
-          totalScore += ovData.runs || 0;
-        }
-      }
+      // Use already-computed innings totals from above
+      const totalWickets = inningsWickets;
+      const totalScore = inningsScore;
       const isAllOut = totalWickets >= 10;
 
-      // For 2nd innings, check if target is chased using innings1Final or Sportsmonk data
-      const inn1Final = sd.innings1Final || sd.innings1;
+      // For 2nd innings, check if target is chased
+      const inn1Final = updatedScoreData.innings1Final || updatedScoreData.innings1;
       const inn1Score = inn1Final?.runs ?? inn1Final?.score ?? 0;
       const targetChased = innings === 2 && inn1Score > 0 && totalScore >= (inn1Score + 1);
+
+      if (isAllOut && innings === 1) {
+        // Auto-trigger innings break when first innings team is all out
+        await match.update({
+          currentPhase: "innings_break",
+          currentInnings: 2,
+          currentOver: 0,
+          scoreData: {
+            ...updatedScoreData,
+            innings1Final: { runs: totalScore, wickets: totalWickets },
+            innings1: {
+              ...(updatedScoreData.innings1 || {}),
+              score: totalScore,
+              wickets: totalWickets,
+              overs: overNumber,
+            },
+            innings2: { score: 0, wickets: 0, overs: 0 },
+            target: totalScore + 1,
+            currentInnings: 2,
+            currentOver: 0,
+          },
+        });
+
+        const scoreData = updatedScoreData as any;
+        const innings1TeamShort = scoreData?.innings1?.teamShort;
+        const chasingTeamShort = innings1TeamShort
+          ? (innings1TeamShort === match.team1Short ? match.team2Short : match.team1Short)
+          : match.team2Short;
+        const chasingTeamPlayers = innings1TeamShort
+          ? (innings1TeamShort === match.team1Short ? match.team2Players : match.team1Players)
+          : match.team2Players;
+
+        // Generate rivalry calls
+        const rivalryCalls = generateRivalryCalls(matchId, totalScore + 1, chasingTeamShort, chasingTeamPlayers);
+        const rivalryExpiresAt = new Date(Date.now() + 480_000);
+        for (const rc of rivalryCalls) {
+          await Prediction.create({ ...rc, expiresAt: rivalryExpiresAt } as any);
+        }
+
+        // Generate round 3 rewards
+        const allOutVenues = await MatchParticipant.findAll({
+          where: { matchId },
+          attributes: ["venueId"],
+          group: ["venueId"],
+        });
+        for (const v of allOutVenues) {
+          await generateRoundRewards(matchId, v.venueId, 3, io);
+        }
+
+        // Generate Over 1 (2nd innings) predictions
+        const inn2Round = getCurrentRound(2, 1);
+        const inn2OverPreds = generatePerOverPredictions(matchId, 1, inn2Round);
+        for (const p of inn2OverPreds) {
+          await Prediction.create(p as any);
+        }
+
+        // Generate Round 4 hot take
+        const existingInnHotTake = await Prediction.findOne({
+          where: { matchId, category: "hot_take", round: inn2Round },
+        });
+        if (!existingInnHotTake) {
+          const hotTakeExpiresAt = new Date(Date.now() + 120_000);
+          const hotTake = generateHotTake(matchId, inn2Round, match.team1Short, match.team2Short);
+          if (hotTake) {
+            await Prediction.create({ ...hotTake, expiresAt: hotTakeExpiresAt } as any);
+          }
+        }
+
+        io.emit("newPrediction", { matchId, type: "per_over", overNumber: 1, round: inn2Round });
+        io.emit("inningsBreak", { matchId, target: totalScore + 1, team1Score: totalScore, team1Wickets: totalWickets });
+
+        res.json({
+          message: `Over ${overNumber} completed — team all out, innings break auto-triggered`,
+          resolvedPredictions: overPredictions.length,
+          currentPhase: "innings_break",
+          nextRound,
+          allOut: true,
+        });
+        return;
+      }
 
       if (!isAllOut && !targetChased) {
         // Deduplication: check if predictions for this over+round already exist
@@ -304,10 +411,19 @@ router.post("/match/:matchId/innings-break", async (req: any, res: Response): Pr
     await match.update({
       currentPhase: "innings_break",
       currentInnings: 2,
+      currentOver: 0,
       scoreData: {
         ...match.scoreData,
         innings1Final: { runs: team1Score, wickets: team1Wickets },
+        innings1: {
+          ...(match.scoreData as any)?.innings1,
+          score: team1Score,
+          wickets: team1Wickets,
+        },
+        innings2: { score: 0, wickets: 0, overs: 0 },
         target,
+        currentInnings: 2,
+        currentOver: 0,
       },
     });
 

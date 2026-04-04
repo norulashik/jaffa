@@ -49,6 +49,9 @@ export const api = {
   updateAvatar: (avatarConfig: any) =>
     request<{ success: boolean }>("/auth/avatar", { method: "PUT", body: JSON.stringify({ avatarConfig }) }),
 
+  getUserStats: () =>
+    request<{ matchesPlayed: number; totalCorrect: number; totalPredictions: number; accuracy: number }>("/auth/stats"),
+
   // Venues
   getVenue: (venueId: string) =>
     request<{ id: string; name: string; rewardConfig: any; latitude: number; longitude: number; radiusMeters: number }>(

@@ -18,6 +18,7 @@ export default function ProfilePage() {
   const [user, setUser] = useState<any>(null);
   const [avatarConfig, setAvatarConfig] = useState<AvatarConfig | null>(null);
   const [showCustomizer, setShowCustomizer] = useState(false);
+  const [stats, setStats] = useState<{ matchesPlayed: number; accuracy: number } | null>(null);
 
   useEffect(() => {
     const token = localStorage.getItem("jaffa_token");
@@ -34,6 +35,8 @@ export default function ProfilePage() {
         setAvatarConfig(parsed.avatarConfig);
       }
     }
+
+    api.getUserStats().then(setStats).catch(() => {});
   }, []);
 
   const handleLogout = () => {
@@ -118,6 +121,34 @@ export default function ProfilePage() {
             </span>
           </div>
         </section>
+
+        {/* Stats */}
+        {stats && (
+          <section className="grid grid-cols-2 gap-3 mb-8">
+            <div className="game-card text-center py-4">
+              <div
+                className="text-3xl font-extrabold text-[#ff6341]"
+                style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+              >
+                {stats.accuracy}%
+              </div>
+              <div className="text-xs text-[#6b7280] uppercase tracking-widest font-bold mt-1">
+                Accuracy
+              </div>
+            </div>
+            <div className="game-card text-center py-4">
+              <div
+                className="text-3xl font-extrabold text-[#ff6341]"
+                style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+              >
+                {stats.matchesPlayed}
+              </div>
+              <div className="text-xs text-[#6b7280] uppercase tracking-widest font-bold mt-1">
+                Matches Played
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* Settings */}
         <section className="space-y-3">

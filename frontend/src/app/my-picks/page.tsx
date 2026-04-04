@@ -60,23 +60,15 @@ export default function MyPicksPage() {
     }
   };
 
-  // Filter into answered and missed
   const answeredPreds = predictions.filter(
     (p: any) => p.userAnswer?.selectedOption
   );
-  const missedPreds = predictions.filter(
-    (p: any) =>
-      !p.userAnswer?.selectedOption &&
-      p.status !== "open" &&
-      p.category !== "pre_match"
-  );
-  const allPicks = [...answeredPreds, ...missedPreds].reverse();
+  const allPicks = [...answeredPreds].reverse();
 
   // Stat counts
   const correctCount = answeredPreds.filter((p: any) => p.status === "resolved" && p.userAnswer?.selectedOption === p.correctOption).length;
   const wrongCount = answeredPreds.filter((p: any) => p.status === "resolved" && p.userAnswer?.selectedOption !== p.correctOption).length;
   const pendingCount = answeredPreds.filter((p: any) => p.status !== "resolved").length;
-  const missedCount = missedPreds.length;
 
   return (
     <div className="bg-[#0d0d0d] text-white min-h-screen">
@@ -178,10 +170,9 @@ export default function MyPicksPage() {
                 }
               }).map((pred: any) => {
                 const selectedKey = pred.userAnswer?.selectedOption;
-                const isMissed = !selectedKey;
-                const selectedLabel = isMissed ? null : getOptionLabel(pred, selectedKey);
+                const selectedLabel = getOptionLabel(pred, selectedKey);
                 const isClosed = pred.status === "resolved";
-                const isCorrect = isClosed && !isMissed ? selectedKey === pred.correctOption : undefined;
+                const isCorrect = isClosed ? selectedKey === pred.correctOption : undefined;
                 const pointsEarned = pred.userAnswer?.pointsEarned || (isCorrect ? (pred.options?.find((o: any) => (o.key || o.label) === selectedKey)?.points || 10) : 0);
                 const correctAnswerLabel = isClosed && !isCorrect && pred.correctOption
                   ? getOptionLabel(pred, pred.correctOption)
@@ -190,11 +181,7 @@ export default function MyPicksPage() {
                 let statusText = "PENDING";
                 let statusColor = "#ffd60a";
                 let cardClass = "game-card";
-                if (isMissed) {
-                  statusText = "MISSED";
-                  statusColor = "#6b7280";
-                  cardClass = "game-card opacity-50";
-                } else if (isClosed && isCorrect === true) {
+                if (isClosed && isCorrect === true) {
                   statusText = `+${pointsEarned || 0} pts`;
                   statusColor = "#22c55e";
                   cardClass = "card-green";
@@ -221,45 +208,31 @@ export default function MyPicksPage() {
                     </div>
                     <p className="text-sm font-medium text-white mb-2">{pred.question}</p>
                     <div className="flex items-center gap-2 flex-wrap">
-                      {isMissed ? (
-                        <span
-                          className="text-xs px-3 py-1 font-bold"
-                          style={{
-                            background: "#1a1a1a",
-                            border: "2px solid #333",
-                            borderRadius: "4px",
-                            color: "#6b7280",
-                          }}
-                        >
-                          Not answered
-                        </span>
-                      ) : (
-                        <span
-                          className="text-xs px-3 py-1 font-bold"
-                          style={{
-                            background: isClosed && isCorrect === false
-                              ? "rgba(255, 99, 65, 0.15)"
-                              : isClosed && isCorrect === true
-                              ? "rgba(34, 197, 94, 0.15)"
-                              : "#1a1a1a",
-                            border: `2px solid ${
-                              isClosed && isCorrect === false
-                                ? "#ff6341"
-                                : isClosed && isCorrect === true
-                                ? "#22c55e"
-                                : "#333"
-                            }`,
-                            borderRadius: "4px",
-                            color: isClosed && isCorrect === false
+                      <span
+                        className="text-xs px-3 py-1 font-bold"
+                        style={{
+                          background: isClosed && isCorrect === false
+                            ? "rgba(255, 99, 65, 0.15)"
+                            : isClosed && isCorrect === true
+                            ? "rgba(34, 197, 94, 0.15)"
+                            : "#1a1a1a",
+                          border: `2px solid ${
+                            isClosed && isCorrect === false
                               ? "#ff6341"
                               : isClosed && isCorrect === true
                               ? "#22c55e"
-                              : "#ccc",
-                          }}
-                        >
-                          Your pick: {selectedLabel}
-                        </span>
-                      )}
+                              : "#333"
+                          }`,
+                          borderRadius: "4px",
+                          color: isClosed && isCorrect === false
+                            ? "#ff6341"
+                            : isClosed && isCorrect === true
+                            ? "#22c55e"
+                            : "#ccc",
+                        }}
+                      >
+                        Your pick: {selectedLabel}
+                      </span>
                       {correctAnswerLabel && (
                         <span className="text-xs text-[#6b7280]">
                           Answer: {correctAnswerLabel}
