@@ -956,7 +956,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
     }
 
     // Use same formula as currentOver so "same over" detection is consistent
-    const prevCurrentOver = !prevScore || prevScore.overs <= 0 ? 0 : Math.min(Math.floor(prevScore.overs) + 1, 20);
+    const prevCurrentOver = !prevScore || prevScore.overs <= 0 ? 1 : Math.min(Math.floor(prevScore.overs) + 1, 20);
     if (prevScore && prevScore.innings === currentInnings && prevCurrentOver === currentOver) {
       // Same over — check if score/wickets/overs changed (ball was bowled)
       const ballBowled = nowScore !== prevScore.score || nowWickets !== prevScore.wickets || nowOvers !== prevScore.overs;

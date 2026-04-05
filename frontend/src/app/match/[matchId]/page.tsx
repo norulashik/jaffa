@@ -267,9 +267,15 @@ export default function MatchDashboard() {
 
     return () => {
       clearInterval(pollInterval);
+      socket.off("newPrediction");
+      socket.off("predictionsLocked");
+      socket.off("scoreUpdate");
+      socket.off("inningsBreak");
+      socket.off("predictionResolved");
+      socket.off("predictionResult");
       disconnectSocket();
     };
-  }, [phase, matchId]);
+  }, [phase, matchId, venueId]);
 
   const loadLiveData = async () => {
     try {
@@ -313,7 +319,8 @@ export default function MatchDashboard() {
           });
         }
         const storedUser = localStorage.getItem("jaffa_user");
-        const currentUserId = storedUser ? JSON.parse(storedUser).id : gameState.user?.id;
+        let currentUserId = gameState.user?.id;
+        if (storedUser) { try { currentUserId = JSON.parse(storedUser).id; } catch {} }
         const myIndex = lb.leaderboard.findIndex(
           (e: any) => e.userId === currentUserId
         );

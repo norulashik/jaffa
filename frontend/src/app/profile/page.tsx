@@ -29,11 +29,13 @@ export default function ProfilePage() {
 
     const userData = localStorage.getItem("jaffa_user");
     if (userData) {
-      const parsed = JSON.parse(userData);
-      setUser(parsed);
-      if (parsed.avatarConfig) {
-        setAvatarConfig(parsed.avatarConfig);
-      }
+      try {
+        const parsed = JSON.parse(userData);
+        setUser(parsed);
+        if (parsed.avatarConfig) {
+          setAvatarConfig(parsed.avatarConfig);
+        }
+      } catch {}
     }
 
     api.getUserStats().then(setStats).catch(() => {});
@@ -50,9 +52,11 @@ export default function ProfilePage() {
     // Update localStorage
     const userData = localStorage.getItem("jaffa_user");
     if (userData) {
-      const parsed = JSON.parse(userData);
-      parsed.avatarConfig = config;
-      localStorage.setItem("jaffa_user", JSON.stringify(parsed));
+      try {
+        const parsed = JSON.parse(userData);
+        parsed.avatarConfig = config;
+        localStorage.setItem("jaffa_user", JSON.stringify(parsed));
+      } catch {}
     }
     // Persist to backend
     try {

@@ -9,6 +9,11 @@ router.get("/:matchId/:venueId/round/:round", async (req: Request, res: Response
     const { matchId, venueId, round } = req.params;
     const roundNum = Number(round);
 
+    if (!Number.isInteger(roundNum) || roundNum < 1 || roundNum > 6) {
+      res.status(400).json({ error: "Round must be between 1 and 6" });
+      return;
+    }
+
     const pointsField = `round${roundNum}Points` as keyof typeof MatchParticipant.prototype;
 
     const participants = await MatchParticipant.findAll({
@@ -24,7 +29,7 @@ router.get("/:matchId/:venueId/round/:round", async (req: Request, res: Response
         rank: index + 1,
         userId: p.userId,
         displayName: userData?.displayName || "Unknown",
-        avatarConfig: userData?.avatarConfig ? JSON.parse(userData.avatarConfig) : null,
+        avatarConfig: userData?.avatarConfig ? (() => { try { return JSON.parse(userData.avatarConfig!); } catch { return null; } })() : null,
         points: (p as unknown as Record<string, number>)[pointsField as string] || 0,
         currentStreak: p.currentStreak,
         bestStreak: p.bestStreak,
@@ -57,7 +62,7 @@ router.get("/:matchId/:venueId/match", async (req: Request, res: Response): Prom
         rank: index + 1,
         userId: p.userId,
         displayName: userData?.displayName || "Unknown",
-        avatarConfig: userData?.avatarConfig ? JSON.parse(userData.avatarConfig) : null,
+        avatarConfig: userData?.avatarConfig ? (() => { try { return JSON.parse(userData.avatarConfig!); } catch { return null; } })() : null,
         totalPoints: p.totalPoints,
         currentStreak: p.currentStreak,
         bestStreak: p.bestStreak,

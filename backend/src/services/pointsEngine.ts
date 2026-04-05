@@ -1,4 +1,5 @@
 import { MatchParticipant, UserPrediction, Prediction } from "../models";
+import sequelize from "../config/database";
 import { Server as SocketIOServer } from "socket.io";
 
 const BOOST_MULTIPLIER = 2;
@@ -117,34 +118,57 @@ export async function resolvePrediction(
   let correctCount = 0;
 
   for (const up of userPredictions) {
-    const participant = await MatchParticipant.findOne({
-      where: { userId: up.userId, matchId: up.matchId, venueId: up.venueId },
+    let result: ReturnType<typeof calculatePoints> | undefined;
+
+    await sequelize.transaction(async (t) => {
+      const participant = await MatchParticipant.findOne({
+        where: { userId: up.userId, matchId: up.matchId, venueId: up.venueId },
+        transaction: t,
+        lock: t.LOCK.UPDATE,
+      });
+
+      if (!participant) return;
+
+      result = calculatePoints(prediction, up.selectedOption, up.boostType, participant.currentStreak);
+
+      await up.update({ isCorrect: result.isCorrect, pointsEarned: result.totalPoints }, { transaction: t });
+
+      if (result.isCorrect) {
+        correctCount++;
+
+        const roundField = `round${prediction.round}Points` as string;
+        const updateData: Record<string, unknown> = {
+          totalPoints: participant.totalPoints + result.totalPoints,
+          currentStreak: result.newStreak,
+          bestStreak: Math.max(participant.bestStreak, result.newStreak),
+          correctPredictions: participant.correctPredictions + 1,
+        };
+        // round0Points column does not exist — only persist round fields for rounds 1-6
+        if (prediction.round >= 1) {
+          updateData[roundField] = ((participant as unknown as Record<string, number>)[roundField] || 0) + result.totalPoints;
+        }
+
+        await participant.update(updateData as Partial<MatchParticipant>, { transaction: t });
+      } else {
+        const updateData: Record<string, unknown> = { currentStreak: 0 };
+
+        if (result.totalPoints < 0) {
+          const roundField = `round${prediction.round}Points` as string;
+          const newTotal = Math.max(0, participant.totalPoints + result.totalPoints);
+          updateData.totalPoints = newTotal;
+          if (prediction.round >= 1) {
+            const currentRoundPts = (participant as unknown as Record<string, number>)[roundField] || 0;
+            updateData[roundField] = Math.max(0, currentRoundPts + result.totalPoints);
+          }
+        }
+
+        await participant.update(updateData as Partial<MatchParticipant>, { transaction: t });
+      }
     });
 
-    if (!participant) continue;
-
-    const result = calculatePoints(prediction, up.selectedOption, up.boostType, participant.currentStreak);
-
-    await up.update({
-      isCorrect: result.isCorrect,
-      pointsEarned: result.totalPoints,
-    });
-
-    if (result.isCorrect) {
-      correctCount++;
-
-      const roundField = `round${prediction.round}Points` as string;
-      const updateData: Record<string, unknown> = {
-        totalPoints: participant.totalPoints + result.totalPoints,
-        [roundField]: ((participant as unknown as Record<string, number>)[roundField] || 0) + result.totalPoints,
-        currentStreak: result.newStreak,
-        bestStreak: Math.max(participant.bestStreak, result.newStreak),
-        correctPredictions: participant.correctPredictions + 1,
-      };
-
-      await participant.update(updateData as Partial<MatchParticipant>);
-
-      if (result.newStreak >= 5) {
+    // Emit hype events outside transaction (non-critical, socket emits)
+    if (result) {
+      if (result.isCorrect && result.newStreak >= 5) {
         const { User } = await import("../models");
         const user = await User.findByPk(up.userId);
         io.to(`venue:${up.venueId}:${up.matchId}`).emit("hypeEvent", {
@@ -152,19 +176,7 @@ export async function resolvePrediction(
           playerName: user?.displayName || "Someone",
           streak: result.newStreak,
         });
-      }
-    } else {
-      const updateData: Record<string, unknown> = { currentStreak: 0 };
-
-      if (result.totalPoints < 0) {
-        const roundField = `round${prediction.round}Points` as string;
-        const newTotal = Math.max(0, participant.totalPoints + result.totalPoints);
-        const currentRoundPts = (participant as unknown as Record<string, number>)[roundField] || 0;
-        const newRoundPts = Math.max(0, currentRoundPts + result.totalPoints);
-
-        updateData.totalPoints = newTotal;
-        updateData[roundField] = newRoundPts;
-
+      } else if (!result.isCorrect && result.totalPoints < 0) {
         const { User } = await import("../models");
         const user = await User.findByPk(up.userId);
         io.to(`venue:${up.venueId}:${up.matchId}`).emit("hypeEvent", {
@@ -173,8 +185,6 @@ export async function resolvePrediction(
           pointsLost: Math.abs(result.totalPoints),
         });
       }
-
-      await participant.update(updateData as Partial<MatchParticipant>);
     }
   }
 
