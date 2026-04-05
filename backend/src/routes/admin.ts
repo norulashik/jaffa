@@ -253,21 +253,18 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
       }
     }
 
-    // Generate per-over predictions TWO overs ahead (to be answered during the next over)
-    const twoAhead = nextOver + 1;
-    const twoAheadRound = getCurrentRound(innings, twoAhead);
-    if (twoAhead <= 20) {
-      // Use already-computed innings totals from above
-      const totalWickets = inningsWickets;
-      const totalScore = inningsScore;
-      const isAllOut = totalWickets >= 10;
+    // Compute innings totals for innings break detection and prediction generation
+    const totalWickets = inningsWickets;
+    const totalScore = inningsScore;
+    const isAllOut = totalWickets >= 10;
 
-      // For 2nd innings, check if target is chased
-      const inn1Final = updatedScoreData.innings1Final || updatedScoreData.innings1;
-      const inn1Score = inn1Final?.runs ?? inn1Final?.score ?? 0;
-      const targetChased = innings === 2 && inn1Score > 0 && totalScore >= (inn1Score + 1);
+    // For 2nd innings, check if target is chased
+    const inn1Final = updatedScoreData.innings1Final || updatedScoreData.innings1;
+    const inn1Score = inn1Final?.runs ?? inn1Final?.score ?? 0;
+    const targetChased = innings === 2 && inn1Score > 0 && totalScore >= (inn1Score + 1);
 
-      if (isAllOut && innings === 1) {
+    // Innings break: triggered when 1st innings ends — either all-out OR over 20 completed
+    if (innings === 1 && (isAllOut || overNumber === 20)) {
         // Auto-trigger innings break when first innings team is all out
         await match.update({
           currentPhase: "innings_break",
@@ -338,28 +335,30 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
         io.emit("inningsBreak", { matchId, target: totalScore + 1, team1Score: totalScore, team1Wickets: totalWickets });
 
         res.json({
-          message: `Over ${overNumber} completed — team all out, innings break auto-triggered`,
+          message: `Over ${overNumber} completed — innings break auto-triggered`,
           resolvedPredictions: overPredictions.length,
           currentPhase: "innings_break",
           nextRound,
-          allOut: true,
+          allOut: isAllOut,
         });
         return;
       }
 
-      if (!isAllOut && !targetChased) {
-        // Deduplication: check if predictions for this over+round already exist
-        const existingPreds = await Prediction.findAll({
-          where: { matchId, overNumber: twoAhead, round: twoAheadRound, category: "per_over" },
-        });
+    // Generate per-over predictions TWO overs ahead (only if still within innings)
+    const twoAhead = nextOver + 1;
+    const twoAheadRound = getCurrentRound(innings, twoAhead);
+    if (twoAhead <= 20 && !isAllOut && !targetChased) {
+      // Deduplication: check if predictions for this over+round already exist
+      const existingPreds = await Prediction.findAll({
+        where: { matchId, overNumber: twoAhead, round: twoAheadRound, category: "per_over" },
+      });
 
-        if (existingPreds.length === 0) {
-          const newPredictions = generatePerOverPredictions(matchId, twoAhead, twoAheadRound, currentBatter);
-          for (const p of newPredictions) {
-            await Prediction.create(p as any);
-          }
-          io.emit("newPrediction", { matchId, type: "per_over", overNumber: twoAhead, round: twoAheadRound });
+      if (existingPreds.length === 0) {
+        const newPredictions = generatePerOverPredictions(matchId, twoAhead, twoAheadRound, currentBatter);
+        for (const p of newPredictions) {
+          await Prediction.create(p as any);
         }
+        io.emit("newPrediction", { matchId, type: "per_over", overNumber: twoAhead, round: twoAheadRound });
       }
     }
 
@@ -677,6 +676,12 @@ router.post("/cricket/import/:fixtureId", async (req: any, res: Response): Promi
         await pred.update({ opensAt });
       }
     }
+
+    // Migrate any MatchCode records previously created with the sportsmonk_ prefixed ID
+    await MatchCode.update(
+      { matchId: match.id },
+      { where: { matchId: `sportsmonk_${fixtureId}` } }
+    );
 
     res.status(201).json({
       message: "Match imported",

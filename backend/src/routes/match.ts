@@ -68,7 +68,15 @@ router.get("/", async (_req: Request, res: Response): Promise<void> => {
 
     // 4. Merge and sort by startTime ascending (nearest first)
     const allMatches = [
-      ...dbMatches.map((m) => ({ ...m.toJSON(), source: "local" })),
+      ...dbMatches.map((m) => {
+        const sd = (m.scoreData as any) || {};
+        return {
+          ...m.toJSON(),
+          team1Img: sd.team1Img || null,
+          team2Img: sd.team2Img || null,
+          source: "local",
+        };
+      }),
       ...sportsmonkMatches,
     ].sort((a, b) => {
       const timeA = a.startTime ? new Date(a.startTime).getTime() : 0;
@@ -153,6 +161,13 @@ router.post("/import/:fixtureId", async (req: Request, res: Response): Promise<v
         await pred.update({ opensAt });
       }
     }
+
+    // Migrate any MatchCode records previously created with the sportsmonk_ prefixed ID
+    // (admin may generate code before import; once imported the UUID must be used)
+    await MatchCode.update(
+      { matchId: match.id },
+      { where: { matchId: `sportsmonk_${fixtureId}` } }
+    );
 
     console.log(`[Auto-Import] ${match.team1Short} vs ${match.team2Short} imported (${preMatchQuestions.length} predictions)`);
     res.status(201).json({ match });

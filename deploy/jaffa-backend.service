@@ -1,0 +1,16 @@
+[Unit]
+Description=JAFFA Backend
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/jaffa/backend
+Environment=NODE_ENV=production
+Environment=PORT=5000
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
