@@ -93,21 +93,25 @@ router.post("/match/:matchId/start", async (req: any, res: Response): Promise<vo
 
     // Generate Over 1 predictions (locked when 1st ball is bowled) — dedup in case start is called twice
     const round = 1;
+    let overPredictionsGenerated = 0;
     const existingOver1 = await Prediction.findOne({ where: { matchId, overNumber: 1, category: "per_over" } });
     if (!existingOver1) {
       const overPreds = generatePerOverPredictions(matchId, 1, round, currentBatter);
       for (const p of overPreds) {
         await Prediction.create(p as any);
       }
+      overPredictionsGenerated = overPreds.length;
     }
 
     // Generate Round 1 hot take (dedup)
     const hotTakeExpiresAt = new Date(Date.now() + 120_000);
+    let hotTakeGenerated = 0;
     const existingHotTake1 = await Prediction.findOne({ where: { matchId, category: "hot_take", round } });
     if (!existingHotTake1) {
       const hotTake = generateHotTake(matchId, round, match.team1Short, match.team2Short);
       if (hotTake) {
         await Prediction.create({ ...hotTake, expiresAt: hotTakeExpiresAt } as any);
+        hotTakeGenerated = 1;
       }
     }
 
@@ -127,7 +131,7 @@ router.post("/match/:matchId/start", async (req: any, res: Response): Promise<vo
 
     res.json({
       message: "Match started! Over 1 predictions are live.",
-      predictionsGenerated: overPreds.length + (hotTake ? 1 : 0),
+      predictionsGenerated: overPredictionsGenerated + hotTakeGenerated,
       preMatchLocked: preMatchPreds.length,
       currentPhase: "innings1_powerplay",
     });
@@ -452,6 +456,7 @@ router.post("/match/:matchId/innings-break", async (req: any, res: Response): Pr
       : match.team2Players;
 
     // Generate rivalry calls for second innings (with dedup)
+    let rivalryCallsGenerated = 0;
     const existingRivalryCallsManual = await Prediction.findAll({ where: { matchId, category: "rivalry_call" } });
     if (existingRivalryCallsManual.length === 0) {
       const rivalryCalls = generateRivalryCalls(
@@ -465,6 +470,7 @@ router.post("/match/:matchId/innings-break", async (req: any, res: Response): Pr
       for (const rc of rivalryCalls) {
         await Prediction.create({ ...rc, expiresAt: rivalryExpiresAt } as any);
       }
+      rivalryCallsGenerated = rivalryCalls.length;
     }
 
     // Generate round 3 rewards
@@ -480,6 +486,7 @@ router.post("/match/:matchId/innings-break", async (req: any, res: Response): Pr
 
     // Generate Over 1 (2nd innings) per-over predictions — locked when 1st ball of innings 2 is bowled (with dedup)
     const inn2Round = getCurrentRound(2, 1); // = 4
+    let innings2OverPredictionsGenerated = 0;
     const existingInn2Over1Manual = await Prediction.findAll({
       where: { matchId, overNumber: 1, round: inn2Round, category: "per_over" },
     });
@@ -488,6 +495,7 @@ router.post("/match/:matchId/innings-break", async (req: any, res: Response): Pr
       for (const p of inn2OverPreds) {
         await Prediction.create(p as any);
       }
+      innings2OverPredictionsGenerated = inn2OverPreds.length;
     }
 
     // Generate Round 4 hot take (with dedup check)
@@ -505,7 +513,11 @@ router.post("/match/:matchId/innings-break", async (req: any, res: Response): Pr
     io.emit("newPrediction", { matchId, type: "per_over", overNumber: 1, round: inn2Round });
     io.emit("inningsBreak", { matchId, target, team1Score, team1Wickets });
 
-    res.json({ message: "Innings break started", rivalryCallsGenerated: rivalryCalls.length, inn2OverPreds: inn2OverPreds.length });
+    res.json({
+      message: "Innings break started",
+      rivalryCallsGenerated,
+      inn2OverPreds: innings2OverPredictionsGenerated,
+    });
   } catch (error) {
     console.error("Innings break error:", error);
     res.status(500).json({ error: "Failed to start innings break" });
