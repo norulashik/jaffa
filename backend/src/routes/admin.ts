@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { Match, Prediction, MatchParticipant, Venue, User, Reward, MatchCode } from "../models";
 import { authenticateVenue, AuthRequest } from "../middleware/auth";
-import { UniqueConstraintError } from "sequelize";
+import { UniqueConstraintError, Op } from "sequelize";
 import {
   generatePreMatchPredictions,
   generatePerOverPredictions,
@@ -123,11 +123,11 @@ router.post("/match/:matchId/start", async (req: any, res: Response): Promise<vo
       await pred.update({ status: "locked" });
     }
     if (preMatchPreds.length > 0) {
-      io.emit("predictionsLocked", { matchId, type: "pre_match" });
+      io.to(`match:${matchId}`).emit("predictionsLocked", { matchId, type: "pre_match" });
     }
 
-    io.emit("newPrediction", { matchId, type: "per_over", overNumber: 1, round });
-    io.emit("matchStarted", { matchId });
+    io.to(`match:${matchId}`).emit("newPrediction", { matchId, type: "per_over", overNumber: 1, round });
+    io.to(`match:${matchId}`).emit("matchStarted", { matchId });
 
     res.json({
       message: "Match started! Over 1 predictions are live.",
@@ -152,14 +152,19 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
     if (!match) { res.status(404).json({ error: "Match not found" }); return; }
 
     const io = req.app.get("io");
-    const round = getCurrentRound(innings, overNumber);
+    const round = getCurrentRound(innings, overNumber, match.totalOvers);
 
     const nextOver = overNumber + 1;
 
     // Update match state — phase reflects the NEXT over being bowled, not the completed one
+    const _totalOvers = match.totalOvers || 20;
+    let ppEnd = Math.min(6, _totalOvers);
+    let midEnd = Math.ceil(_totalOvers * 0.75);
+    if (_totalOvers <= 3) { ppEnd = 1; midEnd = 2; }
+    else if (ppEnd >= midEnd) { midEnd = ppEnd + 1; }
     const newPhase = innings === 1
-      ? nextOver <= 6 ? "innings1_powerplay" : nextOver <= 15 ? "innings1_middle" : "innings1_death"
-      : nextOver <= 6 ? "innings2_powerplay" : nextOver <= 15 ? "innings2_middle" : "innings2_death";
+      ? nextOver <= ppEnd ? "innings1_powerplay" : nextOver <= midEnd ? "innings1_middle" : "innings1_death"
+      : nextOver <= ppEnd ? "innings2_powerplay" : nextOver <= midEnd ? "innings2_middle" : "innings2_death";
     // Compute aggregated innings totals from all stored over results
     const updatedScoreData: Record<string, any> = {
       ...match.scoreData,
@@ -193,7 +198,7 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
     });
 
     // Emit score update so frontend gets live scores immediately
-    io.emit("scoreUpdate", {
+    io.to(`match:${matchId}`).emit("scoreUpdate", {
       matchId,
       innings,
       over: nextOver,
@@ -226,14 +231,14 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
       await pred.update({ status: "locked" });
     }
     if (nextOverPreds.length > 0) {
-      io.emit("predictionsLocked", { matchId, overNumber: nextOver });
+      io.to(`match:${matchId}`).emit("predictionsLocked", { matchId, overNumber: nextOver });
     }
 
     // Generate next over's predictions
-    const nextRound = getCurrentRound(innings, nextOver);
+    const nextRound = getCurrentRound(innings, nextOver, match.totalOvers);
 
     // Check if round changed — generate hot take + round rewards
-    const prevRound = getCurrentRound(innings, overNumber);
+    const prevRound = getCurrentRound(innings, overNumber, match.totalOvers);
     if (nextRound !== prevRound && prevRound > 0) {
       // End of round — generate rewards
       const venues = await MatchParticipant.findAll({
@@ -261,7 +266,7 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
         const hotTake = generateHotTake(matchId, nextRound, match.team1Short, match.team2Short);
         if (hotTake) {
           await Prediction.create({ ...hotTake, expiresAt: roundHotTakeExpiresAt } as any);
-          io.emit("newPrediction", { matchId, type: "hot_take", round: nextRound });
+          io.to(`match:${matchId}`).emit("newPrediction", { matchId, type: "hot_take", round: nextRound });
         }
       }
     }
@@ -277,7 +282,7 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
     const targetChased = innings === 2 && inn1Score > 0 && totalScore >= (inn1Score + 1);
 
     // Innings break: triggered when 1st innings ends — either all-out OR over 20 completed
-    if (innings === 1 && (isAllOut || overNumber === 20)) {
+    if (innings === 1 && (isAllOut || overNumber >= (match.totalOvers || 20))) {
         // Auto-trigger innings break when first innings team is all out
         await match.update({
           currentPhase: "innings_break",
@@ -311,7 +316,7 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
         // Generate rivalry calls (with dedup)
         const existingRivalryCalls = await Prediction.findAll({ where: { matchId, category: "rivalry_call" } });
         if (existingRivalryCalls.length === 0) {
-          const rivalryCalls = generateRivalryCalls(matchId, totalScore + 1, chasingTeamShort, chasingTeamPlayers);
+          const rivalryCalls = generateRivalryCalls(matchId, totalScore + 1, chasingTeamShort, chasingTeamPlayers, match.totalOvers);
           const rivalryExpiresAt = new Date(Date.now() + 480_000);
           for (const rc of rivalryCalls) {
             await Prediction.create({ ...rc, expiresAt: rivalryExpiresAt } as any);
@@ -329,7 +334,7 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
         }
 
         // Generate Over 1 (2nd innings) predictions (with dedup)
-        const inn2Round = getCurrentRound(2, 1);
+        const inn2Round = getCurrentRound(2, 1, match.totalOvers);
         const existingInn2Over1 = await Prediction.findAll({
           where: { matchId, overNumber: 1, round: inn2Round, category: "per_over" },
         });
@@ -352,8 +357,8 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
           }
         }
 
-        io.emit("newPrediction", { matchId, type: "per_over", overNumber: 1, round: inn2Round });
-        io.emit("inningsBreak", { matchId, target: totalScore + 1, team1Score: totalScore, team1Wickets: totalWickets });
+        io.to(`match:${matchId}`).emit("newPrediction", { matchId, type: "per_over", overNumber: 1, round: inn2Round });
+        io.to(`match:${matchId}`).emit("inningsBreak", { matchId, target: totalScore + 1, team1Score: totalScore, team1Wickets: totalWickets });
 
         res.json({
           message: `Over ${overNumber} completed — innings break auto-triggered`,
@@ -367,8 +372,8 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
 
     // Generate per-over predictions TWO overs ahead (only if still within innings)
     const twoAhead = nextOver + 1;
-    const twoAheadRound = getCurrentRound(innings, twoAhead);
-    if (twoAhead <= 20 && !isAllOut && !targetChased) {
+    const twoAheadRound = getCurrentRound(innings, twoAhead, match.totalOvers);
+    if (twoAhead <= (match.totalOvers || 20) && !isAllOut && !targetChased) {
       // Deduplication: check if predictions for this over+round already exist
       const existingPreds = await Prediction.findAll({
         where: { matchId, overNumber: twoAhead, round: twoAheadRound, category: "per_over" },
@@ -379,7 +384,7 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
         for (const p of newPredictions) {
           await Prediction.create(p as any);
         }
-        io.emit("newPrediction", { matchId, type: "per_over", overNumber: twoAhead, round: twoAheadRound });
+        io.to(`match:${matchId}`).emit("newPrediction", { matchId, type: "per_over", overNumber: twoAhead, round: twoAheadRound });
       }
     }
 
@@ -392,6 +397,57 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
   } catch (error) {
     console.error("Advance over error:", error);
     res.status(500).json({ error: "Failed to advance over" });
+  }
+});
+
+// Reduce total overs (rain interruption)
+router.put("/match/:matchId/reduce-overs", async (req: any, res: Response): Promise<void> => {
+  try {
+    const { matchId } = req.params;
+    const { totalOvers } = req.body;
+
+    if (!totalOvers || totalOvers < 1 || totalOvers > 20) {
+      res.status(400).json({ error: "totalOvers must be between 1 and 20" });
+      return;
+    }
+
+    const match = await Match.findByPk(matchId);
+    if (!match) { res.status(404).json({ error: "Match not found" }); return; }
+
+    // Can't reduce below already-completed overs
+    const currentOver = match.currentOver || 0;
+    if (totalOvers < currentOver) {
+      res.status(400).json({ error: `Cannot reduce below current over (${currentOver})` });
+      return;
+    }
+
+    await match.update({ totalOvers });
+
+    // Lock and cancel open predictions for overs beyond the new limit
+    const stalePredictions = await Prediction.findAll({
+      where: {
+        matchId,
+        status: "open",
+        overNumber: { [Op.gt]: totalOvers },
+      },
+    });
+
+    for (const pred of stalePredictions) {
+      await pred.update({ status: "locked" });
+    }
+
+    const io = req.app.get("io");
+    io.to(`match:${matchId}`).emit("oversReduced", { matchId, totalOvers, lockedPredictions: stalePredictions.length });
+
+    console.log(`[Rain] Match ${matchId} reduced to ${totalOvers} overs. Locked ${stalePredictions.length} predictions.`);
+    res.json({
+      message: `Match reduced to ${totalOvers} overs`,
+      totalOvers,
+      lockedPredictions: stalePredictions.length,
+    });
+  } catch (error) {
+    console.error("Reduce overs error:", error);
+    res.status(500).json({ error: "Failed to reduce overs" });
   }
 });
 
@@ -463,7 +519,8 @@ router.post("/match/:matchId/innings-break", async (req: any, res: Response): Pr
         matchId,
         target,
         chasingTeamShort,
-        chasingTeamPlayers
+        chasingTeamPlayers,
+        match.totalOvers
       );
       // 8 minutes — enough time for innings break; backend locks them at first ball of innings 2
       const rivalryExpiresAt = new Date(Date.now() + 480_000);
@@ -485,7 +542,7 @@ router.post("/match/:matchId/innings-break", async (req: any, res: Response): Pr
     }
 
     // Generate Over 1 (2nd innings) per-over predictions — locked when 1st ball of innings 2 is bowled (with dedup)
-    const inn2Round = getCurrentRound(2, 1); // = 4
+    const inn2Round = getCurrentRound(2, 1, match.totalOvers); // = 4
     let innings2OverPredictionsGenerated = 0;
     const existingInn2Over1Manual = await Prediction.findAll({
       where: { matchId, overNumber: 1, round: inn2Round, category: "per_over" },
@@ -510,8 +567,8 @@ router.post("/match/:matchId/innings-break", async (req: any, res: Response): Pr
       }
     }
 
-    io.emit("newPrediction", { matchId, type: "per_over", overNumber: 1, round: inn2Round });
-    io.emit("inningsBreak", { matchId, target, team1Score, team1Wickets });
+    io.to(`match:${matchId}`).emit("newPrediction", { matchId, type: "per_over", overNumber: 1, round: inn2Round });
+    io.to(`match:${matchId}`).emit("inningsBreak", { matchId, target, team1Score, team1Wickets });
 
     res.json({
       message: "Innings break started",
@@ -541,6 +598,14 @@ router.post("/match/:matchId/end", async (req: any, res: Response): Promise<void
       scoreData: { ...match.scoreData, winner, playerOfMatch },
     });
 
+    // Close rooms for this match
+    try {
+      const { Room } = await import("../models");
+      await Room.update({ status: "closed" }, { where: { matchId, status: ["waiting", "active"] } });
+    } catch (err) {
+      console.error("Room close error:", err);
+    }
+
     // Lock any remaining open predictions — they can't be resolved without a correctOption
     const openPreds = await Prediction.findAll({
       where: { matchId, status: "open" },
@@ -563,7 +628,7 @@ router.post("/match/:matchId/end", async (req: any, res: Response): Promise<void
       await generateRoundRewards(matchId, v.venueId, 0, io);
     }
 
-    io.emit("matchEnd", { matchId, winner, playerOfMatch });
+    io.to(`match:${matchId}`).emit("matchEnd", { matchId, winner, playerOfMatch });
 
     res.json({ message: "Match ended" });
   } catch (error) {

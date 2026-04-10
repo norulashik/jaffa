@@ -7,7 +7,7 @@ import { IoCall } from "react-icons/io5";
 import { User, ArrowRight, ShieldCheck } from "lucide-react";
 import Image from "next/image";
 import { api } from "@/lib/api";
-import { cafeUrl } from "@/lib/navigation";
+import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 
 const BUNGEE: React.CSSProperties = {
   fontFamily: "'Bungee', 'Impact', cursive",
@@ -23,14 +23,17 @@ export default function LoginOTP() {
   const [venueName, setVenueName] = useState("");
 
   useEffect(() => {
-    const isCafeRoute = window.location.pathname.startsWith("/cafe/");
-    if (!isCafeRoute) {
-      router.replace("/");
+    // If already logged in, go to lobby
+    const token = localStorage.getItem("jaffa_token");
+    if (token) {
+      router.replace(isCafeRoute() ? cafeUrl("/lobby") : "/lobby");
       return;
     }
-    const venueId = localStorage.getItem("jaffa_venue_id");
-    if (venueId) {
-      api.getVenue(venueId).then((v) => setVenueName(v.name)).catch(() => {});
+    if (isCafeRoute()) {
+      const venueId = localStorage.getItem("jaffa_venue_id");
+      if (venueId) {
+        api.getVenue(venueId).then((v) => setVenueName(v.name)).catch(() => {});
+      }
     }
   }, [router]);
 
@@ -50,7 +53,7 @@ export default function LoginOTP() {
       const result = await api.loginWithPhone(phone, displayName.trim());
       localStorage.setItem("jaffa_token", result.token);
       localStorage.setItem("jaffa_user", JSON.stringify(result.user));
-      router.push(cafeUrl("/lobby"));
+      router.push(isCafeRoute() ? cafeUrl("/lobby") : "/lobby");
     } catch (err: any) {
       setError(err.message || "Login failed");
     } finally {

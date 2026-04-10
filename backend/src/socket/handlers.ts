@@ -4,10 +4,11 @@ export function setupSocketHandlers(io: SocketIOServer): void {
   io.on("connection", (socket: Socket) => {
     console.log(`Client connected: ${socket.id}`);
 
-    // Join a venue's match room
+    // Join a venue's match room + global match room
     socket.on("joinVenueMatch", (data: { venueId: string; matchId: string }) => {
       const room = `venue:${data.venueId}:${data.matchId}`;
       socket.join(room);
+      socket.join(`match:${data.matchId}`);
       console.log(`${socket.id} joined room ${room}`);
     });
 
@@ -15,6 +16,7 @@ export function setupSocketHandlers(io: SocketIOServer): void {
     socket.on("joinTV", (data: { venueId: string; matchId: string }) => {
       const room = `venue:${data.venueId}:${data.matchId}`;
       socket.join(room);
+      socket.join(`match:${data.matchId}`);
       socket.join(`tv:${data.venueId}`);
       console.log(`TV display ${socket.id} joined room ${room}`);
     });
@@ -22,6 +24,19 @@ export function setupSocketHandlers(io: SocketIOServer): void {
     // Leave rooms
     socket.on("leaveVenueMatch", (data: { venueId: string; matchId: string }) => {
       const room = `venue:${data.venueId}:${data.matchId}`;
+      socket.leave(room);
+    });
+
+    // Join a user room channel
+    socket.on("joinRoom", (data: { roomId: string }) => {
+      const room = `room:${data.roomId}`;
+      socket.join(room);
+      console.log(`${socket.id} joined room channel ${room}`);
+    });
+
+    // Leave a user room channel
+    socket.on("leaveRoom", (data: { roomId: string }) => {
+      const room = `room:${data.roomId}`;
       socket.leave(room);
     });
 

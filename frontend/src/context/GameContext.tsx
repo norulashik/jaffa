@@ -19,6 +19,8 @@ interface GameState {
   venueSlug: string | null;
   matchId: string | null;
   venueName: string | null;
+  roomId: string | null;
+  roomCode: string | null;
   currentRound: number;
   boostsUsedThisRound: number;
   boostsUsedRound: number;
@@ -26,6 +28,7 @@ interface GameState {
   currentStreak: number;
   bestStreak: number;
   totalPoints: number;
+  weeklyPoints: number;
   roundPoints: Record<number, number>;
   totalPredictions: number;
   correctPredictions: number;
@@ -44,6 +47,9 @@ type GameAction =
   | { type: "UPDATE_STREAK"; streak: number }
   | { type: "ADD_POINTS"; points: number; round: number }
   | { type: "SET_ROUND"; round: number }
+  | { type: "SET_ROOM"; roomId: string; roomCode?: string }
+  | { type: "CLEAR_ROOM" }
+  | { type: "SET_WEEKLY_POINTS"; weeklyPoints: number }
   | { type: "SET_LOADING"; isLoading: boolean }
   | { type: "LOGOUT" }
   | { type: "RESET" };
@@ -56,6 +62,8 @@ const initialState: GameState = {
   venueSlug: null,
   matchId: null,
   venueName: null,
+  roomId: null,
+  roomCode: null,
   currentRound: 0,
   boostsUsedThisRound: 0,
   boostsUsedRound: 0,
@@ -63,6 +71,7 @@ const initialState: GameState = {
   currentStreak: 0,
   bestStreak: 0,
   totalPoints: 0,
+  weeklyPoints: 0,
   roundPoints: {},
   totalPredictions: 0,
   correctPredictions: 0,
@@ -72,6 +81,9 @@ const initialState: GameState = {
 function gameReducer(state: GameState, action: GameAction): GameState {
   switch (action.type) {
     case "SET_USER":
+      if (typeof window !== "undefined") {
+        localStorage.setItem("jaffa_user", JSON.stringify(action.user));
+      }
       return { ...state, user: action.user, userId: action.user.id, token: action.token, isLoading: false };
     case "SET_TOKEN":
       if (typeof window !== "undefined") {
@@ -106,6 +118,20 @@ function gameReducer(state: GameState, action: GameAction): GameState {
       };
     case "SET_ROUND":
       return { ...state, currentRound: action.round, boostsUsedThisRound: 0, boostsUsedRound: 0 };
+    case "SET_ROOM":
+      if (typeof window !== "undefined") {
+        localStorage.setItem("jaffa_room_id", action.roomId);
+        if (action.roomCode) localStorage.setItem("jaffa_room_code", action.roomCode);
+      }
+      return { ...state, roomId: action.roomId, roomCode: action.roomCode || state.roomCode };
+    case "CLEAR_ROOM":
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("jaffa_room_id");
+        localStorage.removeItem("jaffa_room_code");
+      }
+      return { ...state, roomId: null, roomCode: null };
+    case "SET_WEEKLY_POINTS":
+      return { ...state, weeklyPoints: action.weeklyPoints };
     case "SET_LOADING":
       return { ...state, isLoading: action.isLoading };
     case "LOGOUT":
@@ -116,6 +142,8 @@ function gameReducer(state: GameState, action: GameAction): GameState {
         localStorage.removeItem("jaffa_venue_id");
         localStorage.removeItem("jaffa_match_id");
         localStorage.removeItem("jaffa_venue_name");
+        localStorage.removeItem("jaffa_room_id");
+        localStorage.removeItem("jaffa_room_code");
       }
       return { ...initialState, isLoading: false };
     default:
@@ -143,8 +171,10 @@ export function GameProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "SET_LOADING", isLoading: false });
       const savedVenueId = localStorage.getItem("jaffa_venue_id");
       const savedMatchId = localStorage.getItem("jaffa_match_id");
+      const savedRoomId = localStorage.getItem("jaffa_room_id");
       if (savedVenueId) dispatch({ type: "SET_VENUE", venueId: savedVenueId, venueName: localStorage.getItem("jaffa_venue_name") || "" });
       if (savedMatchId) dispatch({ type: "SET_MATCH", matchId: savedMatchId });
+      if (savedRoomId) dispatch({ type: "SET_ROOM", roomId: savedRoomId, roomCode: localStorage.getItem("jaffa_room_code") || undefined });
       return;
     }
 
@@ -167,8 +197,39 @@ export function GameProvider({ children }: { children: ReactNode }) {
         dispatch({ type: "SET_USER", user, token });
         const savedVenueId = localStorage.getItem("jaffa_venue_id");
         const savedMatchId = localStorage.getItem("jaffa_match_id");
+        const savedRoomId = localStorage.getItem("jaffa_room_id");
         if (savedVenueId) dispatch({ type: "SET_VENUE", venueId: savedVenueId, venueName: localStorage.getItem("jaffa_venue_name") || "" });
         if (savedMatchId) dispatch({ type: "SET_MATCH", matchId: savedMatchId });
+        if (savedRoomId) dispatch({ type: "SET_ROOM", roomId: savedRoomId, roomCode: localStorage.getItem("jaffa_room_code") || undefined });
+
+        // Fetch weekly points
+        fetch(`${process.env.NEXT_PUBLIC_API_URL || "/api"}/weekly-rewards/points`, {
+          headers: { Authorization: `Bearer ${token}`, "ngrok-skip-browser-warning": "true" },
+        })
+          .then((r) => r.ok ? r.json() : Promise.reject())
+          .then((data) => dispatch({ type: "SET_WEEKLY_POINTS", weeklyPoints: data.weeklyPoints }))
+          .catch(() => {});
+
+        // Capture geolocation once for global leaderboard (fire-and-forget)
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              fetch(`${process.env.NEXT_PUBLIC_API_URL || "/api"}/auth/location`, {
+                method: "PUT",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                  "ngrok-skip-browser-warning": "true",
+                },
+                body: JSON.stringify({
+                  latitude: pos.coords.latitude,
+                  longitude: pos.coords.longitude,
+                }),
+              }).catch(() => {});
+            },
+            () => {} // silently ignore if user denies
+          );
+        }
       })
       .catch(() => {
         clearTimeout(timeout);

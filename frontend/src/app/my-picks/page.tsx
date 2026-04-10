@@ -8,7 +8,7 @@ import BottomNav from "@/components/BottomNav";
 import { Target, HelpCircle } from "lucide-react";
 import { useGame } from "@/context/GameContext";
 import { api } from "@/lib/api";
-import { cafeUrl } from "@/lib/navigation";
+import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 
 const getCategoryLabel = (pred: any) => {
   if (pred.category === "per_over") return `Over ${pred.overNumber || ""}`;
@@ -35,7 +35,7 @@ export default function MyPicksPage() {
   useEffect(() => {
     const token = localStorage.getItem("jaffa_token");
     if (!token) {
-      router.replace(cafeUrl("/login"));
+      router.replace(isCafeRoute() ? cafeUrl("/login") : "/login");
       return;
     }
 

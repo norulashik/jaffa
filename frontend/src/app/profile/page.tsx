@@ -7,10 +7,11 @@ import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
 import CricketAvatar from "@/components/CricketAvatar";
 import AvatarCustomizer from "@/components/AvatarCustomizer";
-import { Settings, HelpCircle, LogOut, ChevronRight, User } from "lucide-react";
+import { Settings, HelpCircle, LogOut, ChevronRight, User, MapPin, Trophy } from "lucide-react";
 import { api } from "@/lib/api";
 import { AvatarConfig } from "@/types/avatar";
-import { cafeUrl } from "@/lib/navigation";
+import { cafeUrl, isCafeRoute } from "@/lib/navigation";
+import { GiCrownCoin } from "react-icons/gi";
 import { toast } from "sonner";
 
 export default function ProfilePage() {
@@ -18,12 +19,18 @@ export default function ProfilePage() {
   const [user, setUser] = useState<any>(null);
   const [avatarConfig, setAvatarConfig] = useState<AvatarConfig | null>(null);
   const [showCustomizer, setShowCustomizer] = useState(false);
-  const [stats, setStats] = useState<{ matchesPlayed: number; accuracy: number } | null>(null);
+  const [stats, setStats] = useState<{
+    matchesPlayed: number;
+    accuracy: number;
+    lifetimePoints: number;
+    city: string | null;
+    state: string | null;
+  } | null>(null);
 
   useEffect(() => {
     const token = localStorage.getItem("jaffa_token");
     if (!token) {
-      router.replace(cafeUrl("/login"));
+      router.replace(isCafeRoute() ? cafeUrl("/login") : "/login");
       return;
     }
 
@@ -38,13 +45,13 @@ export default function ProfilePage() {
       } catch {}
     }
 
-    api.getUserStats().then(setStats).catch(() => {});
+    api.getUserStats().then((data) => setStats(data)).catch(() => {});
   }, []);
 
   const handleLogout = () => {
     localStorage.removeItem("jaffa_token");
     localStorage.removeItem("jaffa_user");
-    router.push(cafeUrl("/login"));
+    router.push(isCafeRoute() ? cafeUrl("/login") : "/login");
   };
 
   const handleSaveAvatar = async (config: AvatarConfig) => {
@@ -154,8 +161,60 @@ export default function ProfilePage() {
           </section>
         )}
 
+        {/* Lifetime Points + Location */}
+        {stats && (
+          <section className="space-y-3 mb-8">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="game-card text-center py-4">
+                <div className="flex items-center justify-center gap-1.5 mb-1">
+                  <GiCrownCoin className="text-xl text-[#ff6341]" />
+                </div>
+                <div
+                  className="text-3xl font-extrabold text-[#ff6341]"
+                  style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                >
+                  {stats.lifetimePoints}
+                </div>
+                <div className="text-xs text-[#6b7280] uppercase tracking-widest font-bold mt-1">
+                  Lifetime Points
+                </div>
+              </div>
+              <div className="game-card text-center py-4 flex flex-col items-center justify-center">
+                <MapPin size={18} className="text-[#3b9eff] mb-1" />
+                <div
+                  className="text-sm font-bold text-white"
+                  style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                >
+                  {stats.city || "—"}
+                </div>
+                <div className="text-[10px] text-[#6b7280] uppercase tracking-widest font-bold mt-0.5">
+                  {stats.state || "Location not set"}
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
         {/* Settings */}
         <section className="space-y-3">
+          <motion.button
+            whileTap={{ scale: 0.98 }}
+            onClick={() => router.push("/global-leaderboard")}
+            className="w-full game-card flex items-center justify-between cursor-pointer text-left"
+            style={{ border: "2px solid #ff6341", boxShadow: "4px 4px 0 0 #ff6341" }}
+          >
+            <div className="flex items-center gap-4">
+              <Trophy size={20} className="text-[#ff6341]" />
+              <div>
+                <span className="font-bold text-[#ff6341] uppercase text-sm" style={{ fontFamily: "'Bungee', 'Impact', cursive" }}>
+                  Global Leaderboard
+                </span>
+                <p className="text-[10px] text-[#6b7280]">Lifetime rankings by city, state & all India</p>
+              </div>
+            </div>
+            <ChevronRight size={20} className="text-[#ff6341]" />
+          </motion.button>
+
           <motion.button
             whileTap={{ scale: 0.98 }}
             onClick={() => setShowCustomizer(true)}

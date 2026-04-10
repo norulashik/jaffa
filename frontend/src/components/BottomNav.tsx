@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { GiCastle, GiPodiumWinner, GiTrophyCup } from "react-icons/gi";
 import { GiAlarmClock } from "react-icons/gi";
-import { cafeUrl } from "@/lib/navigation";
+import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 import { useGame } from "@/context/GameContext";
 
 const navItems = [
@@ -19,10 +19,12 @@ export default function BottomNav() {
   const { state } = useGame();
   const pathname = usePathname();
   const [storedMatchId, setStoredMatchId] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
   const normalizedPathname = pathname?.replace(/^\/cafe\/[^/]+/, "") || pathname || "/";
   const activeMatchId = state.matchId || storedMatchId;
 
   useEffect(() => {
+    setMounted(true);
     if (typeof window === "undefined") return;
     setStoredMatchId(localStorage.getItem("jaffa_match_id"));
   }, [state.matchId, pathname]);
@@ -38,7 +40,7 @@ export default function BottomNav() {
             item.key === "home" && activeMatchId
               ? `/match/${activeMatchId}`
               : item.href;
-          const resolvedHref = cafeUrl(href) || href;
+          const resolvedHref = mounted && isCafeRoute() ? cafeUrl(href) : href;
           const isActive =
             item.key === "home"
               ? normalizedPathname?.startsWith("/match/") ||

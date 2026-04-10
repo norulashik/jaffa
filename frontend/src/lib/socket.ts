@@ -37,6 +37,16 @@ export function joinVenueMatch(venueId: string, matchId: string): void {
   s.emit("joinVenueMatch", { venueId, matchId });
 }
 
+export function joinSocketRoom(roomId: string): void {
+  const s = connectSocket();
+  s.emit("joinRoom", { roomId });
+}
+
+export function leaveSocketRoom(roomId: string): void {
+  const s = connectSocket();
+  s.emit("leaveRoom", { roomId });
+}
+
 export function disconnectSocket(): void {
   if (socket) {
     socket.disconnect();

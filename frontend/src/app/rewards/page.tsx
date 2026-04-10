@@ -8,7 +8,7 @@ import { Trophy, Star, Gift, Lock, Copy } from "lucide-react";
 import { useGame } from "@/context/GameContext";
 import { api } from "@/lib/api";
 import { useRouter } from "next/navigation";
-import { cafeUrl } from "@/lib/navigation";
+import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 import { toast } from "sonner";
 
 export default function RewardsPage() {
@@ -23,7 +23,7 @@ export default function RewardsPage() {
   useEffect(() => {
     const token = localStorage.getItem("jaffa_token");
     if (!token) {
-      router.replace(cafeUrl("/login"));
+      router.replace(isCafeRoute() ? cafeUrl("/login") : "/login");
       return;
     }
 

@@ -5,10 +5,11 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
-import { Flame, Share2, Loader2 } from "lucide-react";
+import { Flame, Share2, Loader2, Users, Plus, LogIn } from "lucide-react";
 import { api } from "@/lib/api";
-import { cafeUrl } from "@/lib/navigation";
+import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 import { toast } from "sonner";
+import RoomCard from "@/components/RoomCard";
 
 interface Match {
   id: string;
@@ -31,6 +32,8 @@ export default function HomeLiveMatches() {
   const router = useRouter();
   const [matches, setMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(true);
+  const [myRooms, setMyRooms] = useState<any[]>([]);
+  const [roomsLoading, setRoomsLoading] = useState(false);
 
   // Match code modal state
   const [codeModal, setCodeModal] = useState<{ match: Match; code: string; error: string; validating: boolean } | null>(null);
@@ -38,10 +41,11 @@ export default function HomeLiveMatches() {
   useEffect(() => {
     const token = localStorage.getItem("jaffa_token");
     if (!token) {
-      router.push(cafeUrl("/login"));
+      router.push(isCafeRoute() ? cafeUrl("/login") : "/login");
       return;
     }
     loadMatches();
+    loadMyRooms();
   }, []);
 
   const loadMatches = async () => {
@@ -55,6 +59,19 @@ export default function HomeLiveMatches() {
     }
   };
 
+  const loadMyRooms = async () => {
+    setRoomsLoading(true);
+    try {
+      const data = await api.getMyRooms();
+      setMyRooms(data.rooms || []);
+    } catch {
+      // Silently fail
+    } finally {
+      setRoomsLoading(false);
+    }
+  };
+
+  const hasVenue = typeof window !== "undefined" && isCafeRoute() && !!localStorage.getItem("jaffa_venue_id") && localStorage.getItem("jaffa_venue_id") !== "00000000-0000-0000-0000-000000000001";
   const liveMatches = matches.filter((m) => m.status === "live");
   const upcomingMatches = matches.filter((m) => m.status === "upcoming");
 
@@ -159,6 +176,57 @@ export default function HomeLiveMatches() {
           </h2>
         </section>
 
+        {/* Play with Friends Section — global users only */}
+        {!hasVenue && (
+          <section className="mb-6">
+            <h3
+              className="text-lg font-bold text-white mb-4 pl-3 uppercase"
+              style={{
+                fontFamily: "'Bungee', 'Impact', cursive",
+                borderLeft: "4px solid #3b9eff",
+              }}
+            >
+              PLAY WITH FRIENDS
+            </h3>
+
+            <div className="flex gap-3 mb-4">
+              <button
+                onClick={() => router.push("/room/create")}
+                className="flex-1 btn-sticker uppercase tracking-tight py-3 flex items-center justify-center gap-2 text-sm font-bold"
+                style={{ background: "#3b9eff", color: "#fff", border: "2px solid #3b9eff" }}
+              >
+                <Plus size={18} /> Create Room
+              </button>
+              <button
+                onClick={() => router.push("/room/join")}
+                className="flex-1 btn-sticker uppercase tracking-tight py-3 flex items-center justify-center gap-2 text-sm font-bold"
+                style={{ background: "#1a1a1a", color: "#fff", border: "2px solid #3b9eff" }}
+              >
+                <LogIn size={18} /> Join Room
+              </button>
+            </div>
+
+            {/* My Active Rooms */}
+            {roomsLoading && (
+              <div className="flex justify-center py-4">
+                <Loader2 size={18} className="animate-spin text-[#6b7280]" />
+              </div>
+            )}
+
+            {!roomsLoading && myRooms.length > 0 && (
+              <div>
+                <p className="text-[10px] text-[#6b7280] uppercase tracking-wider font-bold mb-2">
+                  <Users size={12} className="inline mr-1" />
+                  My Rooms
+                </p>
+                {myRooms.map((room) => (
+                  <RoomCard key={room.id} room={room} />
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
         {/* Loading State */}
         {loading && (
           <div className="flex justify-center py-12">
@@ -256,13 +324,31 @@ export default function HomeLiveMatches() {
 
             {/* Footer Action */}
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => handleJoin(match)}
-                disabled={importing === match.id}
-                className="flex-1 btn-sticker btn-orange uppercase tracking-tight disabled:opacity-50"
-              >
-                {importing === match.id ? "LOADING..." : "JOIN NOW"}
-              </button>
+              {hasVenue ? (
+                <button
+                  onClick={() => handleJoin(match)}
+                  disabled={importing === match.id}
+                  className="flex-1 btn-sticker btn-orange uppercase tracking-tight disabled:opacity-50"
+                >
+                  {importing === match.id ? "LOADING..." : "JOIN NOW"}
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={() => router.push(`/room/create?matchId=${match.id}`)}
+                    className="flex-1 btn-sticker btn-orange uppercase tracking-tight"
+                  >
+                    CREATE ROOM
+                  </button>
+                  <button
+                    onClick={() => router.push(`/room/join?matchId=${match.id}`)}
+                    className="flex-1 btn-sticker uppercase tracking-tight"
+                    style={{ background: "#1a1a1a", color: "#fff", border: "2px solid #ff6341" }}
+                  >
+                    JOIN ROOM
+                  </button>
+                </>
+              )}
               <button
                 onClick={() => handleShare(match)}
                 className="w-12 h-12 flex items-center justify-center text-[#6b7280] hover:text-[#ff6341] transition-colors"
@@ -378,13 +464,31 @@ export default function HomeLiveMatches() {
               </div>
 
               {startDate && (startDate.getTime() - now) <= 45 * 60 * 1000 ? (
-                <button
-                  onClick={() => handleJoin(match)}
-                  disabled={importing === match.id}
-                  className="w-full btn-sticker btn-orange uppercase tracking-tight disabled:opacity-50"
-                >
-                  {importing === match.id ? "LOADING..." : "JOIN MATCH"}
-                </button>
+                hasVenue ? (
+                  <button
+                    onClick={() => handleJoin(match)}
+                    disabled={importing === match.id}
+                    className="w-full btn-sticker btn-orange uppercase tracking-tight disabled:opacity-50"
+                  >
+                    {importing === match.id ? "LOADING..." : "JOIN MATCH"}
+                  </button>
+                ) : (
+                  <div className="flex gap-3 w-full">
+                    <button
+                      onClick={() => router.push(`/room/create?matchId=${match.id}`)}
+                      className="flex-1 btn-sticker btn-orange uppercase tracking-tight"
+                    >
+                      CREATE ROOM
+                    </button>
+                    <button
+                      onClick={() => router.push(`/room/join?matchId=${match.id}`)}
+                      className="flex-1 btn-sticker uppercase tracking-tight"
+                      style={{ background: "#1a1a1a", color: "#fff", border: "2px solid #ff6341" }}
+                    >
+                      JOIN ROOM
+                    </button>
+                  </div>
+                )
               ) : (
                 <div className="space-y-2">
                   <button

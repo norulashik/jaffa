@@ -2,7 +2,9 @@ import { Router, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { User, OTP, MatchParticipant } from "../models";
 import { Op } from "sequelize";
+import sequelize from "../config/database";
 import { generateAvatarConfig } from "../utils/avatarGenerator";
+import { authenticateUser, AuthRequest } from "../middleware/auth";
 
 const router = Router();
 
@@ -25,13 +27,28 @@ router.post("/phone-login", async (req: Request, res: Response): Promise<void> =
         return;
       }
 
+      const trimmedName = String(displayName).trim();
+      const nameTaken = await User.findOne({ where: sequelize.where(sequelize.fn("LOWER", sequelize.col("displayName")), trimmedName.toLowerCase()) });
+      if (nameTaken) {
+        res.status(409).json({ error: "This nickname is already taken. Choose another name." });
+        return;
+      }
+
       const avatarConfig = JSON.stringify(generateAvatarConfig(phone));
       user = await User.create({
         phone,
-        displayName: String(displayName).trim(),
+        displayName: trimmedName,
         avatarConfig,
       });
       isNewUser = true;
+    } else if (displayName && String(displayName).trim() && user.displayName !== String(displayName).trim()) {
+      const trimmedName = String(displayName).trim();
+      const nameTaken = await User.findOne({ where: sequelize.where(sequelize.fn("LOWER", sequelize.col("displayName")), trimmedName.toLowerCase()) });
+      if (nameTaken && nameTaken.id !== user.id) {
+        res.status(409).json({ error: "This nickname is already taken. Choose another name." });
+        return;
+      }
+      await user.update({ displayName: trimmedName });
     }
 
     if (!user.avatarConfig) {
@@ -137,8 +154,15 @@ router.post("/verify-otp", async (req: Request, res: Response): Promise<void> =>
         return;
       }
 
+      const trimmedName = String(displayName).trim();
+      const nameTaken = await User.findOne({ where: sequelize.where(sequelize.fn("LOWER", sequelize.col("displayName")), trimmedName.toLowerCase()) });
+      if (nameTaken) {
+        res.status(409).json({ error: "This nickname is already taken. Choose another name." });
+        return;
+      }
+
       const avatarConfig = JSON.stringify(generateAvatarConfig(phone));
-      user = await User.create({ phone, displayName, avatarConfig });
+      user = await User.create({ phone, displayName: trimmedName, avatarConfig });
       isNewUser = true;
     }
 
@@ -208,6 +232,31 @@ router.get("/me", async (req: Request, res: Response): Promise<void> => {
   }
 });
 
+// Update avatar
+router.put("/avatar", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.userId!;
+    const { avatarConfig } = req.body;
+
+    if (!avatarConfig) {
+      res.status(400).json({ error: "avatarConfig is required" });
+      return;
+    }
+
+    const user = await User.findByPk(userId);
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    await user.update({ avatarConfig: JSON.stringify(avatarConfig) });
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Update avatar error:", error);
+    res.status(500).json({ error: "Failed to update avatar" });
+  }
+});
+
 // Get user stats (accuracy, matches played)
 router.get("/stats", async (req: Request, res: Response): Promise<void> => {
   try {
@@ -230,9 +279,66 @@ router.get("/stats", async (req: Request, res: Response): Promise<void> => {
       ? Math.round((totalCorrect / totalPredictions) * 100)
       : 0;
 
-    res.json({ matchesPlayed, totalCorrect, totalPredictions, accuracy });
+    const user = await User.findByPk(decoded.userId);
+
+    res.json({
+      matchesPlayed,
+      totalCorrect,
+      totalPredictions,
+      accuracy,
+      lifetimePoints: user?.lifetimePoints || 0,
+      city: user?.city || null,
+      state: user?.state || null,
+    });
   } catch {
     res.status(401).json({ error: "Invalid token" });
+  }
+});
+
+// Update user location (one-time, reverse geocode from lat/lon)
+router.put("/location", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.userId!;
+    const { latitude, longitude } = req.body;
+
+    if (!latitude || !longitude) {
+      res.status(400).json({ error: "Latitude and longitude required" });
+      return;
+    }
+
+    const user = await User.findByPk(userId);
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    // Only set once — don't overwrite existing location
+    if (user.city) {
+      res.json({ city: user.city, state: user.state, message: "Location already set" });
+      return;
+    }
+
+    const geoRes = await fetch(
+      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
+    );
+
+    if (!geoRes.ok) {
+      res.status(502).json({ error: "Geocoding service unavailable" });
+      return;
+    }
+
+    const geo: any = await geoRes.json();
+    const city = geo.city || geo.locality || null;
+    const state = geo.principalSubdivision || null;
+
+    if (city || state) {
+      await user.update({ city, state });
+    }
+
+    res.json({ city, state });
+  } catch (error) {
+    console.error("Location update error:", error);
+    res.status(500).json({ error: "Failed to update location" });
   }
 });
 

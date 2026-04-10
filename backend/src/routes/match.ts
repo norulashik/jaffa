@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { Match, MatchParticipant, Prediction, MatchCode } from "../models";
+import { Match, MatchParticipant, Prediction, MatchCode, User } from "../models";
 import { authenticateUser, AuthRequest } from "../middleware/auth";
 import { fetchUpcomingFixtures, fetchSportsmonkLiveScores, fetchTeamData } from "../services/sportsmonkApi";
 import { generatePreMatchPredictions, getCurrentRound } from "../services/predictionEngine";
@@ -232,7 +232,7 @@ router.post("/:matchId/join", authenticateUser, async (req: AuthRequest, res: Re
     }
 
     const currentRound = match.status === "live"
-      ? getCurrentRound(match.currentInnings || 1, match.currentOver || 1)
+      ? getCurrentRound(match.currentInnings || 1, match.currentOver || 1, match.totalOvers)
       : 0;
 
     const participant = await MatchParticipant.create({
@@ -245,6 +245,30 @@ router.post("/:matchId/join", authenticateUser, async (req: AuthRequest, res: Re
     const io = req.app.get("io");
     const playerCount = await MatchParticipant.count({ where: { matchId, venueId } });
     io.to(`venue:${venueId}:${matchId}`).emit("playerCount", { count: playerCount });
+
+    // Fire-and-forget: capture city/state from GPS if not already set
+    const { latitude, longitude } = req.body;
+    if (latitude && longitude) {
+      User.findByPk(userId).then(async (user) => {
+        if (user && !user.city) {
+          try {
+            const geoRes = await fetch(
+              `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
+            );
+            if (geoRes.ok) {
+              const geo: any = await geoRes.json();
+              const city = geo.city || geo.locality || null;
+              const state = geo.principalSubdivision || null;
+              if (city || state) {
+                await user.update({ city, state });
+              }
+            }
+          } catch (geoErr) {
+            console.error("Reverse geocoding error:", geoErr);
+          }
+        }
+      }).catch(() => {});
+    }
 
     res.status(201).json({ participant });
   } catch (error) {
@@ -267,7 +291,7 @@ router.get("/:matchId/balls", async (req: Request, res: Response): Promise<void>
     const overs: { overNumber: number; innings: number; balls: { label: string; type: string }[] }[] = [];
     const currentOver = (sd.currentOver as number) || 1;
     for (let inn = 1; inn <= currentInnings; inn++) {
-      const maxOvers = 20;
+      const maxOvers = match.totalOvers || 20;
       for (let ov = 1; ov <= maxOvers; ov++) {
         const key = `innings${inn}_over${ov}_balls`;
         if (sd[key]) {
@@ -310,10 +334,11 @@ router.get("/:matchId/state", authenticateUser, async (req: AuthRequest, res: Re
       where: { matchId, venueId },
     });
 
-    // Derive currentRound from match state if participant's round is stale
+    // Derive currentRound from match state if participant's round is stale, and persist it
     if (participant && participant.currentRound === 0 && match.status === "live") {
-      const derivedRound = getCurrentRound(match.currentInnings || 1, match.currentOver || 1);
+      const derivedRound = getCurrentRound(match.currentInnings || 1, match.currentOver || 1, match.totalOvers);
       participant.currentRound = derivedRound;
+      await participant.update({ currentRound: derivedRound });
     }
 
     res.json({ match, participant, openPredictions, playerCount });

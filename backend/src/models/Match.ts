@@ -18,12 +18,13 @@ interface MatchAttributes {
   currentPhase: InningsPhase;
   currentOver: number;
   currentInnings: number;
+  totalOvers: number;
   scoreData: Record<string, unknown>;
   createdAt?: Date;
   updatedAt?: Date;
 }
 
-interface MatchCreationAttributes extends Optional<MatchAttributes, "id" | "externalId" | "status" | "currentPhase" | "currentOver" | "currentInnings" | "scoreData" | "team1Players" | "team2Players"> {}
+interface MatchCreationAttributes extends Optional<MatchAttributes, "id" | "externalId" | "status" | "currentPhase" | "currentOver" | "currentInnings" | "scoreData" | "totalOvers" | "team1Players" | "team2Players"> {}
 
 class Match extends Model<MatchAttributes, MatchCreationAttributes> implements MatchAttributes {
   public id!: string;
@@ -39,6 +40,7 @@ class Match extends Model<MatchAttributes, MatchCreationAttributes> implements M
   public currentPhase!: InningsPhase;
   public currentOver!: number;
   public currentInnings!: number;
+  public totalOvers!: number;
   public scoreData!: Record<string, unknown>;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -98,6 +100,10 @@ Match.init(
     currentInnings: {
       type: DataTypes.INTEGER,
       defaultValue: 0,
+    },
+    totalOvers: {
+      type: DataTypes.INTEGER,
+      defaultValue: 20,
     },
     scoreData: {
       type: DataTypes.JSON,

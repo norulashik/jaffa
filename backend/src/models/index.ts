@@ -8,6 +8,9 @@ import MatchParticipant from "./MatchParticipant";
 import Reward from "./Reward";
 import MatchCode from "./MatchCode";
 import OTP from "./OTP";
+import Room from "./Room";
+import RoomMember from "./RoomMember";
+import WeeklyRedemption from "./WeeklyRedemption";
 
 // Associations
 
@@ -47,6 +50,23 @@ MatchCode.belongsTo(Venue, { foreignKey: "venueId", as: "venue" });
 Prediction.hasMany(UserPrediction, { foreignKey: "predictionId", as: "userPredictions" });
 UserPrediction.belongsTo(Prediction, { foreignKey: "predictionId", as: "prediction" });
 
+// Room associations
+User.hasMany(Room, { foreignKey: "hostUserId", as: "hostedRooms" });
+Room.belongsTo(User, { foreignKey: "hostUserId", as: "host" });
+
+Match.hasMany(Room, { foreignKey: "matchId", as: "rooms" });
+Room.belongsTo(Match, { foreignKey: "matchId", as: "match" });
+
+Room.hasMany(RoomMember, { foreignKey: "roomId", as: "members" });
+RoomMember.belongsTo(Room, { foreignKey: "roomId", as: "room" });
+
+User.hasMany(RoomMember, { foreignKey: "userId", as: "roomMemberships" });
+RoomMember.belongsTo(User, { foreignKey: "userId", as: "user" });
+
+// Weekly redemptions
+User.hasMany(WeeklyRedemption, { foreignKey: "userId", as: "weeklyRedemptions" });
+WeeklyRedemption.belongsTo(User, { foreignKey: "userId", as: "user" });
+
 export {
   sequelize,
   User,
@@ -58,4 +78,7 @@ export {
   Reward,
   MatchCode,
   OTP,
+  Room,
+  RoomMember,
+  WeeklyRedemption,
 };

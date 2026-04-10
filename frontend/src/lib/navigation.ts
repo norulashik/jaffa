@@ -7,3 +7,8 @@ export function getCafePrefix(): string {
 export function cafeUrl(path: string): string {
   return `${getCafePrefix()}${path}`;
 }
+
+export function isCafeRoute(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.location.pathname.startsWith("/cafe/");
+}

@@ -166,6 +166,36 @@ export async function resolvePrediction(
       }
     });
 
+    // Accumulate weekly points
+    if (result && result.totalPoints !== 0) {
+      try {
+        const { User } = await import("../models");
+        const { getYearWeekNumber } = await import("../utils/weekHelper");
+        const currentWeek = getYearWeekNumber();
+
+        await sequelize.transaction(async (t) => {
+          const user = await User.findByPk(up.userId, { transaction: t, lock: t.LOCK.UPDATE });
+          if (!user) return;
+
+          let currentWeeklyPoints = user.weeklyPoints;
+          if (user.weekNumber !== currentWeek) {
+            currentWeeklyPoints = 0;
+          }
+
+          await user.update(
+            {
+              weeklyPoints: Math.max(0, currentWeeklyPoints + result!.totalPoints),
+              weekNumber: currentWeek,
+              lifetimePoints: Math.max(0, (user.lifetimePoints || 0) + result!.totalPoints),
+            },
+            { transaction: t }
+          );
+        });
+      } catch (err) {
+        console.error("Weekly points update error:", err);
+      }
+    }
+
     // Emit hype events outside transaction (non-critical, socket emits)
     if (result) {
       if (result.isCorrect && result.newStreak >= 5) {
@@ -215,6 +245,23 @@ export async function resolvePrediction(
     io.to(`venue:${venueId}:${prediction.matchId}`).emit("leaderboardUpdate", {
       round: prediction.round,
     });
+  }
+
+  // Emit room-specific leaderboard updates
+  try {
+    const { Room } = await import("../models");
+    const activeRooms = await Room.findAll({
+      where: { matchId: prediction.matchId, status: ["waiting", "active"] },
+      attributes: ["id"],
+    });
+    for (const room of activeRooms) {
+      io.to(`room:${room.id}`).emit("roomLeaderboardUpdate", {
+        matchId: prediction.matchId,
+        round: prediction.round,
+      });
+    }
+  } catch (err) {
+    console.error("Room leaderboard emission error:", err);
   }
 }
 

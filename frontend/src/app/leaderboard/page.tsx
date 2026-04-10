@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
 import Leaderboard from "@/components/Leaderboard";
+import RoomLeaderboard from "@/components/RoomLeaderboard";
 import { Trophy } from "lucide-react";
 import { useGame } from "@/context/GameContext";
-import { cafeUrl } from "@/lib/navigation";
+import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 
 export default function LeaderboardPage() {
   const { state } = useGame();
@@ -16,17 +17,19 @@ export default function LeaderboardPage() {
   // Use context values with localStorage fallback
   const [matchId, setMatchId] = useState(state.matchId);
   const [venueId, setVenueId] = useState(state.venueId);
+  const [roomId, setRoomId] = useState(state.roomId);
 
   useEffect(() => {
     const token = localStorage.getItem("jaffa_token");
     if (!token) {
-      router.replace(cafeUrl("/login"));
+      router.replace(isCafeRoute() ? cafeUrl("/login") : "/login");
       return;
     }
 
     if (!matchId) setMatchId(localStorage.getItem("jaffa_match_id"));
     if (!venueId) setVenueId(localStorage.getItem("jaffa_venue_id"));
-  }, [state.matchId, state.venueId, matchId, venueId, router]);
+    if (!roomId) setRoomId(localStorage.getItem("jaffa_room_id"));
+  }, [state.matchId, state.venueId, state.roomId, matchId, venueId, roomId, router]);
 
   return (
     <div className="bg-[#0d0d0d] text-white min-h-screen">
@@ -42,7 +45,9 @@ export default function LeaderboardPage() {
           </h2>
         </section>
 
-        {matchId && venueId ? (
+        {matchId && roomId ? (
+          <RoomLeaderboard roomId={roomId} />
+        ) : matchId && venueId ? (
           <Leaderboard
             matchId={matchId}
             venueId={venueId}

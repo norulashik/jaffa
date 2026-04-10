@@ -12,8 +12,12 @@ import leaderboardRoutes from "./routes/leaderboard";
 import rewardRoutes from "./routes/reward";
 import adminRoutes from "./routes/admin";
 import ownerRoutes from "./routes/owner";
+import roomRoutes from "./routes/room";
+import weeklyRewardsRoutes from "./routes/weeklyRewards";
+import globalLeaderboardRoutes from "./routes/globalLeaderboard";
 import { setupSocketHandlers } from "./socket/handlers";
 import { pollSportsmonkUpdates } from "./services/sportsmonkApi";
+import { ensureRoomVenue } from "./services/roomVenue";
 
 dotenv.config();
 
@@ -49,6 +53,9 @@ app.use("/api/leaderboard", leaderboardRoutes);
 app.use("/api/rewards", rewardRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/owner", ownerRoutes);
+app.use("/api/rooms", roomRoutes);
+app.use("/api/weekly-rewards", weeklyRewardsRoutes);
+app.use("/api/global-leaderboard", globalLeaderboardRoutes);
 
 // Health check
 app.get("/api/health", (_req, res) => {
@@ -192,6 +199,8 @@ async function start() {
 
     await sequelize.sync({ alter: true });
     console.log("Database synced");
+
+    await ensureRoomVenue();
 
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);

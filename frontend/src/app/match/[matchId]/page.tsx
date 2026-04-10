@@ -22,7 +22,7 @@ import { api } from "@/lib/api";
 import { connectSocket, joinVenueMatch, disconnectSocket } from "@/lib/socket";
 import { useGame } from "@/context/GameContext";
 import { toast } from "sonner";
-import { cafeUrl } from "@/lib/navigation";
+import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 
 interface Prediction {
   id: string;
@@ -83,7 +83,7 @@ export default function MatchDashboard() {
   useEffect(() => {
     const token = localStorage.getItem("jaffa_token");
     if (!token) {
-      router.replace(cafeUrl("/login"));
+      router.replace(isCafeRoute() ? cafeUrl("/login") : "/login");
       return;
     }
 
@@ -301,9 +301,10 @@ export default function MatchDashboard() {
 
       // Fetch participant stats (points, streak) and rank
       try {
+        const roomId = gameState.roomId || localStorage.getItem("jaffa_room_id");
         const [matchState, lb] = await Promise.all([
           api.getMatchState(matchId, venueId),
-          api.getMatchLeaderboard(matchId, venueId),
+          roomId ? api.getRoomLeaderboard(roomId) : api.getMatchLeaderboard(matchId, venueId),
         ]);
         if (matchState.participant) {
           dispatch({
@@ -613,8 +614,9 @@ export default function MatchDashboard() {
           const crr = overs > 0 ? (score / overs).toFixed(2) : "0.00";
           const target = innings1 && currInn === 2 ? innings1.score + 1 : null;
           const runsNeeded = target ? target - (innings2?.score || 0) : null;
-          const rrr = target && overs < 20
-            ? (((runsNeeded || 0) / (20 - overs))).toFixed(2)
+          const totalOvers = matchData?.totalOvers || 20;
+          const rrr = target && overs < totalOvers
+            ? (((runsNeeded || 0) / (totalOvers - overs))).toFixed(2)
             : null;
 
           return (
@@ -750,7 +752,7 @@ export default function MatchDashboard() {
           const sd = matchData?.scoreData || {};
           const currentOver = sd.currentOver || matchData?.currentOver || 0;
           const nextOver = currentOver + 1;
-          if (currentOver > 0 && nextOver <= 20) {
+          if (currentOver > 0 && nextOver <= (matchData?.totalOvers || 20)) {
             return (
               <>
                 <div className="text-center py-2">

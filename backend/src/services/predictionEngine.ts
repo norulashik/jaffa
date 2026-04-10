@@ -359,7 +359,8 @@ export function generateRivalryCalls(
   matchId: string,
   target: number,
   team2Short: string,
-  team2Players: string[]
+  team2Players: string[],
+  totalOvers: number = 20
 ): Array<{
   matchId: string;
   category: string;
@@ -367,6 +368,8 @@ export function generateRivalryCalls(
   question: string;
   options: { key: string; label: string; points: number }[];
 }> {
+  const ppEnd = Math.min(6, totalOvers);
+  const midEnd = Math.ceil(totalOvers * 0.75);
   const predictions = [
     // Q1: Chase done in which phase?
     {
@@ -375,9 +378,9 @@ export function generateRivalryCalls(
       round: 4, // assigned to chase powerplay round for points tracking
       question: `${team2Short} need ${target} — chase done in which phase?`,
       options: [
-        { key: "powerplay", label: "Powerplay (overs 1-6)", points: 35 },
-        { key: "middle", label: "Middle overs (7-15)", points: 25 },
-        { key: "death", label: "Death overs (16-20)", points: 20 },
+        { key: "powerplay", label: `Powerplay (overs 1-${ppEnd})`, points: 35 },
+        { key: "middle", label: `Middle overs (${ppEnd + 1}-${midEnd})`, points: 25 },
+        { key: "death", label: `Death overs (${midEnd + 1}-${totalOvers})`, points: 20 },
         { key: "not_chased", label: "Not chased — bowlers win", points: 25 },
       ],
     },
@@ -400,16 +403,23 @@ export function generateRivalryCalls(
   return predictions;
 }
 
-// Determine which round based on current over and innings
-export function getCurrentRound(currentInnings: number, currentOver: number): number {
+// Determine which round based on current over, innings, and total overs
+// Boundaries scale with totalOvers: powerplay = min(6, totalOvers), middle = ~75% mark
+export function getCurrentRound(currentInnings: number, currentOver: number, totalOvers: number = 20): number {
   if (currentInnings === 0) return 0; // pre-match
+  const overs = totalOvers || 20;                     // fallback for null/undefined from old DB records
+  let ppEnd = Math.min(6, overs);                     // powerplay: 6 overs or totalOvers if shorter
+  let midEnd = Math.ceil(overs * 0.75);               // middle: 75% mark (15 for 20ov, 8 for 10ov)
+  // Ensure all 3 rounds get at least 1 over each for very short matches
+  if (overs <= 3) { ppEnd = 1; midEnd = 2; }
+  else if (ppEnd >= midEnd) { midEnd = ppEnd + 1; }
   if (currentInnings === 1) {
-    if (currentOver <= 6) return 1;  // 1st Innings Powerplay
-    if (currentOver <= 15) return 2; // 1st Innings Middle
-    return 3;                         // 1st Innings Death
+    if (currentOver <= ppEnd) return 1;  // 1st Innings Powerplay
+    if (currentOver <= midEnd) return 2; // 1st Innings Middle
+    return 3;                             // 1st Innings Death
   }
   // Second innings — mirrors first innings rounds
-  if (currentOver <= 6) return 4;    // Chase Powerplay
-  if (currentOver <= 15) return 5;   // Chase Middle
-  return 6;                           // Chase Death
+  if (currentOver <= ppEnd) return 4;    // Chase Powerplay
+  if (currentOver <= midEnd) return 5;   // Chase Middle
+  return 6;                               // Chase Death
 }

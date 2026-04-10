@@ -47,8 +47,14 @@ export const api = {
   updateAvatar: (avatarConfig: any) =>
     request<{ success: boolean }>("/auth/avatar", { method: "PUT", body: JSON.stringify({ avatarConfig }) }),
 
+  updateLocation: (latitude: number, longitude: number) =>
+    request<{ city: string | null; state: string | null }>("/auth/location", {
+      method: "PUT",
+      body: JSON.stringify({ latitude, longitude }),
+    }),
+
   getUserStats: () =>
-    request<{ matchesPlayed: number; totalCorrect: number; totalPredictions: number; accuracy: number }>("/auth/stats"),
+    request<{ matchesPlayed: number; totalCorrect: number; totalPredictions: number; accuracy: number; lifetimePoints: number; city: string | null; state: string | null }>("/auth/stats"),
 
   // Venues
   getVenue: (venueId: string) =>
@@ -124,4 +130,69 @@ export const api = {
 
   getVenuePlayers: (matchId: string) =>
     request<{ players: any[]; count: number }>(`/admin/venue/players/${matchId}`),
+
+  // Rooms
+  createRoom: (matchId: string, name: string, isPublic?: boolean, maxPlayers?: number) =>
+    request<{ room: any; shareLink: string; venueId: string }>("/rooms", {
+      method: "POST",
+      body: JSON.stringify({ matchId, name, isPublic, maxPlayers }),
+    }),
+
+  getMyRooms: () => request<{ rooms: any[] }>("/rooms/my"),
+
+  getPublicRooms: () => request<{ rooms: any[] }>("/rooms/public"),
+
+  getRoom: (roomId: string) => request<{ room: any; venueId: string }>(`/rooms/${roomId}`),
+
+  joinRoomByCode: (code: string) =>
+    request<{ room: any; venueId: string }>("/rooms/join", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    }),
+
+  joinRandomRoom: (matchId: string) =>
+    request<{ room: any; venueId: string }>("/rooms/join-random", {
+      method: "POST",
+      body: JSON.stringify({ matchId }),
+    }),
+
+  leaveRoom: (roomId: string) =>
+    request<{ success: boolean }>(`/rooms/${roomId}/leave`, { method: "POST" }),
+
+  getRoomLeaderboard: (roomId: string) =>
+    request<{ leaderboard: any[] }>(`/rooms/${roomId}/leaderboard`),
+
+  getRoomRoundLeaderboard: (roomId: string, round: number) =>
+    request<{ round: number; leaderboard: any[] }>(`/rooms/${roomId}/leaderboard/round/${round}`),
+
+  // Weekly Rewards
+  getWeeklyPoints: () =>
+    request<{ weeklyPoints: number; weekNumber: number }>("/weekly-rewards/points"),
+
+  getWeeklyRewardsCatalog: () =>
+    request<{ weeklyPoints: number; catalog: any[]; redemptions: any[] }>("/weekly-rewards/catalog"),
+
+  redeemWeeklyReward: (rewardKey: string) =>
+    request<{ success: boolean; weeklyPoints: number }>("/weekly-rewards/redeem", {
+      method: "POST",
+      body: JSON.stringify({ rewardKey }),
+    }),
+
+  // Global Leaderboard
+  getGlobalLeaderboard: (scope: "city" | "state" | "all") =>
+    request<{
+      leaderboard: {
+        rank: number;
+        userId: string;
+        displayName: string;
+        avatarConfig: any;
+        lifetimePoints: number;
+        city: string | null;
+        state: string | null;
+      }[];
+      myRank: number;
+      scope: string;
+      myCity: string | null;
+      myState: string | null;
+    }>(`/global-leaderboard?scope=${scope}`),
 };
