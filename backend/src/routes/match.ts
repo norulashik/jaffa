@@ -250,7 +250,7 @@ router.post("/:matchId/join", authenticateUser, async (req: AuthRequest, res: Re
     const { latitude, longitude } = req.body;
     if (latitude && longitude) {
       User.findByPk(userId).then(async (user) => {
-        if (user && !user.city) {
+        if (user) {
           try {
             const geoRes = await fetch(
               `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`

@@ -22,9 +22,17 @@ router.get("/", authenticateUser, async (req: AuthRequest, res: Response): Promi
       lifetimePoints: { [Op.gt]: 0 },
     };
 
-    if (scope === "city" && currentUser.city) {
+    if (scope === "city") {
+      if (!currentUser.city) {
+        res.json({ leaderboard: [], myRank: 0, scope, myCity: null, myState: currentUser.state, locationMissing: true });
+        return;
+      }
       whereClause.city = currentUser.city;
-    } else if (scope === "state" && currentUser.state) {
+    } else if (scope === "state") {
+      if (!currentUser.state) {
+        res.json({ leaderboard: [], myRank: 0, scope, myCity: currentUser.city, myState: null, locationMissing: true });
+        return;
+      }
       whereClause.state = currentUser.state;
     }
     // scope === "all" → no location filter

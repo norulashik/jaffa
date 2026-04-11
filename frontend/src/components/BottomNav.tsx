@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { GiCastle, GiPodiumWinner, GiTrophyCup } from "react-icons/gi";
+import { GiCastle, GiPodiumWinner, GiCrownCoin } from "react-icons/gi";
 import { GiAlarmClock } from "react-icons/gi";
 import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 import { useGame } from "@/context/GameContext";
@@ -11,7 +11,7 @@ import { useGame } from "@/context/GameContext";
 const navItems = [
   { key: "home", href: "/lobby", icon: GiCastle, label: "Home" },
   { key: "leaderboard", href: "/leaderboard", icon: GiPodiumWinner, label: "Ranks" },
-  { key: "rewards", href: "/rewards", icon: GiTrophyCup, label: "Rewards" },
+  { key: "redeem", href: "/redeem", icon: GiCrownCoin, label: "Week Pts" },
   { key: "my-picks", href: "/my-picks", icon: GiAlarmClock, label: "My Picks" },
 ];
 
@@ -61,7 +61,17 @@ export default function BottomNav() {
                   : "text-white/50 border-b-[3px] border-transparent hover:text-white/80"
               }`}
             >
-              <Icon className="text-2xl" />
+              <div className="relative">
+                <Icon className="text-2xl" />
+                {item.key === "redeem" && (
+                  <span
+                    className="absolute -top-1.5 -right-3 bg-[#ff6341] text-black text-[8px] font-black px-1 rounded-[2px] leading-tight"
+                    style={{ border: "1px solid #000" }}
+                  >
+                    {state.weeklyPoints}
+                  </span>
+                )}
+              </div>
               <span className="text-[10px] font-black uppercase tracking-wider">
                 {item.label}
               </span>

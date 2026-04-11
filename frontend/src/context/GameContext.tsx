@@ -210,26 +210,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
           .then((data) => dispatch({ type: "SET_WEEKLY_POINTS", weeklyPoints: data.weeklyPoints }))
           .catch(() => {});
 
-        // Capture geolocation once for global leaderboard (fire-and-forget)
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            (pos) => {
-              fetch(`${process.env.NEXT_PUBLIC_API_URL || "/api"}/auth/location`, {
-                method: "PUT",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${token}`,
-                  "ngrok-skip-browser-warning": "true",
-                },
-                body: JSON.stringify({
-                  latitude: pos.coords.latitude,
-                  longitude: pos.coords.longitude,
-                }),
-              }).catch(() => {});
-            },
-            () => {} // silently ignore if user denies
-          );
-        }
+        // Location capture moved to global leaderboard page — only prompt when user visits it
       })
       .catch(() => {
         clearTimeout(timeout);

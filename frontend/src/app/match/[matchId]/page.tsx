@@ -129,7 +129,17 @@ export default function MatchDashboard() {
         const matchCode = localStorage.getItem("jaffa_match_code") || undefined;
         if (matchCode) {
           try {
-            await api.joinMatch(matchId, venueId, matchCode);
+            // Capture GPS for city/state leaderboard (non-blocking)
+            let lat: number | undefined;
+            let lng: number | undefined;
+            try {
+              const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
+                navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 })
+              );
+              lat = pos.coords.latitude;
+              lng = pos.coords.longitude;
+            } catch {}
+            await api.joinMatch(matchId, venueId, matchCode, lat, lng);
             localStorage.removeItem("jaffa_match_code");
           } catch (err: any) {
             localStorage.removeItem("jaffa_match_code");

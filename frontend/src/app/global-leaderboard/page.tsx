@@ -20,6 +20,8 @@ export default function GlobalLeaderboardPage() {
   const [myState, setMyState] = useState<string | null>(null);
   const [scope, setScope] = useState<"city" | "state" | "all">("all");
   const [loading, setLoading] = useState(true);
+  const [locationGranted, setLocationGranted] = useState<boolean | null>(null); // null = checking
+  const [permBlocked, setPermBlocked] = useState(false); // true = browser permanently blocked
 
   useEffect(() => {
     const token = localStorage.getItem("jaffa_token");
@@ -27,8 +29,60 @@ export default function GlobalLeaderboardPage() {
       router.push(isCafeRoute() ? cafeUrl("/login") : "/login");
       return;
     }
-    loadLeaderboard();
-  }, [scope]);
+    requestLocation();
+  }, []);
+
+  useEffect(() => {
+    if (locationGranted) loadLeaderboard();
+  }, [scope, locationGranted]);
+
+  const requestLocation = async () => {
+    if (!navigator.geolocation) {
+      setLocationGranted(false);
+      setPermBlocked(true);
+      setLoading(false);
+      return;
+    }
+
+    // Check if permission is permanently denied by the browser
+    if (navigator.permissions) {
+      try {
+        const perm = await navigator.permissions.query({ name: "geolocation" });
+        if (perm.state === "denied") {
+          setLocationGranted(false);
+          setPermBlocked(true);
+          setLoading(false);
+          return;
+        }
+      } catch {}
+    }
+
+    try {
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000 })
+      );
+      // Update city/state on backend
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
+      const token = localStorage.getItem("jaffa_token");
+      await fetch(`${API_URL}/auth/location`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "ngrok-skip-browser-warning": "true",
+        },
+        body: JSON.stringify({
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+        }),
+      }).catch(() => {});
+      setLocationGranted(true);
+    } catch {
+      setLocationGranted(false);
+      setPermBlocked(true);
+      setLoading(false);
+    }
+  };
 
   const loadLeaderboard = async () => {
     setLoading(true);
@@ -70,6 +124,63 @@ export default function GlobalLeaderboardPage() {
           </p>
         </section>
 
+        {/* Location permission gate */}
+        {locationGranted === false && (
+          <div className="py-16 text-center space-y-4">
+            <MapPin size={48} className="mx-auto text-[#ff6341] opacity-60" />
+            <p
+              className="text-lg font-bold uppercase text-white"
+              style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+            >
+              Location Required
+            </p>
+            {permBlocked ? (
+              <>
+                <p className="text-sm text-[#6b7280] max-w-xs mx-auto">
+                  Location is blocked by your browser. To enable it:
+                </p>
+                <div className="text-xs text-[#6b7280] max-w-xs mx-auto text-left space-y-2">
+                  <p className="font-bold text-white/70">Chrome (Android / Desktop):</p>
+                  <p className="pl-2">Tap the lock icon (left of URL) &rarr; Permissions &rarr; Location &rarr; Allow</p>
+                  <p className="font-bold text-white/70">Safari (iPhone / iPad):</p>
+                  <p className="pl-2">Open Settings &rarr; Safari &rarr; Location &rarr; Allow, or tap aA in the address bar &rarr; Website Settings &rarr; Location &rarr; Allow</p>
+                </div>
+                <p className="text-xs text-[#6b7280]">Then tap the button below</p>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="bg-[#ff6341] text-black font-black uppercase text-sm px-6 py-3 rounded-[3px] border-2 border-black"
+                  style={{ boxShadow: "3px 3px 0 0 #000" }}
+                >
+                  Refresh Page
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-[#6b7280] max-w-xs mx-auto">
+                  Allow location access to see how you rank against players in your city and state
+                </p>
+                <button
+                  onClick={requestLocation}
+                  className="bg-[#ff6341] text-black font-black uppercase text-sm px-6 py-3 rounded-[3px] border-2 border-black"
+                  style={{ boxShadow: "3px 3px 0 0 #000" }}
+                >
+                  Allow Location
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {locationGranted === null && (
+          <div className="flex justify-center py-16">
+            <div
+              className="w-8 h-8 animate-spin rounded-[2px]"
+              style={{ border: "3px solid #ff6341", borderTopColor: "transparent" }}
+            />
+          </div>
+        )}
+
+        {locationGranted && <>
         {/* My Stats Banner */}
         <div
           className="game-card flex items-center justify-between"
@@ -253,6 +364,7 @@ export default function GlobalLeaderboardPage() {
             )}
           </div>
         )}
+        </>}
       </main>
 
       <BottomNav />

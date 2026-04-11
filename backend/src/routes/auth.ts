@@ -312,11 +312,7 @@ router.put("/location", authenticateUser, async (req: AuthRequest, res: Response
       return;
     }
 
-    // Only set once — don't overwrite existing location
-    if (user.city) {
-      res.json({ city: user.city, state: user.state, message: "Location already set" });
-      return;
-    }
+    // Update location to reflect where the user is currently playing
 
     const geoRes = await fetch(
       `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`

@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { GiCrownCoin } from "react-icons/gi";
 import { useGame } from "@/context/GameContext";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cafeUrl, isCafeRoute } from "@/lib/navigation";
@@ -17,8 +16,6 @@ export default function Header() {
 
   const homeHref = mounted && isCafeRoute() ? cafeUrl("/lobby") : "/lobby";
   const profileHref = mounted && isCafeRoute() ? cafeUrl("/profile") : "/profile";
-  const redeemHref = mounted && isCafeRoute() ? cafeUrl("/redeem") : "/redeem";
-
   const initial = state.user?.displayName
     ? state.user.displayName.charAt(0).toUpperCase()
     : "?";
@@ -30,23 +27,8 @@ export default function Header() {
     >
       {/* 3-column layout: left controls | centered logo | right controls */}
       <div className="grid grid-cols-3 items-center px-3 py-2 relative">
-        {/* Left: Weekly points chip — clickable → /redeem */}
-        <div className="flex items-center justify-start">
-          <Link href={redeemHref}>
-            <div
-              className="flex items-center gap-1.5 bg-[#ff6341] text-black px-3 py-1.5 rounded-[3px] border-2 border-black cursor-pointer"
-              style={{ boxShadow: "3px 3px 0 0 #000000" }}
-            >
-              <GiCrownCoin className="text-lg" />
-              <div className="flex flex-col items-start leading-none">
-                <span className="font-black text-sm tracking-wide">
-                  {state.weeklyPoints}
-                </span>
-                <span className="text-[7px] font-bold opacity-70 uppercase">Week</span>
-              </div>
-            </div>
-          </Link>
-        </div>
+        {/* Left: spacer for grid balance */}
+        <div />
 
         {/* Center: Logo — absolutely positioned so it doesn't push header height */}
         <div className="flex justify-center">
