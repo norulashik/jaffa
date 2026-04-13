@@ -73,7 +73,7 @@ async function seed() {
     console.log("Pre-match predictions created:", preMatchQuestions.length);
 
     // Generate Over 1 predictions (so they're ready when user finishes pre-match cards)
-    const over1Preds = generatePerOverPredictions(match.id, 1, 1, "Ruturaj Gaikwad");
+    const over1Preds = generatePerOverPredictions(match.id, 1, 1, "Ruturaj Gaikwad", "");
     for (const p of over1Preds) {
       await Prediction.create(p as any);
     }

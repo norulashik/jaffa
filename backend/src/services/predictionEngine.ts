@@ -100,7 +100,106 @@ export function generatePreMatchPredictions(
         { key: "stumped", label: "Stumped", points: 40 },
       ],
     },
+    // Player-based pre-match questions (Q5-Q7) — only if player data available
+    ...generatePlayerPreMatchQuestions(matchId, team1Players, team2Players),
   ];
+}
+
+// Generate player-based pre-match questions from lineup data
+function generatePlayerPreMatchQuestions(
+  matchId: string,
+  team1Players: string[],
+  team2Players: string[]
+): Array<{
+  matchId: string;
+  category: string;
+  round: number;
+  question: string;
+  options: { key: string; label: string; points: number }[];
+}> {
+  const allPlayers = [...(team1Players || []), ...(team2Players || [])];
+  if (allPlayers.length < 4) return []; // Not enough player data — skip player questions
+
+  const results: Array<{
+    matchId: string;
+    category: string;
+    round: number;
+    question: string;
+    options: { key: string; label: string; points: number }[];
+  }> = [];
+
+  // Pick top batters: first 3 from each team (openers + top order) = 6 options
+  const topBatters = [
+    ...(team1Players || []).slice(0, 3),
+    ...(team2Players || []).slice(0, 3),
+  ].filter(Boolean);
+
+  if (topBatters.length >= 4) {
+    // Q5: Who will be tonight's top scorer?
+    results.push({
+      matchId,
+      category: "pre_match",
+      round: 0,
+      question: "Who will be tonight's top scorer?",
+      options: [
+        ...topBatters.map((name) => ({
+          key: playerKey(name),
+          label: name,
+          points: 20,
+        })),
+        { key: "someone_else", label: "Someone else", points: 30 },
+      ],
+    });
+  }
+
+  // Pick bowlers: last 3-4 from each team lineup (tail-enders are usually bowlers)
+  const t1Bowlers = (team1Players || []).slice(-3);
+  const t2Bowlers = (team2Players || []).slice(-3);
+  const topBowlers = [...t1Bowlers, ...t2Bowlers].filter(Boolean);
+
+  if (topBowlers.length >= 4) {
+    // Q6: Who will take the most wickets tonight?
+    results.push({
+      matchId,
+      category: "pre_match",
+      round: 0,
+      question: "Who will take the most wickets tonight?",
+      options: [
+        ...topBowlers.map((name) => ({
+          key: playerKey(name),
+          label: name,
+          points: 20,
+        })),
+        { key: "someone_else", label: "Someone else", points: 30 },
+      ],
+    });
+  }
+
+  // Pick star players for MOTM: mix of top batters and bowlers (first 3 from each team)
+  const motmCandidates = [
+    ...(team1Players || []).slice(0, 3),
+    ...(team2Players || []).slice(0, 3),
+  ].filter(Boolean);
+
+  if (motmCandidates.length >= 4) {
+    // Q7: Man of the Match?
+    results.push({
+      matchId,
+      category: "pre_match",
+      round: 0,
+      question: "Man of the Match — who takes the award?",
+      options: [
+        ...motmCandidates.map((name) => ({
+          key: playerKey(name),
+          label: name,
+          points: 25,
+        })),
+        { key: "someone_else", label: "Someone else", points: 30 },
+      ],
+    });
+  }
+
+  return results;
 }
 
 // IPL team colors
@@ -210,6 +309,74 @@ const perOverPool = [
   },
 ];
 
+// Player-specific per-over question pool (requires currentBatter/currentBowler)
+const playerPerOverPool = [
+  {
+    key: "batter_six",
+    semanticGroup: "batter",
+    type: "batter" as const,
+    question: (over: number, player: string) => `Will ${player} hit a six in over ${over}?`,
+    options: [
+      { key: "yes", label: "Yes", points: 20 },
+      { key: "no", label: "No", points: 10 },
+    ],
+  },
+  {
+    key: "batter_ten_plus",
+    semanticGroup: "batter",
+    type: "batter" as const,
+    question: (over: number, player: string) => `Will ${player} score 10+ runs in over ${over}?`,
+    options: [
+      { key: "yes", label: "Yes", points: 20 },
+      { key: "no", label: "No", points: 10 },
+    ],
+  },
+  {
+    key: "batter_boundary",
+    semanticGroup: "batter",
+    type: "batter" as const,
+    question: (over: number, player: string) => `Will ${player} hit a boundary in over ${over}?`,
+    options: [
+      { key: "yes", label: "Yes", points: 15 },
+      { key: "no", label: "No", points: 10 },
+    ],
+  },
+  {
+    key: "bowler_wicket",
+    semanticGroup: "bowler_player",
+    type: "bowler" as const,
+    question: (over: number, player: string) => `Will ${player} take a wicket in over ${over}?`,
+    options: [
+      { key: "yes", label: "Yes", points: 15 },
+      { key: "no", label: "No", points: 10 },
+    ],
+  },
+  {
+    key: "bowler_under_five",
+    semanticGroup: "bowler_player",
+    type: "bowler" as const,
+    question: (over: number, player: string) => `Will ${player} concede less than 5 runs in over ${over}?`,
+    options: [
+      { key: "yes", label: "Yes", points: 15 },
+      { key: "no", label: "No", points: 10 },
+    ],
+  },
+  {
+    key: "batter_runs_range",
+    semanticGroup: "batter",
+    type: "batter" as const,
+    question: (over: number, player: string) => `How many runs will ${player} score in over ${over}?`,
+    options: [
+      { key: "low", label: "0-3 runs", points: 10 },
+      { key: "medium", label: "4-8 runs", points: 10 },
+      { key: "high", label: "9+ runs", points: 20 },
+    ],
+  },
+];
+
+// Track recent player questions separately
+const recentPlayerQuestions: Map<string, string[]> = new Map();
+
 // Track which questions were used recently to avoid repeats within 3 overs
 const recentQuestions: Map<string, string[]> = new Map(); // matchId -> last N question keys
 
@@ -217,7 +384,8 @@ export function generatePerOverPredictions(
   matchId: string,
   overNumber: number,
   round: number,
-  currentBatter?: string
+  currentBatter?: string,
+  currentBowler?: string
 ): Array<{
   matchId: string;
   category: string;
@@ -257,7 +425,7 @@ export function generatePerOverPredictions(
   const newRecent = [...recent, ...randomPicks.map((s) => s.key)].slice(-6);
   recentQuestions.set(recentKey, newRecent);
 
-  return selected.map((template) => ({
+  const results = selected.map((template) => ({
     matchId,
     category: "per_over" as const,
     round,
@@ -265,6 +433,49 @@ export function generatePerOverPredictions(
     question: template.question(overNumber),
     options: template.options,
   }));
+
+  // Pick 1 player question if batter or bowler is available
+  const hasBatter = currentBatter && currentBatter.trim() !== "";
+  const hasBowler = currentBowler && currentBowler.trim() !== "";
+
+  if (hasBatter || hasBowler) {
+    const recentPlayer = recentPlayerQuestions.get(recentKey) || [];
+
+    // Filter player pool: only batter questions if we have batter, only bowler if we have bowler
+    const availablePlayerPool = playerPerOverPool.filter((q) => {
+      if (q.type === "batter" && !hasBatter) return false;
+      if (q.type === "bowler" && !hasBowler) return false;
+      if (recentPlayer.includes(q.key)) return false;
+      return true;
+    });
+
+    const playerPool = availablePlayerPool.length > 0
+      ? availablePlayerPool
+      : playerPerOverPool.filter((q) => {
+          if (q.type === "batter" && !hasBatter) return false;
+          if (q.type === "bowler" && !hasBowler) return false;
+          return true;
+        });
+
+    if (playerPool.length > 0) {
+      const pick = playerPool[Math.floor(Math.random() * playerPool.length)];
+      const playerName = pick.type === "batter" ? currentBatter! : currentBowler!;
+
+      results.push({
+        matchId,
+        category: "per_over" as const,
+        round,
+        overNumber,
+        question: pick.question(overNumber, playerName),
+        options: pick.options,
+      });
+
+      const newRecentPlayer = [...recentPlayer, pick.key].slice(-6);
+      recentPlayerQuestions.set(recentKey, newRecentPlayer);
+    }
+  }
+
+  return results;
 }
 
 // Hot Takes — one per round start
@@ -351,6 +562,120 @@ export function generateHotTake(
     round,
     question,
     options,
+  };
+}
+
+// Helper to sanitize player name into a short option key (fits STRING(50))
+export function playerKey(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, "_").slice(0, 45);
+}
+
+// Player-based Hot Takes — one per round start (alongside the existing hot take)
+export function generatePlayerHotTake(
+  matchId: string,
+  round: number,
+  playerContext: {
+    team1Players?: string[];
+    team2Players?: string[];
+    topScorerName?: string;
+    currentBatsmen?: [string, string];
+    currentBowler?: string;
+  }
+): {
+  matchId: string;
+  category: string;
+  round: number;
+  question: string;
+  options: { key: string; label: string; points: number }[];
+} | null {
+  const { team1Players, team2Players, topScorerName, currentBatsmen } = playerContext;
+
+  const hotTakes: Record<number, () => { question: string; options: { key: string; label: string; points: number }[] } | null> = {
+    // Round 1: 1st Innings Powerplay — will either opener score 50+?
+    1: () => {
+      const openers = (team1Players || []).slice(0, 2);
+      if (openers.length < 2) return null;
+      return {
+        question: `Will either opener score 50+ in the powerplay?`,
+        options: [
+          { key: "yes", label: "Yes — one of them goes big", points: 25 },
+          { key: "no", label: "No — both stay under 50", points: 20 },
+        ],
+      };
+    },
+    // Round 2: 1st Innings Middle — will top scorer reach a century?
+    2: () => {
+      const name = topScorerName;
+      if (!name) return null;
+      return {
+        question: `Will ${name} reach a century this innings?`,
+        options: [
+          { key: "yes", label: "Yes — ton incoming", points: 25 },
+          { key: "no", label: "No — falls short", points: 20 },
+        ],
+      };
+    },
+    // Round 3: 1st Innings Death — who smashes more sixes in death?
+    3: () => {
+      const batsmen = currentBatsmen;
+      if (!batsmen || batsmen.length < 2 || !batsmen[0] || !batsmen[1]) return null;
+      return {
+        question: `Who smashes more sixes in the death — ${batsmen[0]} or ${batsmen[1]}?`,
+        options: [
+          { key: playerKey(batsmen[0]), label: batsmen[0], points: 20 },
+          { key: playerKey(batsmen[1]), label: batsmen[1], points: 20 },
+          { key: "neither", label: "Neither hits one", points: 25 },
+        ],
+      };
+    },
+    // Round 4: Chase Powerplay — which chase opener scores more?
+    4: () => {
+      const openers = (team2Players || []).slice(0, 2);
+      if (openers.length < 2) return null;
+      return {
+        question: `Will ${openers[0]} outscore ${openers[1]} in the chase powerplay?`,
+        options: [
+          { key: playerKey(openers[0]), label: openers[0], points: 20 },
+          { key: playerKey(openers[1]), label: openers[1], points: 20 },
+          { key: "equal", label: "Both score equal", points: 30 },
+        ],
+      };
+    },
+    // Round 5: Chase Middle — will any bowler finish with 3+ wickets?
+    5: () => ({
+      question: "Will any bowler finish the match with 3+ wickets?",
+      options: [
+        { key: "yes", label: "Yes — a bowler dominates", points: 25 },
+        { key: "no", label: "No — wickets spread around", points: 20 },
+      ],
+    }),
+    // Round 6: Chase Death — will batter at crease hit a six in last 5 overs?
+    6: () => {
+      const batsmen = currentBatsmen;
+      const batter = batsmen?.[0];
+      if (!batter) return null;
+      return {
+        question: `Will ${batter} hit a six in the last 5 overs?`,
+        options: [
+          { key: "yes", label: "Yes — goes big", points: 15 },
+          { key: "no", label: "No — plays it safe", points: 20 },
+        ],
+      };
+    },
+  };
+
+  const generator = hotTakes[round];
+  if (!generator) return null;
+
+  const result = generator();
+  if (!result) return null;
+
+  return {
+    matchId,
+    category: "hot_take",
+    round,
+    question: result.question,
+    options: result.options,
   };
 }
 

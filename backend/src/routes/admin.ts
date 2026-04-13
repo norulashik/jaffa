@@ -6,6 +6,7 @@ import {
   generatePreMatchPredictions,
   generatePerOverPredictions,
   generateHotTake,
+  generatePlayerHotTake,
   generateRivalryCalls,
   getCurrentRound,
 } from "../services/predictionEngine";
@@ -96,7 +97,7 @@ router.post("/match/:matchId/start", async (req: any, res: Response): Promise<vo
     let overPredictionsGenerated = 0;
     const existingOver1 = await Prediction.findOne({ where: { matchId, overNumber: 1, category: "per_over" } });
     if (!existingOver1) {
-      const overPreds = generatePerOverPredictions(matchId, 1, round, currentBatter);
+      const overPreds = generatePerOverPredictions(matchId, 1, round, currentBatter, "");
       for (const p of overPreds) {
         await Prediction.create(p as any);
       }
@@ -112,6 +113,14 @@ router.post("/match/:matchId/start", async (req: any, res: Response): Promise<vo
       if (hotTake) {
         await Prediction.create({ ...hotTake, expiresAt: hotTakeExpiresAt } as any);
         hotTakeGenerated = 1;
+      }
+      const playerHotTake = generatePlayerHotTake(matchId, round, {
+        team1Players: match.team1Players,
+        team2Players: match.team2Players,
+      });
+      if (playerHotTake) {
+        await Prediction.create({ ...playerHotTake, expiresAt: hotTakeExpiresAt } as any);
+        hotTakeGenerated++;
       }
     }
 
@@ -268,6 +277,13 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
           await Prediction.create({ ...hotTake, expiresAt: roundHotTakeExpiresAt } as any);
           io.to(`match:${matchId}`).emit("newPrediction", { matchId, type: "hot_take", round: nextRound });
         }
+        const playerHotTake = generatePlayerHotTake(matchId, nextRound, {
+          team1Players: match.team1Players,
+          team2Players: match.team2Players,
+        });
+        if (playerHotTake) {
+          await Prediction.create({ ...playerHotTake, expiresAt: roundHotTakeExpiresAt } as any);
+        }
       }
     }
 
@@ -339,7 +355,7 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
           where: { matchId, overNumber: 1, round: inn2Round, category: "per_over" },
         });
         if (existingInn2Over1.length === 0) {
-          const inn2OverPreds = generatePerOverPredictions(matchId, 1, inn2Round);
+          const inn2OverPreds = generatePerOverPredictions(matchId, 1, inn2Round, "", "");
           for (const p of inn2OverPreds) {
             await Prediction.create(p as any);
           }
@@ -354,6 +370,13 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
           const hotTake = generateHotTake(matchId, inn2Round, match.team1Short, match.team2Short);
           if (hotTake) {
             await Prediction.create({ ...hotTake, expiresAt: hotTakeExpiresAt } as any);
+          }
+          const playerHotTake = generatePlayerHotTake(matchId, inn2Round, {
+            team1Players: match.team1Players,
+            team2Players: match.team2Players,
+          });
+          if (playerHotTake) {
+            await Prediction.create({ ...playerHotTake, expiresAt: hotTakeExpiresAt } as any);
           }
         }
 
@@ -380,7 +403,7 @@ router.post("/match/:matchId/advance-over", async (req: any, res: Response): Pro
       });
 
       if (existingPreds.length === 0) {
-        const newPredictions = generatePerOverPredictions(matchId, twoAhead, twoAheadRound, currentBatter);
+        const newPredictions = generatePerOverPredictions(matchId, twoAhead, twoAheadRound, currentBatter, "");
         for (const p of newPredictions) {
           await Prediction.create(p as any);
         }
@@ -548,7 +571,7 @@ router.post("/match/:matchId/innings-break", async (req: any, res: Response): Pr
       where: { matchId, overNumber: 1, round: inn2Round, category: "per_over" },
     });
     if (existingInn2Over1Manual.length === 0) {
-      const inn2OverPreds = generatePerOverPredictions(matchId, 1, inn2Round);
+      const inn2OverPreds = generatePerOverPredictions(matchId, 1, inn2Round, "", "");
       for (const p of inn2OverPreds) {
         await Prediction.create(p as any);
       }
@@ -564,6 +587,13 @@ router.post("/match/:matchId/innings-break", async (req: any, res: Response): Pr
       const hotTake = generateHotTake(matchId, inn2Round, match.team1Short, match.team2Short);
       if (hotTake) {
         await Prediction.create({ ...hotTake, expiresAt: hotTakeExpiresAt } as any);
+      }
+      const playerHotTake = generatePlayerHotTake(matchId, inn2Round, {
+        team1Players: match.team1Players,
+        team2Players: match.team2Players,
+      });
+      if (playerHotTake) {
+        await Prediction.create({ ...playerHotTake, expiresAt: hotTakeExpiresAt } as any);
       }
     }
 

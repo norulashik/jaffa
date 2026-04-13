@@ -1,6 +1,6 @@
 import { Op } from "sequelize";
 import { Match, Prediction, MatchParticipant } from "../models";
-import { generatePerOverPredictions, generateHotTake, generateRivalryCalls, getCurrentRound } from "./predictionEngine";
+import { generatePerOverPredictions, generateHotTake, generatePlayerHotTake, generateRivalryCalls, getCurrentRound } from "./predictionEngine";
 import {
   ALL_CORRECT_OPTION,
   resolvePrediction,
@@ -108,6 +108,18 @@ interface BallData {
   bowler: { fullname: string };
 }
 
+interface BatsmanOverStats {
+  runs: number;
+  sixes: number;
+  boundaries: number;
+  isOut: boolean;
+}
+
+interface BowlerOverStats {
+  runs: number;
+  wickets: number;
+}
+
 interface OverStats {
   runs: number;
   extras: number;
@@ -121,6 +133,22 @@ interface OverStats {
   lastBallWicket: boolean;
   firstBallBoundary: boolean;
   currentBatsman: string;
+  currentBowler: string;
+  batsmanStats: Record<string, BatsmanOverStats>;
+  bowlerStats: Record<string, BowlerOverStats>;
+}
+
+// Fetch fixture lineup (Playing XI) — available after toss
+async function fetchFixtureLineup(fixtureId: number): Promise<any[]> {
+  try {
+    const url = `${API_BASE}/fixtures/${fixtureId}?api_token=${getApiToken()}&include=lineup`;
+    const res = await fetch(url, { headers: SPORTSMONK_HEADERS });
+    const data: any = await res.json();
+    return data.data?.lineup || [];
+  } catch (error) {
+    console.error("[Sportsmonk] Lineup fetch error:", error);
+    return [];
+  }
 }
 
 // Fetch fixture with runs only (fast — for score updates)
@@ -464,6 +492,13 @@ async function resolveRemainingPredictionsAtMatchEnd(
   allBalls: BallData[],
   io: SocketIOServer
 ): Promise<void> {
+  // Skip auto-resolution for abandoned/no-result matches
+  const fixtureStatus = (fixture.status || "").toLowerCase();
+  if (fixtureStatus === "abandoned" || fixtureStatus === "cancelled" || fixtureStatus === "no result" || fixtureStatus === "postp.") {
+    console.log(`[Sportsmonk] Match ${match.id} was ${fixture.status} — skipping auto-resolution, leaving for admin`);
+    return;
+  }
+
   const preMatchPreds = await Prediction.findAll({
     where: { matchId: match.id, category: "pre_match", status: ["open", "locked"] },
   });
@@ -595,6 +630,9 @@ function computeOverStats(balls: BallData[], overNumber: number, innings: string
   let lastBallWicket = false;
   let firstBallBoundary = false;
   let currentBatsman = "";
+  let currentBowler = "";
+  const batsmanStats: Record<string, BatsmanOverStats> = {};
+  const bowlerStats: Record<string, BowlerOverStats> = {};
 
   const legalBalls = overBalls.filter((b) => b.score.ball); // only legal deliveries
 
@@ -609,7 +647,8 @@ function computeOverStats(balls: BallData[], overNumber: number, innings: string
       (s.leg_bye || 0) +
       (s.noball > 0 ? 1 : 0) +
       (isWide ? 1 : 0);
-    runs += getBallTotalRuns(b);
+    const ballTotalRuns = getBallTotalRuns(b);
+    runs += ballTotalRuns;
     extras += extraRuns;
 
     if (s.is_wicket || b.batsmanout_id) wickets++;
@@ -620,6 +659,37 @@ function computeOverStats(balls: BallData[], overNumber: number, innings: string
     if (s.noball > 0 || s.noball_runs > 0) noballs++;
 
     currentBatsman = b.batsman?.fullname || currentBatsman;
+    currentBowler = b.bowler?.fullname || currentBowler;
+
+    // Track per-batsman stats
+    const batName = b.batsman?.fullname;
+    if (batName) {
+      if (!batsmanStats[batName]) {
+        batsmanStats[batName] = { runs: 0, sixes: 0, boundaries: 0, isOut: false };
+      }
+      batsmanStats[batName].runs += s.runs || 0;
+      if (s.six) batsmanStats[batName].sixes++;
+      if (s.four || s.six) batsmanStats[batName].boundaries++;
+      if ((s.is_wicket || b.batsmanout_id) && b.batsmanout_id === b.batsman_id) {
+        batsmanStats[batName].isOut = true;
+      }
+    }
+
+    // Track per-bowler stats
+    const bowlName = b.bowler?.fullname;
+    if (bowlName) {
+      if (!bowlerStats[bowlName]) {
+        bowlerStats[bowlName] = { runs: 0, wickets: 0 };
+      }
+      bowlerStats[bowlName].runs += ballTotalRuns;
+      if (s.is_wicket || b.batsmanout_id) {
+        // Don't count run outs as bowler wickets
+        const dismissal = resolveDismissalType(s.name);
+        if (dismissal !== "run_out") {
+          bowlerStats[bowlName].wickets++;
+        }
+      }
+    }
   }
 
   // Last legal ball
@@ -648,6 +718,9 @@ function computeOverStats(balls: BallData[], overNumber: number, innings: string
     lastBallWicket,
     firstBallBoundary,
     currentBatsman,
+    currentBowler,
+    batsmanStats,
+    bowlerStats,
   };
 }
 
@@ -748,6 +821,29 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           },
         });
 
+        // Fetch lineup (Playing XI) at toss and auto-populate team players
+        try {
+          const fixtureId = Number(match.externalId);
+          const lineup = await fetchFixtureLineup(fixtureId);
+          if (lineup && lineup.length > 0) {
+            const team1Lineup = lineup
+              .filter((p: any) => p.lineup?.team_id === fixture.localteam_id && !p.lineup?.substitution)
+              .map((p: any) => p.fullname);
+            const team2Lineup = lineup
+              .filter((p: any) => p.lineup?.team_id === fixture.visitorteam_id && !p.lineup?.substitution)
+              .map((p: any) => p.fullname);
+            if (team1Lineup.length > 0 || team2Lineup.length > 0) {
+              await match.update({
+                team1Players: team1Lineup.length > 0 ? team1Lineup : match.team1Players,
+                team2Players: team2Lineup.length > 0 ? team2Lineup : match.team2Players,
+              });
+              console.log(`[Sportsmonk] Lineup fetched: ${team1Lineup.length} + ${team2Lineup.length} players`);
+            }
+          }
+        } catch (err) {
+          console.error("[Sportsmonk] Lineup fetch error at toss:", err);
+        }
+
         // Activate rooms for this match
         try {
           const { Room } = await import("../models");
@@ -761,7 +857,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           where: { matchId: match.id, overNumber: actualCurrentOver, round: actualRound, category: "per_over" },
         });
         if (existingOverPreds.length === 0) {
-          const overPreds = generatePerOverPredictions(match.id, actualCurrentOver, actualRound, "");
+          const overPreds = generatePerOverPredictions(match.id, actualCurrentOver, actualRound, "", "");
           for (const p of overPreds) {
             await Prediction.create(p as any);
           }
@@ -775,6 +871,14 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           if (hotTake) {
             const hotTakeExpiresAt = new Date(Date.now() + 120_000);
             await Prediction.create({ ...hotTake, expiresAt: hotTakeExpiresAt } as any);
+          }
+          // Also generate player hot take
+          const playerHotTake = generatePlayerHotTake(match.id, actualRound, {
+            team1Players: match.team1Players,
+            team2Players: match.team2Players,
+          });
+          if (playerHotTake) {
+            await Prediction.create({ ...playerHotTake, expiresAt: new Date(Date.now() + 120_000) } as any);
           }
         }
 
@@ -843,7 +947,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
               where: { matchId: match.id, overNumber: 1, round: 1, category: "per_over" },
             });
             if (existingOver1.length === 0) {
-              const over1Preds = generatePerOverPredictions(match.id, 1, 1, "");
+              const over1Preds = generatePerOverPredictions(match.id, 1, 1, "", "");
               for (const p of over1Preds) {
                 await Prediction.create(p as any);
               }
@@ -1111,7 +1215,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
             where: { matchId: match.id, overNumber: nextOverNum, round: nextOverRound, category: "per_over" },
           });
           if (existingNextPreds.length === 0) {
-            const newPreds = generatePerOverPredictions(match.id, nextOverNum, nextOverRound);
+            const newPreds = generatePerOverPredictions(match.id, nextOverNum, nextOverRound, "", "");
             for (const p of newPreds) {
               await Prediction.create(p as any);
             }
@@ -1260,7 +1364,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           where: { matchId: match.id, overNumber: 1, round: inn2Round, category: "per_over" },
         });
         if (existingInn2Over1.length === 0) {
-          const inn2OverPreds = generatePerOverPredictions(match.id, 1, inn2Round);
+          const inn2OverPreds = generatePerOverPredictions(match.id, 1, inn2Round, "", "");
           for (const p of inn2OverPreds) {
             await Prediction.create(p as any);
           }
@@ -1275,6 +1379,14 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           const hotTake = generateHotTake(match.id, inn2Round, match.team1Short, match.team2Short);
           if (hotTake) {
             await Prediction.create({ ...hotTake, expiresAt: hotTakeExpiresAt } as any);
+          }
+          // Also generate player hot take for chase powerplay
+          const playerHotTake = generatePlayerHotTake(match.id, inn2Round, {
+            team1Players: match.team1Players,
+            team2Players: match.team2Players,
+          });
+          if (playerHotTake) {
+            await Prediction.create({ ...playerHotTake, expiresAt: new Date(Date.now() + 120_000) } as any);
           }
         }
 
@@ -1509,6 +1621,35 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
                 await Prediction.create({ ...hotTake, expiresAt: roundHotTakeExpiresAt } as any);
                 io.to(`match:${match.id}`).emit("newPrediction", { matchId: match.id, type: "hot_take", round: newRound });
               }
+              // Also generate player hot take for this round
+              // Compute player context from ball data
+              // Top scorer: sum all runs per batsman in the current innings
+              const currentInn = currentInnings === 1 ? "S1" : "S2";
+              const batsmanRunTotals: Record<string, number> = {};
+              for (const b of balls) {
+                if (b.scoreboard !== currentInn) continue;
+                const name = b.batsman?.fullname;
+                if (name) batsmanRunTotals[name] = (batsmanRunTotals[name] || 0) + (b.score?.runs || 0);
+              }
+              let topScorerName: string | undefined;
+              let topScorerRuns = 0;
+              for (const [name, r] of Object.entries(batsmanRunTotals)) {
+                if (r > topScorerRuns) { topScorerRuns = r; topScorerName = name; }
+              }
+              // Current batsmen at crease: from the latest over's stats
+              const currentBatsmen: [string, string] | undefined =
+                Object.keys(overStats.batsmanStats).length >= 2
+                  ? [Object.keys(overStats.batsmanStats)[0], Object.keys(overStats.batsmanStats)[1]]
+                  : undefined;
+              const playerHotTake = generatePlayerHotTake(match.id, newRound, {
+                team1Players: match.team1Players,
+                team2Players: match.team2Players,
+                topScorerName,
+                currentBatsmen,
+              });
+              if (playerHotTake) {
+                await Prediction.create({ ...playerHotTake, expiresAt: roundHotTakeExpiresAt } as any);
+              }
             }
           }
 
@@ -1525,6 +1666,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
 
             if (!isAllOut && !targetChased) {
               const nextBatsman = overStats.currentBatsman;
+              const nextBowler = overStats.currentBowler;
 
               // Deduplication: check if predictions for this over+round already exist
               const existingPreds = await Prediction.findAll({
@@ -1532,7 +1674,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
               });
 
               if (existingPreds.length === 0) {
-                const newPreds = generatePerOverPredictions(match.id, twoAhead, twoAheadRound, nextBatsman);
+                const newPreds = generatePerOverPredictions(match.id, twoAhead, twoAheadRound, nextBatsman, nextBowler);
                 for (const p of newPreds) {
                   await Prediction.create(p as any);
                 }
@@ -1615,6 +1757,23 @@ function getPhase(innings: number, over: number, totalOvers: number = 20): strin
 export function resolveOverPredictionFromStats(prediction: Prediction, stats: OverStats): string | null {
   const q = prediction.question.toLowerCase();
 
+  // IMPORTANT: Check player-specific "how many runs will [batter] score" BEFORE generic "how many runs"
+  // to avoid the generic pattern swallowing the player question
+  if (q.includes("how many runs will") && q.includes("score in over")) {
+    const findBatsman = (): BatsmanOverStats | null => {
+      for (const [name, st] of Object.entries(stats.batsmanStats)) {
+        if (q.includes(name.toLowerCase())) return st;
+      }
+      return stats.batsmanStats[stats.currentBatsman] || null;
+    };
+    const bs = findBatsman();
+    if (!bs) return "low"; // batter didn't face a ball this over → 0 runs
+    const r = bs.runs;
+    if (r <= 3) return "low";
+    if (r <= 8) return "medium";
+    return "high";
+  }
+
   if (q.includes("how many runs")) {
     if (stats.runs <= 5) return "low";
     if (stats.runs <= 10) return "medium";
@@ -1663,6 +1822,58 @@ export function resolveOverPredictionFromStats(prediction: Prediction, stats: Ov
     if (stats.extras <= 2) return "one_two";
     return "three_plus";
   }
+
+  // --- Player-specific per-over questions ---
+
+  // Helper: find player name from question by matching against stats keys
+  const findBatsmanInQuestion = (): BatsmanOverStats | null => {
+    for (const [name, st] of Object.entries(stats.batsmanStats)) {
+      if (q.includes(name.toLowerCase())) return st;
+    }
+    // Fallback: if no match found (name mismatch), use currentBatsman stats
+    return stats.batsmanStats[stats.currentBatsman] || null;
+  };
+
+  const findBowlerInQuestion = (): BowlerOverStats | null => {
+    for (const [name, st] of Object.entries(stats.bowlerStats)) {
+      if (q.includes(name.toLowerCase())) return st;
+    }
+    return stats.bowlerStats[stats.currentBowler] || null;
+  };
+
+  // "Will [batter] hit a six in over N?"
+  if (q.includes("hit a six in over")) {
+    const bs = findBatsmanInQuestion();
+    return (bs && bs.sixes > 0) ? "yes" : "no";
+  }
+
+  // "Will [batter] score 10+ runs in over N?"
+  if (q.includes("score 10+ runs in over")) {
+    const bs = findBatsmanInQuestion();
+    return (bs && bs.runs >= 10) ? "yes" : "no";
+  }
+
+  // "Will [batter] hit a boundary in over N?"
+  if (q.includes("hit a boundary in over")) {
+    const bs = findBatsmanInQuestion();
+    return (bs && bs.boundaries > 0) ? "yes" : "no";
+  }
+
+  // "Will [bowler] take a wicket in over N?"
+  if (q.includes("take a wicket in over")) {
+    const bw = findBowlerInQuestion();
+    return (bw && bw.wickets > 0) ? "yes" : "no";
+  }
+
+  // "Will [bowler] concede less than 5 runs in over N?"
+  if (q.includes("concede less than 5 runs in over")) {
+    const bw = findBowlerInQuestion();
+    if (!bw) return "yes"; // bowler didn't bowl = 0 runs conceded
+    return bw.runs < 5 ? "yes" : "no";
+  }
+
+  // NOTE: "How many runs will [batter] score in over N?" is handled at the TOP of this function
+  // (before generic "how many runs") to avoid pattern collision
 
   return null;
 }
@@ -1889,6 +2100,103 @@ function resolvePreMatchPrediction(
     return resolveDismissalType(wicketBall.score?.name);
   }
 
+  // --- Player-based pre-match resolutions ---
+
+  // Q5: "Who will be tonight's top scorer?"
+  if (q.includes("top scorer")) {
+    const batsmanRuns: Record<string, number> = {};
+    for (const b of allBalls) {
+      const name = b.batsman?.fullname;
+      if (name) {
+        batsmanRuns[name] = (batsmanRuns[name] || 0) + (b.score?.runs || 0);
+      }
+    }
+    // Find max scorer
+    let maxRuns = 0;
+    let maxName = "";
+    for (const [name, r] of Object.entries(batsmanRuns)) {
+      if (r > maxRuns) { maxRuns = r; maxName = name; }
+    }
+    if (!maxName) return null;
+
+    // Match against option keys using playerKey format
+    const matchedOption = prediction.options.find(
+      (o) => o.key !== "someone_else" && o.label?.toLowerCase() === maxName.toLowerCase()
+    );
+    if (matchedOption) return matchedOption.key;
+
+    // Check for ties — if another batter has the same max runs AND is in the options
+    const tiedNames = Object.entries(batsmanRuns).filter(([, r]) => r === maxRuns).map(([n]) => n);
+    for (const tn of tiedNames) {
+      const tiedOption = prediction.options.find(
+        (o) => o.key !== "someone_else" && o.label?.toLowerCase() === tn.toLowerCase()
+      );
+      if (tiedOption) return tiedOption.key;
+    }
+
+    return "someone_else";
+  }
+
+  // Q6: "Who will take the most wickets tonight?"
+  if (q.includes("most wickets")) {
+    const bowlerWickets: Record<string, number> = {};
+    for (const b of allBalls) {
+      if (b.score?.is_wicket || b.batsmanout_id) {
+        // Don't count run outs as bowler wickets
+        const dismissal = resolveDismissalType(b.score?.name);
+        if (dismissal === "run_out") continue;
+        const name = b.bowler?.fullname;
+        if (name) {
+          bowlerWickets[name] = (bowlerWickets[name] || 0) + 1;
+        }
+      }
+    }
+    let maxWickets = 0;
+    let maxName = "";
+    for (const [name, w] of Object.entries(bowlerWickets)) {
+      if (w > maxWickets) { maxWickets = w; maxName = name; }
+    }
+    if (!maxName) return null;
+
+    const matchedOption = prediction.options.find(
+      (o) => o.key !== "someone_else" && o.label?.toLowerCase() === maxName.toLowerCase()
+    );
+    if (matchedOption) return matchedOption.key;
+
+    // Check for ties
+    const tiedNames = Object.entries(bowlerWickets).filter(([, w]) => w === maxWickets).map(([n]) => n);
+    for (const tn of tiedNames) {
+      const tiedOption = prediction.options.find(
+        (o) => o.key !== "someone_else" && o.label?.toLowerCase() === tn.toLowerCase()
+      );
+      if (tiedOption) return tiedOption.key;
+    }
+
+    return "someone_else";
+  }
+
+  // Q7: "Man of the Match — who takes the award?"
+  if (q.includes("man of the match")) {
+    const motmId = fixture.man_of_match_id;
+    if (!motmId) return null; // MOTM not yet available — leave for admin manual resolution
+
+    // We need to find the MOTM player name. Check lineup data or ball data for matching ID.
+    // First try: find any ball where batsman_id or bowler_id matches motmId
+    let motmName = "";
+    for (const b of allBalls) {
+      if (b.batsman_id === motmId) { motmName = b.batsman?.fullname || ""; break; }
+      if (b.bowler_id === motmId) { motmName = b.bowler?.fullname || ""; break; }
+    }
+
+    if (!motmName) return null; // Could not resolve MOTM name from ball data
+
+    const matchedOption = prediction.options.find(
+      (o) => o.key !== "someone_else" && o.label?.toLowerCase() === motmName.toLowerCase()
+    );
+    if (matchedOption) return matchedOption.key;
+    return "someone_else";
+  }
+
   return null;
 }
 
@@ -1901,6 +2209,12 @@ function resolveEndOfMatchPrediction(
   allBalls: BallData[]
 ): string | null {
   const q = prediction.question.toLowerCase();
+
+  // Abandoned/cancelled matches — leave all predictions for admin manual resolution
+  const fixtureStatus = (fixture.status || "").toLowerCase();
+  if (fixtureStatus === "abandoned" || fixtureStatus === "cancelled" || fixtureStatus === "no result" || fixtureStatus === "postp.") {
+    return null;
+  }
 
   // "Total first innings score"
   if (q.includes("total first innings score") || q.includes("gut say")) {
@@ -1998,18 +2312,133 @@ function resolveEndOfMatchPrediction(
   }
 
   // "Chase done in which phase?"
-  if (q.includes("chase done in which phase") || q.includes("need")) {
+  if (q.includes("chase done in which phase")) {
     const inn2 = runs.find((r: any) => r.inning === 2);
     const inn1 = runs.find((r: any) => r.inning === 1);
     if (!inn2 || !inn1) return "not_chased";
 
-    // Did chasing team win?
-    if (fixture.winner_team_id !== inn2.team_id) return "not_chased";
+    // Did chasing team win? (also handles null winner_team_id for abandoned matches)
+    if (!fixture.winner_team_id || fixture.winner_team_id !== inn2.team_id) return "not_chased";
 
     const overs = inn2.overs;
     if (overs <= 6) return "powerplay";
     if (overs <= 15) return "middle";
     return "death";
+  }
+
+  // --- Player-based hot take resolutions ---
+
+  // Helper: sum runs per batsman from ball data for a given innings and over range
+  const sumBatsmanRuns = (
+    innings: string,
+    overStart: number,
+    overEnd: number
+  ): Record<string, number> => {
+    const result: Record<string, number> = {};
+    for (const b of allBalls) {
+      if (b.scoreboard !== innings) continue;
+      const overIdx = Math.floor(b.ball);
+      if (overIdx < overStart || overIdx >= overEnd) continue;
+      const name = b.batsman?.fullname;
+      if (name) {
+        result[name] = (result[name] || 0) + (b.score?.runs || 0);
+      }
+    }
+    return result;
+  };
+
+  // Round 1: "Will either opener score 50+ in the powerplay?"
+  if (q.includes("either opener score 50+")) {
+    const ppRuns = sumBatsmanRuns("S1", 0, 6);
+    const values = Object.values(ppRuns);
+    const any50 = values.some((r) => r >= 50);
+    return any50 ? "yes" : "no";
+  }
+
+  // Round 2: "Will [player] reach a century this innings?"
+  if (q.includes("reach a century")) {
+    // Sum all runs for this batter in S1 (entire innings)
+    const inn1Runs = sumBatsmanRuns("S1", 0, 100);
+    // Find which player name from options appears in the question
+    for (const [name, r] of Object.entries(inn1Runs)) {
+      if (q.includes(name.toLowerCase()) && r >= 100) return "yes";
+    }
+    return "no";
+  }
+
+  // Round 3: "Who smashes more sixes in the death — [batter1] or [batter2]?"
+  if (q.includes("more sixes in the death")) {
+    const deathStart = Math.ceil((match.totalOvers || 20) * 0.75);
+    const totalOvers = match.totalOvers || 20;
+    const batter1Sixes: Record<string, number> = {};
+    for (const b of allBalls) {
+      if (b.scoreboard !== "S1") continue;
+      if (Math.floor(b.ball) < deathStart) continue;
+      if (b.score?.six) {
+        const name = b.batsman?.fullname;
+        if (name) batter1Sixes[name] = (batter1Sixes[name] || 0) + 1;
+      }
+    }
+    // Match option keys against player names
+    const options = prediction.options;
+    const namedOptions = options.filter((o) => o.key !== "neither");
+    if (namedOptions.length >= 2) {
+      const p1Name = namedOptions[0].label;
+      const p2Name = namedOptions[1].label;
+      const p1Sixes = batter1Sixes[p1Name] || 0;
+      const p2Sixes = batter1Sixes[p2Name] || 0;
+      if (p1Sixes === 0 && p2Sixes === 0) return "neither";
+      if (p1Sixes > p2Sixes) return namedOptions[0].key;
+      if (p2Sixes > p1Sixes) return namedOptions[1].key;
+      return ALL_CORRECT_OPTION; // tied sixes
+    }
+    return null; // malformed options — leave for admin
+  }
+
+  // Round 4: "Will [opener1] outscore [opener2] in the chase powerplay?"
+  if (q.includes("outscore") && q.includes("chase powerplay")) {
+    const ppRuns = sumBatsmanRuns("S2", 0, 6);
+    const options = prediction.options;
+    const namedOptions = options.filter((o) => o.key !== "equal");
+    if (namedOptions.length >= 2) {
+      const p1Name = namedOptions[0].label;
+      const p2Name = namedOptions[1].label;
+      const p1Runs = ppRuns[p1Name] || 0;
+      const p2Runs = ppRuns[p2Name] || 0;
+      if (p1Runs > p2Runs) return namedOptions[0].key;
+      if (p2Runs > p1Runs) return namedOptions[1].key;
+      return "equal";
+    }
+    return null; // malformed options — leave for admin
+  }
+
+  // Round 5: "Will any bowler finish the match with 3+ wickets?"
+  if (q.includes("bowler finish the match with 3+")) {
+    const bowlerWickets: Record<string, number> = {};
+    for (const b of allBalls) {
+      if (b.score?.is_wicket || b.batsmanout_id) {
+        // Don't count run outs as bowler wickets
+        const dismissal = resolveDismissalType(b.score?.name);
+        if (dismissal === "run_out") continue;
+        const name = b.bowler?.fullname;
+        if (name) bowlerWickets[name] = (bowlerWickets[name] || 0) + 1;
+      }
+    }
+    const any3Plus = Object.values(bowlerWickets).some((w) => w >= 3);
+    return any3Plus ? "yes" : "no";
+  }
+
+  // Round 6: "Will [batter] hit a six in the last 5 overs?"
+  if (q.includes("hit a six in the last 5 overs")) {
+    const deathStart = Math.max(0, (match.totalOvers || 20) - 5);
+    for (const b of allBalls) {
+      if (b.scoreboard !== "S2") continue;
+      if (Math.floor(b.ball) < deathStart) continue;
+      if (b.score?.six && b.batsman?.fullname && q.includes(b.batsman.fullname.toLowerCase())) {
+        return "yes";
+      }
+    }
+    return "no";
   }
 
   return null;

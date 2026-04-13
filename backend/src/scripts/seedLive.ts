@@ -81,7 +81,7 @@ async function seed() {
     }
 
     // Over 1 predictions
-    const over1Preds = generatePerOverPredictions(match.id, 1, 1, "Nicky van den Bergh");
+    const over1Preds = generatePerOverPredictions(match.id, 1, 1, "Nicky van den Bergh", "");
     for (const p of over1Preds) {
       await Prediction.create(p as any);
     }
