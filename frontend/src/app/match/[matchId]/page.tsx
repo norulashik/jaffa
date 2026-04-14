@@ -18,6 +18,7 @@ import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
 import CorrectAnswerFeedback from "@/components/CorrectAnswerFeedback";
 import OverBallsPanel from "@/components/OverBallsPanel";
+import Scorecard from "@/components/Scorecard";
 import { api } from "@/lib/api";
 import { connectSocket, joinVenueMatch, disconnectSocket } from "@/lib/socket";
 import { useGame } from "@/context/GameContext";
@@ -76,6 +77,7 @@ export default function MatchDashboard() {
   const [userRank, setUserRank] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
   const [scoreVersion, setScoreVersion] = useState(0);
+  const [activeTab, setActiveTab] = useState<"predict" | "scorecard">("predict");
   const { state: gameState, dispatch } = useGame();
 
   const [venueId, setVenueId] = useState("");
@@ -777,8 +779,37 @@ export default function MatchDashboard() {
           return null;
         })()}
 
+        {/* Tab Switcher: Predict / Scorecard */}
+        <div className="flex gap-2">
+          <button
+            onClick={() => setActiveTab("predict")}
+            className={`flex-1 py-2 text-xs font-black uppercase tracking-wider rounded-[3px] border-2 transition-all ${
+              activeTab === "predict"
+                ? "bg-[#ff6341] text-black border-black shadow-[2px_2px_0_0_#000]"
+                : "bg-[#0d0d0d] text-white/50 border-[#2a2a2a]"
+            }`}
+          >
+            Predict
+          </button>
+          <button
+            onClick={() => setActiveTab("scorecard")}
+            className={`flex-1 py-2 text-xs font-black uppercase tracking-wider rounded-[3px] border-2 transition-all ${
+              activeTab === "scorecard"
+                ? "bg-[#ff6341] text-black border-black shadow-[2px_2px_0_0_#000]"
+                : "bg-[#0d0d0d] text-white/50 border-[#2a2a2a]"
+            }`}
+          >
+            Scorecard
+          </button>
+        </div>
+
+        {/* Scorecard Tab */}
+        {activeTab === "scorecard" && (
+          <Scorecard matchId={matchId} scoreVersion={scoreVersion} matchData={matchData} />
+        )}
+
         {/* Predict Tabs */}
-        {(() => {
+        {activeTab === "predict" && (() => {
           const sd = matchData?.scoreData || {};
           const currInn = sd.currentInnings || matchData?.currentInnings || 1;
           const currOv = sd.currentOver || matchData?.currentOver || 0;

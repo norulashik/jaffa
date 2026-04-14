@@ -308,6 +308,105 @@ router.get("/:matchId/balls", async (req: Request, res: Response): Promise<void>
   }
 });
 
+// Get live scorecard (batting + bowling) from SportsMonk
+router.get("/:matchId/scorecard", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const matchId = req.params.matchId as string;
+    const match = await Match.findByPk(matchId);
+    if (!match) { res.status(404).json({ error: "Match not found" }); return; }
+
+    if (!match.externalId) {
+      res.json({ batting: [], bowling: [], playerMap: {}, scoreData: match.scoreData || {} });
+      return;
+    }
+
+    const apiToken = process.env.SPORTSMONK_API_KEY || "";
+    const fixtureId = Number(match.externalId);
+    const url = `https://cricket.sportmonks.com/api/v2.0/fixtures/${fixtureId}?api_token=${apiToken}&include=batting,bowling,lineup`;
+    const apiRes = await fetch(url, {
+      headers: { accept: "application/json", "user-agent": "JaffaBackend/1.0" },
+    });
+    const apiData: any = await apiRes.json();
+    const fix = apiData.data || {};
+
+    // Build player map from lineup
+    const lineupArr: any[] = Array.isArray(fix.lineup) ? fix.lineup : (fix.lineup?.data || []);
+    const playerMap: Record<number, { name: string; image: string | null }> = {};
+    for (const p of lineupArr) {
+      playerMap[p.id] = { name: p.fullname, image: p.image_path || null };
+    }
+
+    // Helper: format dismissal string using score_id from SportsMonk
+    const RUN_OUT_IDS = new Set([3,5,22,23,24,25,28,29,32,36,42,63,64,65,66,67,68]);
+    const fmtDismissal = (b: any): string => {
+      const bowler = playerMap[b.bowling_player_id]?.name?.split(" ").pop() || "";
+      const fielder = playerMap[b.catch_stump_player_id]?.name?.split(" ").pop() || "";
+      const runoutBy = playerMap[b.runout_by_id]?.name?.split(" ").pop() || "";
+      const sid = b.score_id;
+
+      if (RUN_OUT_IDS.has(sid)) return `run out (${fielder || runoutBy || "sub"})`;
+      if (sid === 56 || sid === 57 || sid === 21) return `st ${fielder} b ${bowler}`;
+      if (sid === 83) return `lbw b ${bowler}`;
+      if (sid === 20 || sid === 87) return `hit wicket b ${bowler}`;
+      if (sid === 54 || sid === 55) {
+        if (b.catch_stump_player_id === b.bowling_player_id) return `c & b ${bowler}`;
+        return `c ${fielder} b ${bowler}`;
+      }
+      if (sid === 58 || sid === 79) return `b ${bowler}`;
+      if (sid === 138) return "retired out";
+      if (sid === 80 || sid === 81) return "absent hurt";
+      if (sid === 78) return "obstructing the field";
+      if (sid === 86) return "hit ball twice";
+
+      // Fallback for unknown score_ids
+      if (b.catch_stump_player_id) return `c ${fielder} b ${bowler}`;
+      if (bowler) return `b ${bowler}`;
+      return "out";
+    };
+
+    // Transform batting
+    const battingRaw: any[] = Array.isArray(fix.batting) ? fix.batting : (fix.batting?.data || []);
+    const batting = battingRaw.map((b: any) => ({
+      name: playerMap[b.player_id]?.name || `Player ${b.player_id}`,
+      image: playerMap[b.player_id]?.image || null,
+      runs: b.score ?? 0,
+      balls: b.ball ?? 0,
+      fours: b.four_x ?? 0,
+      sixes: b.six_x ?? 0,
+      strikeRate: b.rate ?? 0,
+      isOut: b.score_id !== 84 && b.score_id !== 85,
+      dismissal: (b.score_id !== 84 && b.score_id !== 85) ? fmtDismissal(b) : "not out",
+      fowScore: (b.score_id !== 84 && b.score_id !== 85) ? (b.fow_score ?? null) : null,
+      fowBalls: (b.score_id !== 84 && b.score_id !== 85) ? (b.fow_balls ?? null) : null,
+      scoreboard: b.scoreboard,
+      teamId: b.team_id,
+      sort: b.sort,
+    }));
+
+    // Transform bowling
+    const bowlingRaw: any[] = Array.isArray(fix.bowling) ? fix.bowling : (fix.bowling?.data || []);
+    const bowling = bowlingRaw.map((b: any) => ({
+      name: playerMap[b.player_id]?.name || `Player ${b.player_id}`,
+      image: playerMap[b.player_id]?.image || null,
+      overs: b.overs ?? 0,
+      maidens: b.medians ?? 0,
+      runs: b.runs ?? 0,
+      wickets: b.wickets ?? 0,
+      economy: b.rate ?? 0,
+      wides: b.wide ?? 0,
+      noballs: b.noball ?? 0,
+      scoreboard: b.scoreboard,
+      teamId: b.team_id,
+      sort: b.sort,
+    }));
+
+    res.json({ batting, bowling, playerMap, scoreData: match.scoreData || {} });
+  } catch (error) {
+    console.error("Get scorecard error:", error);
+    res.status(500).json({ error: "Failed to get scorecard" });
+  }
+});
+
 // Get match state for a user
 router.get("/:matchId/state", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {

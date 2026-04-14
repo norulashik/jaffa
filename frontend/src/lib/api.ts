@@ -66,6 +66,7 @@ export const api = {
   getMatches: () => request<any[]>("/matches"),
   getMatch: (matchId: string) => request<any>(`/matches/${matchId}`),
   getMatchBalls: (matchId: string) => request<{ overs: any[]; currentInnings: number; currentOver: number }>(`/matches/${matchId}/balls`),
+  getMatchScorecard: (matchId: string) => request<any>(`/matches/${matchId}/scorecard`),
   importMatch: (fixtureId: string) => request<{ match: any }>(`/matches/import/${fixtureId}`, { method: "POST" }),
 
   joinMatch: (matchId: string, venueId: string, matchCode?: string, latitude?: number, longitude?: number) =>
