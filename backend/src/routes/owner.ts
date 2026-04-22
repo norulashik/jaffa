@@ -1,30 +1,40 @@
 import { Router, Request, Response } from "express";
 import jwt from "jsonwebtoken";
+import rateLimit from "express-rate-limit";
 import { Op } from "sequelize";
 import { Venue, User, Match, MatchParticipant, Prediction, UserPrediction, Reward } from "../models";
 import { authenticateOwner, AuthRequest } from "../middleware/auth";
 import { fetchTodayFixtures, fetchTeamData } from "../services/sportsmonkApi";
 import { generatePreMatchPredictions } from "../services/predictionEngine";
 import { resolvePrediction } from "../services/pointsEngine";
+import { JWT_SECRET, OWNER_USER, OWNER_PASS } from "../config/secrets";
+import { parsePagination, paginationMeta } from "../utils/pagination";
 
 const router = Router();
 
+// Brute-force guard on owner login. 5 attempts / 15 min / IP.
+const ownerLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many login attempts. Try again in 15 minutes." },
+});
+
 // ── Owner Authentication ─────────────────────────────────────────
 
-router.post("/login", async (req: Request, res: Response): Promise<void> => {
+router.post("/login", ownerLoginLimiter, async (req: Request, res: Response): Promise<void> => {
   try {
     const { username, password } = req.body;
-    const ownerUser = process.env.OWNER_USER || "admin";
-    const ownerPass = process.env.OWNER_PASS || "admin";
 
-    if (username !== ownerUser || password !== ownerPass) {
+    if (username !== OWNER_USER || password !== OWNER_PASS) {
       res.status(401).json({ error: "Invalid credentials" });
       return;
     }
 
     const token = jwt.sign(
       { ownerId: "owner", type: "owner" },
-      process.env.JWT_SECRET || "dev-secret",
+      JWT_SECRET,
       { expiresIn: "24h" }
     );
 
@@ -200,29 +210,31 @@ router.get("/venues/:venueId/leaderboard", authenticateOwner, async (req: AuthRe
   try {
     const venueId = req.params.venueId as string;
     const matchId = req.query.matchId as string;
+    const p = parsePagination(req);
 
     const where: any = { venueId };
     if (matchId) where.matchId = matchId;
 
-    const players = await MatchParticipant.findAll({
+    const { count, rows: players } = await MatchParticipant.findAndCountAll({
       where,
       order: [["totalPoints", "DESC"]],
-      limit: 50,
+      limit: p.limit,
+      offset: p.offset,
       include: [{ model: User, as: "user", attributes: ["displayName", "avatarConfig"] }],
     });
 
-    const leaderboard = players.map((p: any, i: number) => ({
-      rank: i + 1,
-      userId: p.userId,
-      displayName: p.user?.displayName || "Player",
-      avatarConfig: p.user?.avatarConfig || null,
-      totalPoints: p.totalPoints,
-      correctPredictions: p.correctPredictions,
-      totalPredictions: p.totalPredictions,
-      currentStreak: p.currentStreak,
+    const leaderboard = players.map((row: any, i: number) => ({
+      rank: p.offset + i + 1,
+      userId: row.userId,
+      displayName: row.user?.displayName || "Player",
+      avatarConfig: row.user?.avatarConfig || null,
+      totalPoints: row.totalPoints,
+      correctPredictions: row.correctPredictions,
+      totalPredictions: row.totalPredictions,
+      currentStreak: row.currentStreak,
     }));
 
-    res.json(leaderboard);
+    res.json({ leaderboard, ...paginationMeta(p, count) });
   } catch (error) {
     console.error("Venue leaderboard error:", error);
     res.status(500).json({ error: "Failed to get leaderboard" });
@@ -253,13 +265,15 @@ router.get("/venues/:venueId/rewards", authenticateOwner, async (req: AuthReques
 
 // ── Match Management ─────────────────────────────────────────────
 
-router.get("/matches", authenticateOwner, async (_req: AuthRequest, res: Response): Promise<void> => {
+router.get("/matches", authenticateOwner, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const matches = await Match.findAll({
+    const p = parsePagination(req);
+    const { count, rows: matches } = await Match.findAndCountAll({
       order: [["startTime", "DESC"]],
-      limit: 50,
+      limit: p.limit,
+      offset: p.offset,
     });
-    res.json(matches);
+    res.json({ matches, ...paginationMeta(p, count) });
   } catch (error) {
     console.error("Owner matches error:", error);
     res.status(500).json({ error: "Failed to get matches" });

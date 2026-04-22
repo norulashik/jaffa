@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { Venue } from "../models";
+import { JWT_SECRET } from "../config/secrets";
 
 const router = Router();
 
@@ -101,7 +102,7 @@ router.post("/login", async (req: Request, res: Response): Promise<void> => {
 
     const token = jwt.sign(
       { venueId: venue.id, type: "venue" },
-      process.env.JWT_SECRET || "dev-secret",
+      JWT_SECRET,
       { expiresIn: "90d" }
     );
 
@@ -127,7 +128,7 @@ router.put("/rewards", async (req: Request, res: Response): Promise<void> => {
     const token = req.headers.authorization?.replace("Bearer ", "");
     if (!token) { res.status(401).json({ error: "No token" }); return; }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "dev-secret") as { venueId: string; type: string };
+    const decoded = jwt.verify(token, JWT_SECRET) as { venueId: string; type: string };
     if (decoded.type !== "venue") { res.status(401).json({ error: "Not a venue" }); return; }
 
     const venue = await Venue.findByPk(decoded.venueId);

@@ -1,4 +1,5 @@
-import { MatchParticipant, UserPrediction, Prediction } from "../models";
+import { MatchParticipant, UserPrediction, Prediction, PredictionAggregate } from "../models";
+import { GLOBAL_SCOPE_ID } from "../models/PredictionAggregate";
 import sequelize from "../config/database";
 import { Server as SocketIOServer } from "socket.io";
 
@@ -94,10 +95,70 @@ export function calculatePoints(
   };
 }
 
+/**
+ * Recomputes and upserts per-venue + global answer aggregates for a resolved prediction.
+ * Always additive — never throws out of the call site; failures are logged only.
+ * Safe to run after re-resolution (row is keyed on unique (predictionId, scope, scopeId)).
+ */
+export async function writePredictionAggregates(prediction: Prediction): Promise<void> {
+  try {
+    if (!prediction.correctOption) return;
+
+    const userPredictions = await UserPrediction.findAll({
+      where: { predictionId: prediction.id },
+      attributes: ["id", "venueId", "selectedOption"],
+    });
+
+    if (userPredictions.length === 0) return;
+
+    const pct = (correct: number, total: number) =>
+      total > 0 ? Math.round((correct / total) * 10000) / 100 : 0;
+
+    // Global
+    const globalTotal = userPredictions.length;
+    const globalCorrect = userPredictions.filter((up) =>
+      isSelectedOptionCorrect(prediction, up.selectedOption)
+    ).length;
+
+    await PredictionAggregate.upsert({
+      predictionId: prediction.id,
+      scope: "global",
+      scopeId: GLOBAL_SCOPE_ID,
+      totalAnswered: globalTotal,
+      correctCount: globalCorrect,
+      correctPct: pct(globalCorrect, globalTotal),
+    });
+
+    // Per venue
+    const venueMap = new Map<string, { total: number; correct: number }>();
+    for (const up of userPredictions) {
+      const bucket = venueMap.get(up.venueId) || { total: 0, correct: 0 };
+      bucket.total += 1;
+      if (isSelectedOptionCorrect(prediction, up.selectedOption)) bucket.correct += 1;
+      venueMap.set(up.venueId, bucket);
+    }
+
+    for (const [venueId, { total, correct }] of venueMap.entries()) {
+      await PredictionAggregate.upsert({
+        predictionId: prediction.id,
+        scope: "venue",
+        scopeId: venueId,
+        totalAnswered: total,
+        correctCount: correct,
+        correctPct: pct(correct, total),
+      });
+    }
+  } catch (err) {
+    // Aggregates are a read-side convenience — never block scoring / leaderboards on failure.
+    console.error("[PredictionAggregate] write failed for prediction", prediction.id, err);
+  }
+}
+
 export async function resolvePrediction(
   prediction: Prediction,
   correctOption: string,
-  io: SocketIOServer
+  io: SocketIOServer,
+  context?: Omit<import("./feedback").FeedbackContext, "correctOption">
 ): Promise<void> {
   if (prediction.status === "resolved") {
     if (prediction.correctOption === correctOption) {
@@ -115,6 +176,10 @@ export async function resolvePrediction(
     where: { predictionId: prediction.id },
   });
 
+  // Lazy-import to sidestep any circular-import risk at module load.
+  const { buildFeedback } = await import("./feedback");
+  const feedbackCtx = { ...(context || {}), correctOption };
+
   let correctCount = 0;
 
   for (const up of userPredictions) {
@@ -131,7 +196,15 @@ export async function resolvePrediction(
 
       result = calculatePoints(prediction, up.selectedOption, up.boostType, participant.currentStreak);
 
-      await up.update({ isCorrect: result.isCorrect, pointsEarned: result.totalPoints }, { transaction: t });
+      // Short "you missed by X" text for wrong picks. Null for correct picks.
+      const feedbackText = result.isCorrect
+        ? null
+        : buildFeedback(prediction, up.selectedOption, feedbackCtx);
+
+      await up.update(
+        { isCorrect: result.isCorrect, pointsEarned: result.totalPoints, feedbackText },
+        { transaction: t }
+      );
 
       if (result.isCorrect) {
         correctCount++;
@@ -218,6 +291,10 @@ export async function resolvePrediction(
     }
   }
 
+  // Persist per-venue + global aggregates before broadcasting so the UI can read
+  // them on refetch. Never blocks scoring; writePredictionAggregates swallows errors.
+  await writePredictionAggregates(prediction);
+
   const venues = [...new Set(userPredictions.map((up) => up.venueId))];
   for (const venueId of venues) {
     const venueAnswers = userPredictions.filter((up) => up.venueId === venueId);
@@ -265,6 +342,90 @@ export async function resolvePrediction(
   }
 }
 
+/**
+ * Void an unresolved prediction and refund the boosts users spent on it.
+ *
+ * Used when a live match condition invalidates the question before it can be
+ * fairly resolved — Abandoned/Cancelled/No-Result on a live player question
+ * is the primary case, but generic enough for future void cases.
+ *
+ * No points have been awarded yet (voids happen before resolution), so we
+ * never touch `totalPoints` on MatchParticipant. Idempotent on already
+ * resolved/voided predictions.
+ */
+export async function voidPrediction(
+  prediction: Prediction,
+  reason: string,
+  io: SocketIOServer
+): Promise<void> {
+  if (prediction.status === "resolved" || prediction.status === "voided") {
+    return;
+  }
+
+  const userPredictions = await UserPrediction.findAll({
+    where: { predictionId: prediction.id },
+  });
+
+  await sequelize.transaction(async (t) => {
+    await prediction.update(
+      {
+        status: "voided",
+        voidedAt: new Date(),
+        voidReason: reason,
+      },
+      { transaction: t }
+    );
+
+    for (const up of userPredictions) {
+      // Refund the boost/all-in slot.
+      if (up.boostType === "boost" || up.boostType === "all_in") {
+        const participant = await MatchParticipant.findOne({
+          where: {
+            userId: up.userId,
+            matchId: up.matchId,
+            venueId: up.venueId,
+          },
+          transaction: t,
+          lock: t.LOCK.UPDATE,
+        });
+
+        if (participant) {
+          const patch: Record<string, unknown> = {};
+          if (up.boostType === "boost") {
+            patch.boostsUsedRound = Math.max(0, participant.boostsUsedRound - 1);
+          } else {
+            patch.allInUsed = false;
+          }
+          await participant.update(patch as Partial<MatchParticipant>, { transaction: t });
+        }
+      }
+
+      // Clear correctness/points on the user's row.
+      await up.update(
+        {
+          pointsEarned: 0,
+          isCorrect: null as unknown as boolean,
+        } as Partial<UserPrediction>,
+        { transaction: t }
+      );
+    }
+  });
+
+  // Broadcast per venue so UIs can remove/fade the card.
+  const venues = [...new Set(userPredictions.map((up) => up.venueId))];
+  for (const venueId of venues) {
+    io.to(`venue:${venueId}:${prediction.matchId}`).emit("predictionVoided", {
+      matchId: prediction.matchId,
+      predictionId: prediction.id,
+      reason,
+    });
+  }
+
+  console.log(
+    `[voidPrediction] ${prediction.id} voided (${reason}) — refunded ${userPredictions.length} user pick(s)`
+  );
+}
+
 export async function reResolvePrediction(
   prediction: Prediction,
   newCorrectOption: string,
@@ -294,6 +455,9 @@ export async function reResolvePrediction(
   if (!changed) return false;
 
   await recomputeParticipantScores({ matchId: prediction.matchId });
+
+  // Refresh aggregates after re-resolution so badges reflect the new correct option.
+  await writePredictionAggregates(prediction);
 
   const venues = [...new Set(userPredictions.map((up) => up.venueId))];
   for (const venueId of venues) {

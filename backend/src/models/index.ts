@@ -11,6 +11,7 @@ import OTP from "./OTP";
 import Room from "./Room";
 import RoomMember from "./RoomMember";
 import WeeklyRedemption from "./WeeklyRedemption";
+import PredictionAggregate from "./PredictionAggregate";
 
 // Associations
 
@@ -50,6 +51,10 @@ MatchCode.belongsTo(Venue, { foreignKey: "venueId", as: "venue" });
 Prediction.hasMany(UserPrediction, { foreignKey: "predictionId", as: "userPredictions" });
 UserPrediction.belongsTo(Prediction, { foreignKey: "predictionId", as: "prediction" });
 
+// Prediction has many PredictionAggregates (one per scope)
+Prediction.hasMany(PredictionAggregate, { foreignKey: "predictionId", as: "aggregates" });
+PredictionAggregate.belongsTo(Prediction, { foreignKey: "predictionId", as: "prediction" });
+
 // Room associations
 User.hasMany(Room, { foreignKey: "hostUserId", as: "hostedRooms" });
 Room.belongsTo(User, { foreignKey: "hostUserId", as: "host" });
@@ -81,4 +86,5 @@ export {
   Room,
   RoomMember,
   WeeklyRedemption,
+  PredictionAggregate,
 };

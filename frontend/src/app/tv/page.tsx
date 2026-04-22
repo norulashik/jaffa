@@ -49,7 +49,15 @@ export default function TVDisplay() {
     loadMatch();
     loadLeaderboards();
 
-    const socket = io(SOCKET_URL);
+    // TV display is venue-scoped — must authenticate with the venue JWT.
+    // Fall back to user token so a logged-in player can also open the URL in a pinch.
+    const tvToken =
+      (typeof window !== "undefined" &&
+        (localStorage.getItem("jaffa_venue_token") ||
+          localStorage.getItem("jaffa_token"))) || "";
+    const socket = io(SOCKET_URL, {
+      auth: { token: tvToken },
+    });
     socketRef.current = socket;
 
     socket.on("connect", () => {

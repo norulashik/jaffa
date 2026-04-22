@@ -832,8 +832,17 @@ export default function MatchDashboard() {
           const boostsRemaining = Math.max(0, 1 - (gameState.boostsUsedThisRound || 0));
           const allInAvailable = !gameState.allInUsed;
 
+          const liveOver = matchData?.scoreData?.currentOver || matchData?.currentOver || 0;
           const getCategoryLabel = (pred: any) => {
-            if (pred.category === "per_over") return `Over ${pred.overNumber || ""}`;
+            if (pred.category === "per_over") {
+              if (pred.subjectType === "batsman_innings") return "Live: at crease";
+              if (pred.subjectType === "bowler_innings") return "Live: bowling";
+              const n = pred.overNumber;
+              if (!n) return "Over";
+              if (liveOver && n === liveOver) return `Over ${n} — live`;
+              if (liveOver && n === liveOver + 1) return "Next over";
+              return `Over ${n}`;
+            }
             if (pred.category === "hot_take") return "Hot Take";
             return pred.category?.replace(/_/g, " ") || "Predict";
           };
@@ -1073,6 +1082,11 @@ export default function MatchDashboard() {
                                       </span>
                                     )}
                                   </div>
+                                  {isClosed && isCorrect === false && pred.userAnswer?.feedbackText && (
+                                    <p className="text-xs mt-2 text-[#ff9b80] italic">
+                                      {pred.userAnswer.feedbackText}
+                                    </p>
+                                  )}
                                 </div>
                               );
                             })}

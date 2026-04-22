@@ -1,9 +1,28 @@
-import { Router, Response } from "express";
+import { Router, Response, Request } from "express";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { Reward, User } from "../models";
 import sequelize from "../config/database";
 import { authenticateUser, authenticateVenue, AuthRequest } from "../middleware/auth";
 
 const router = Router();
+
+// Per-venue limiter on the 4-digit code redemption endpoint.
+// 4-digit space is 10,000 possibilities; even with a venue token, a rogue
+// insider could brute-force in minutes. 20 attempts/min/venue makes brute-force
+// take ~8 hours and is loud enough to notice in logs.
+const redeemLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Key on the venue id (from the already-verified JWT). Fall back to IPv6-safe IP.
+  keyGenerator: (req: Request, res: Response) => {
+    const v = (req as AuthRequest).venueId;
+    if (v) return `venue:${v}`;
+    return `ip:${ipKeyGenerator(req.ip || "", res as unknown as never)}`;
+  },
+  message: { error: "Too many redemption attempts. Slow down." },
+});
 
 // Get my rewards
 router.get("/my", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
@@ -26,13 +45,16 @@ router.get("/my", authenticateUser, async (req: AuthRequest, res: Response): Pro
   }
 });
 
-// Verify and redeem a reward (venue staff action)
-router.post("/redeem", authenticateVenue, async (req: AuthRequest, res: Response): Promise<void> => {
+// Verify and redeem a reward (venue staff action).
+// authenticateVenue runs FIRST so the limiter can key on the verified venueId.
+router.post("/redeem", authenticateVenue, redeemLimiter, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const venueId = req.venueId!;
     const { code } = req.body;
 
-    if (!code || code.length !== 4) {
+    // Reject anything that isn't exactly 4 digits — prevents wildcard lookups
+    // and strips surprise characters before we hit the DB.
+    if (!code || typeof code !== "string" || !/^[0-9]{4}$/.test(code)) {
       res.status(400).json({ error: "Invalid code" });
       return;
     }

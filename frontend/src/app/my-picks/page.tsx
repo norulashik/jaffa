@@ -10,8 +10,19 @@ import { useGame } from "@/context/GameContext";
 import { api } from "@/lib/api";
 import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 
-const getCategoryLabel = (pred: any) => {
-  if (pred.category === "per_over") return `Over ${pred.overNumber || ""}`;
+const getCategoryLabel = (pred: any, currentOver?: number) => {
+  if (pred.category === "per_over") {
+    const n = pred.overNumber;
+    // Live player questions piggyback on category="per_over" but carry subjectType.
+    if (pred.subjectType === "batsman_innings") return "Live: at crease";
+    if (pred.subjectType === "bowler_innings") return "Live: bowling";
+    if (n == null) return "Over";
+    if (currentOver != null) {
+      if (n === currentOver) return `Over ${n} — live`;
+      if (n === currentOver + 1) return `Next over`;
+    }
+    return `Over ${n}`;
+  }
   if (pred.category === "hot_take") return "Hot Take";
   if (pred.category === "rivalry_call") return "Rivalry Call";
   if (pred.category === "bold_call") return "Bold Call";
@@ -21,6 +32,48 @@ const getCategoryLabel = (pred: any) => {
 
 const getOptionLabel = (pred: any, key: string) =>
   pred.options?.find((o: any) => (o.key || o.label) === key)?.label || key;
+
+type ScopeAgg = { totalAnswered: number; correctCount: number; correctPct: number };
+
+const bandLabel = (pct: number): string | null => {
+  if (pct <= 0 || pct > 50) return null;
+  if (pct <= 5) return "top 5% — elite call";
+  if (pct <= 10) return "top 10%";
+  if (pct <= 25) return "top 25%";
+  return "top 50%";
+};
+
+// Spotify-style percentile badge: only shown for resolved+correct picks
+// where at least one scope (global or venue) had ≤50% correct. Leads with
+// the tighter (rarer-correct) scope. Requires a minimum sample so a single
+// lucky pick doesn't read as "top 1%".
+const MIN_SAMPLE = 5;
+function PercentileBadge({ aggregates }: { aggregates: { global?: ScopeAgg; venue?: ScopeAgg } | null | undefined }) {
+  if (!aggregates) return null;
+
+  const g = aggregates.global && aggregates.global.totalAnswered >= MIN_SAMPLE ? aggregates.global : undefined;
+  const v = aggregates.venue && aggregates.venue.totalAnswered >= MIN_SAMPLE ? aggregates.venue : undefined;
+
+  const gLabel = g ? bandLabel(g.correctPct) : null;
+  const vLabel = v ? bandLabel(v.correctPct) : null;
+  if (!gLabel && !vLabel) return null;
+
+  // Lead with the tighter scope (smaller correctPct = rarer correct = bigger flex).
+  const gPct = g?.correctPct ?? Infinity;
+  const vPct = v?.correctPct ?? Infinity;
+  const leadIsVenue = vLabel && (!gLabel || vPct <= gPct);
+  const primary = leadIsVenue ? `${vLabel} at this venue` : `${gLabel} globally`;
+  const secondary = leadIsVenue
+    ? gLabel && `${gLabel} globally`
+    : vLabel && `${vLabel} at this venue`;
+
+  return (
+    <div className="mt-2 text-[11px] font-bold flex items-center gap-1 flex-wrap">
+      <span style={{ color: "#22c55e" }}>🏆 You&apos;re in the {primary}</span>
+      {secondary && <span className="text-[#6b7280]">· {secondary}</span>}
+    </div>
+  );
+}
 
 export default function MyPicksPage() {
   const { state } = useGame();
@@ -64,6 +117,16 @@ export default function MyPicksPage() {
     (p: any) => p.userAnswer?.selectedOption
   );
   const allPicks = [...answeredPreds].reverse();
+
+  // Derive the current over from resolved per-over predictions: the highest
+  // resolved overNumber is the most recently completed over, so the live over
+  // is that + 1. Anything above the live over is "Next over" — the UI label.
+  const resolvedOverNumbers = predictions
+    .filter((p: any) => p.category === "per_over" && p.status === "resolved" && p.overNumber)
+    .map((p: any) => p.overNumber as number);
+  const currentOver = resolvedOverNumbers.length
+    ? Math.max(...resolvedOverNumbers) + 1
+    : undefined;
 
   // Stat counts
   const correctCount = answeredPreds.filter((p: any) => p.status === "resolved" && p.userAnswer?.selectedOption === p.correctOption).length;
@@ -200,7 +263,7 @@ export default function MyPicksPage() {
                   >
                     <div className="flex justify-between items-start mb-1">
                       <span className="info-pill">
-                        {getCategoryLabel(pred)}
+                        {getCategoryLabel(pred, currentOver)}
                       </span>
                       <span className="text-xs font-bold" style={{ color: statusColor }}>
                         {statusText}
@@ -239,6 +302,15 @@ export default function MyPicksPage() {
                         </span>
                       )}
                     </div>
+                    {/* "You missed by X runs" — shown only on wrong, only when resolver supplied context */}
+                    {isClosed && isCorrect === false && pred.userAnswer?.feedbackText && (
+                      <p className="text-xs mt-2 text-[#ff9b80] italic">
+                        {pred.userAnswer.feedbackText}
+                      </p>
+                    )}
+                    {isClosed && isCorrect === true && (
+                      <PercentileBadge aggregates={pred.aggregates} />
+                    )}
                   </motion.div>
                 );
               })}

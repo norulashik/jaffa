@@ -13,12 +13,14 @@ interface UserPredictionAttributes {
   boostType: BoostType;
   pointsEarned: number;
   isCorrect?: boolean;
+  feedbackText?: string | null;
   answeredAt: Date;
   createdAt?: Date;
   updatedAt?: Date;
 }
 
-interface UserPredictionCreationAttributes extends Optional<UserPredictionAttributes, "id" | "pointsEarned" | "isCorrect" | "answeredAt"> {}
+interface UserPredictionCreationAttributes
+  extends Optional<UserPredictionAttributes, "id" | "pointsEarned" | "isCorrect" | "feedbackText" | "answeredAt"> {}
 
 class UserPrediction extends Model<UserPredictionAttributes, UserPredictionCreationAttributes> implements UserPredictionAttributes {
   public id!: string;
@@ -30,6 +32,7 @@ class UserPrediction extends Model<UserPredictionAttributes, UserPredictionCreat
   public boostType!: BoostType;
   public pointsEarned!: number;
   public isCorrect!: boolean;
+  public feedbackText!: string | null;
   public answeredAt!: Date;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
@@ -76,6 +79,10 @@ UserPrediction.init(
     },
     isCorrect: {
       type: DataTypes.BOOLEAN,
+      allowNull: true,
+    },
+    feedbackText: {
+      type: DataTypes.STRING(120),
       allowNull: true,
     },
     answeredAt: {

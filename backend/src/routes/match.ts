@@ -1,10 +1,25 @@
 import { Router, Request, Response } from "express";
-import { Match, MatchParticipant, Prediction, MatchCode, User } from "../models";
+import { Op } from "sequelize";
+import { Match, MatchParticipant, Prediction, MatchCode, User, Venue, UserPrediction, PredictionAggregate } from "../models";
 import { authenticateUser, AuthRequest } from "../middleware/auth";
 import { fetchUpcomingFixtures, fetchSportsmonkLiveScores, fetchTeamData } from "../services/sportsmonkApi";
 import { generatePreMatchPredictions, getCurrentRound } from "../services/predictionEngine";
+import { buildStory } from "../services/storyBuilder";
 
 const router = Router();
+
+// Haversine — great-circle distance between two lat/lng points, in meters.
+// Used to reject joins whose GPS is outside the venue's geofence.
+function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6_371_000; // earth radius in meters
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
 
 // Get current/upcoming matches — merges local DB + live Sportsmonk data
 router.get("/", async (_req: Request, res: Response): Promise<void> => {
@@ -197,7 +212,7 @@ router.get("/:matchId", async (req: Request, res: Response): Promise<void> => {
 router.post("/:matchId/join", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const matchId = req.params.matchId as string;
-    const { venueId, matchCode } = req.body;
+    const { venueId, matchCode, latitude, longitude } = req.body;
     const userId = req.userId!;
 
     const match = await Match.findByPk(matchId);
@@ -231,6 +246,46 @@ router.post("/:matchId/join", authenticateUser, async (req: AuthRequest, res: Re
       return;
     }
 
+    // Server-side geofence check. The virtual rooms venue has radiusMeters=999999
+    // which makes this a no-op for private-room joins.
+    //
+    // Modes:
+    //   - STRICT_GEOFENCE=true  → reject join if lat/lng missing or outside radius.
+    //                             Set this for the pilot / production.
+    //   - default (dev)          → log the result but allow the join to proceed,
+    //                             so GPS-denied laptops, desktop browsers, and
+    //                             simulator clients still work.
+    const venue = await Venue.findByPk(venueId);
+    if (!venue) {
+      res.status(404).json({ error: "Venue not found" });
+      return;
+    }
+    const strict = process.env.STRICT_GEOFENCE === "true";
+    const latNum = typeof latitude === "number" ? latitude : parseFloat(latitude);
+    const lngNum = typeof longitude === "number" ? longitude : parseFloat(longitude);
+
+    if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
+      if (strict) {
+        res.status(400).json({ error: "Location required to join this venue" });
+        return;
+      }
+      // Dev fallback: allow join without GPS.
+    } else {
+      const distanceMeters = haversineMeters(latNum, lngNum, venue.latitude, venue.longitude);
+      if (distanceMeters > (venue.radiusMeters || 200)) {
+        if (strict) {
+          res.status(403).json({
+            error: "You are outside the venue area. Join from inside the venue.",
+            distanceMeters: Math.round(distanceMeters),
+          });
+          return;
+        }
+        console.warn(
+          `[geofence] user ${userId} joined ${venue.name} from ${Math.round(distanceMeters)}m away (soft mode)`
+        );
+      }
+    }
+
     const currentRound = match.status === "live"
       ? getCurrentRound(match.currentInnings || 1, match.currentOver || 1, match.totalOvers)
       : 0;
@@ -246,14 +301,14 @@ router.post("/:matchId/join", authenticateUser, async (req: AuthRequest, res: Re
     const playerCount = await MatchParticipant.count({ where: { matchId, venueId } });
     io.to(`venue:${venueId}:${matchId}`).emit("playerCount", { count: playerCount });
 
-    // Fire-and-forget: capture city/state from GPS if not already set
-    const { latitude, longitude } = req.body;
-    if (latitude && longitude) {
+    // Fire-and-forget: capture city/state from GPS (reuses the lat/lng already
+    // destructured + validated above for the geofence check).
+    if (Number.isFinite(latNum) && Number.isFinite(lngNum)) {
       User.findByPk(userId).then(async (user) => {
         if (user) {
           try {
             const geoRes = await fetch(
-              `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latitude}&longitude=${longitude}&localityLanguage=en`
+              `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${latNum}&longitude=${lngNum}&localityLanguage=en`
             );
             if (geoRes.ok) {
               const geo: any = await geoRes.json();
@@ -444,6 +499,52 @@ router.get("/:matchId/state", authenticateUser, async (req: AuthRequest, res: Re
   } catch (error) {
     console.error("Get match state error:", error);
     res.status(500).json({ error: "Failed to get match state" });
+  }
+});
+
+// Per-user post-match story ("You started slow, nailed the middle, clutched the finish").
+// Available as soon as the match has any resolved picks for this user; best read after
+// the match ends. Returns a lightweight narrative object the recap page can render directly.
+router.get("/:matchId/my-story", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const matchId = req.params.matchId as string;
+    const venueId = req.query.venueId as string;
+    const userId = req.userId!;
+
+    if (!venueId) {
+      res.status(400).json({ error: "venueId is required" });
+      return;
+    }
+
+    const userPicks = await UserPrediction.findAll({
+      where: { userId, matchId, venueId },
+      include: [{ model: Prediction, as: "prediction" }],
+      order: [["answeredAt", "ASC"]],
+    });
+
+    const participant = await MatchParticipant.findOne({
+      where: { userId, matchId, venueId },
+    });
+
+    // For the "signature call" beat we need aggregates for the user's correct picks.
+    const correctPickIds = userPicks
+      .filter((p) => p.isCorrect === true)
+      .map((p) => p.predictionId);
+
+    const aggregates = correctPickIds.length
+      ? await PredictionAggregate.findAll({
+          where: {
+            predictionId: { [Op.in]: correctPickIds },
+            scope: "global",
+          },
+        })
+      : [];
+
+    const story = buildStory(userPicks as any, participant, aggregates);
+    res.json(story);
+  } catch (error) {
+    console.error("Story build error:", error);
+    res.status(500).json({ error: "Failed to build story" });
   }
 });
 

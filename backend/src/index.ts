@@ -1,8 +1,18 @@
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import http from "http";
 import { Server as SocketIOServer } from "socket.io";
 import dotenv from "dotenv";
+
+// Load env BEFORE importing anything that reads env at module load (secrets.ts).
+dotenv.config();
+
+// Importing secrets validates JWT_SECRET / OWNER_USER / OWNER_PASS and aborts
+// the process early if any are missing or blank.
+import "./config/secrets";
+
 import { sequelize } from "./models";
 import authRoutes from "./routes/auth";
 import venueRoutes from "./routes/venue";
@@ -17,11 +27,14 @@ import weeklyRewardsRoutes from "./routes/weeklyRewards";
 import globalLeaderboardRoutes from "./routes/globalLeaderboard";
 import { setupSocketHandlers } from "./socket/handlers";
 import { pollSportsmonkUpdates } from "./services/sportsmonkApi";
+import { pollLivePlayers } from "./services/livePlayerTracker";
 import { ensureRoomVenue } from "./services/roomVenue";
 
-dotenv.config();
-
 const app = express();
+
+// Behind a reverse proxy (nginx / AWS ALB) — trust one hop so rate limiters key off
+// the real client IP instead of the proxy. Safe value: 1 hop.
+app.set("trust proxy", 1);
 const server = http.createServer(app);
 
 // Parse CORS origins — supports comma-separated list in env
@@ -38,8 +51,23 @@ const io = new SocketIOServer(server, {
 });
 
 // Middleware
+// Helmet: sets security headers (no-sniff, frame deny, hsts, referrer-policy, etc.).
+// CSP is disabled because the /api/sportsmonk-test debug page emits inline HTML;
+// re-enable with a strict policy once that route is removed or moved behind auth.
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: corsOrigins, credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: "100kb" }));
+
+// Global rate limit — blanket ceiling for API abuse / amplification.
+// Per-route limits on auth, owner login, and reward redemption live next to those routes.
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 min
+  max: 300,            // 300 req/min/IP ~ 5 req/sec, plenty for a live venue
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests" },
+});
+app.use("/api", globalLimiter);
 
 // Make io accessible in routes
 app.set("io", io);
@@ -64,7 +92,7 @@ app.get("/api/health", (_req, res) => {
 
 // Sportmonks API test page — shows live data in the browser
 app.get("/api/sportsmonk-test", async (_req, res) => {
-  const API_BASE = "https://cricket.sportmonks.com/api/v2.0";
+  const API_BASE = process.env.SPORTSMONK_API_BASE || "https://cricket.sportmonks.com/api/v2.0";
   const TOKEN = process.env.SPORTSMONK_API_KEY || "";
 
   try {
@@ -212,13 +240,20 @@ async function start() {
 
     console.log(`JAFFA backend running on port ${PORT}`);
 
-    // Sportsmonk: poll every 5 seconds for live score updates
+    // Sportsmonk: poll every 5 seconds for live score updates.
+    // The live-player tracker runs in the same tick, right after, so
+    // new batsmen/bowlers are detected off the same refresh cadence.
     const POLL_INTERVAL = 5 * 1000;
     setInterval(async () => {
       try {
         await pollSportsmonkUpdates(io);
       } catch (err) {
         console.error("Sportsmonk poll error:", err);
+      }
+      try {
+        await pollLivePlayers(io);
+      } catch (err) {
+        console.error("Live player tracker error:", err);
       }
     }, POLL_INTERVAL);
     console.log(`Sportsmonk live polling enabled (every ${POLL_INTERVAL / 1000}s)`);

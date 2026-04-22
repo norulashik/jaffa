@@ -2,14 +2,16 @@ import { Router, Response } from "express";
 import { Op } from "sequelize";
 import { User } from "../models";
 import { authenticateUser, AuthRequest } from "../middleware/auth";
+import { parsePagination, paginationMeta } from "../utils/pagination";
 
 const router = Router();
 
-// GET /api/global-leaderboard?scope=city|state|all
+// GET /api/global-leaderboard?scope=city|state|all&page=1&pageSize=25
 router.get("/", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = req.userId!;
     const scope = (req.query.scope as string) || "all";
+    const p = parsePagination(req);
 
     const currentUser = await User.findByPk(userId);
     if (!currentUser) {
@@ -24,35 +26,46 @@ router.get("/", authenticateUser, async (req: AuthRequest, res: Response): Promi
 
     if (scope === "city") {
       if (!currentUser.city) {
-        res.json({ leaderboard: [], myRank: 0, scope, myCity: null, myState: currentUser.state, locationMissing: true });
+        res.json({
+          leaderboard: [], myRank: 0, scope,
+          myCity: null, myState: currentUser.state, locationMissing: true,
+          ...paginationMeta(p, 0),
+        });
         return;
       }
       whereClause.city = currentUser.city;
     } else if (scope === "state") {
       if (!currentUser.state) {
-        res.json({ leaderboard: [], myRank: 0, scope, myCity: currentUser.city, myState: null, locationMissing: true });
+        res.json({
+          leaderboard: [], myRank: 0, scope,
+          myCity: currentUser.city, myState: null, locationMissing: true,
+          ...paginationMeta(p, 0),
+        });
         return;
       }
       whereClause.state = currentUser.state;
     }
     // scope === "all" → no location filter
 
-    // Get top 50 (secondary sort by createdAt for tie-breaking)
-    const leaderboard = await User.findAll({
+    // Pull total count + page slice in one call.
+    const { count, rows: leaderboard } = await User.findAndCountAll({
       where: whereClause,
       order: [["lifetimePoints", "DESC"], ["createdAt", "ASC"]],
-      limit: 50,
+      limit: p.limit,
+      offset: p.offset,
       attributes: ["id", "displayName", "avatarConfig", "lifetimePoints", "city", "state"],
     });
 
-    // Assign ranks with ties (same points = same rank)
-    let currentRank = 1;
+    // Tie-aware ranks within the page. On pages > 1 we seed from offset+1, so
+    // ranks are approximate across page boundaries — a tie split by a page
+    // boundary won't be detected. Fine for the 99% case where users view p1.
+    let currentRank = p.offset + 1;
     const formatted = leaderboard.map((u, index) => {
       if (index > 0) {
         const prevPoints = leaderboard[index - 1].lifetimePoints || 0;
         const currPoints = u.lifetimePoints || 0;
         if (currPoints < prevPoints) {
-          currentRank = index + 1;
+          currentRank = p.offset + index + 1;
         }
       }
       return {
@@ -66,7 +79,7 @@ router.get("/", authenticateUser, async (req: AuthRequest, res: Response): Promi
       };
     });
 
-    // Calculate current user's rank
+    // Calculate current user's rank (global, not page-relative).
     const myRank = await User.count({
       where: {
         ...whereClause,
@@ -80,6 +93,7 @@ router.get("/", authenticateUser, async (req: AuthRequest, res: Response): Promi
       scope,
       myCity: currentUser.city,
       myState: currentUser.state,
+      ...paginationMeta(p, count),
     });
   } catch (error) {
     console.error("Global leaderboard error:", error);

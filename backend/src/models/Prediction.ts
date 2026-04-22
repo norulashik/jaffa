@@ -1,8 +1,18 @@
-import { DataTypes, Model, Optional } from "sequelize";
+import { DataTypes, Model, Optional, Op } from "sequelize";
 import sequelize from "../config/database";
 
 export type PredictionCategory = "pre_match" | "per_over" | "hot_take" | "bold_call" | "rivalry_call";
-export type PredictionStatus = "open" | "locked" | "resolved";
+export type PredictionStatus = "open" | "locked" | "resolved" | "voided";
+// Live player-specific subjects. NULL for team-level / pre-match questions.
+// - batsman_innings       → how many runs will this batsman score?
+// - bowler_innings        → how many runs will this bowler concede? (runs bands)
+// - bowler_innings_wkts   → how many wickets will this bowler take? (0/1/2/2+)
+// - batsman_sixes         → how many sixes will this batsman hit tonight? (fires on first-six)
+export type PredictionSubjectType =
+  | "batsman_innings"
+  | "bowler_innings"
+  | "bowler_innings_wkts"
+  | "batsman_sixes";
 
 interface PredictionAttributes {
   id: string;
@@ -16,11 +26,34 @@ interface PredictionAttributes {
   status: PredictionStatus;
   opensAt?: Date;
   expiresAt?: Date;
+  // Live player tracking (null for team/pre-match questions)
+  subjectType?: PredictionSubjectType | null;
+  playerId?: number | null;
+  inningsNumber?: number | null;
+  voidedAt?: Date | null;
+  voidReason?: string | null;
+  // Stable identifier for team-level per-over templates so the resolver can
+  // dispatch without substring-matching the (now-varied) question text.
+  templateKey?: string | null;
   createdAt?: Date;
   updatedAt?: Date;
 }
 
-interface PredictionCreationAttributes extends Optional<PredictionAttributes, "id" | "correctOption" | "status" | "overNumber" | "opensAt" | "expiresAt"> {}
+interface PredictionCreationAttributes
+  extends Optional<
+    PredictionAttributes,
+    | "id"
+    | "correctOption"
+    | "status"
+    | "overNumber"
+    | "opensAt"
+    | "expiresAt"
+    | "subjectType"
+    | "playerId"
+    | "inningsNumber"
+    | "voidedAt"
+    | "voidReason"
+  > {}
 
 class Prediction extends Model<PredictionAttributes, PredictionCreationAttributes> implements PredictionAttributes {
   public id!: string;
@@ -34,6 +67,11 @@ class Prediction extends Model<PredictionAttributes, PredictionCreationAttribute
   public status!: PredictionStatus;
   public opensAt!: Date;
   public expiresAt!: Date;
+  public subjectType!: PredictionSubjectType | null;
+  public playerId!: number | null;
+  public inningsNumber!: number | null;
+  public voidedAt!: Date | null;
+  public voidReason!: string | null;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
 }
@@ -87,6 +125,27 @@ Prediction.init(
       type: DataTypes.DATE,
       allowNull: true,
     },
+    // Live player-specific tracking. NULL for team-level/pre-match questions.
+    subjectType: {
+      type: DataTypes.STRING(20),
+      allowNull: true,
+    },
+    playerId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    inningsNumber: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    voidedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    voidReason: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+    },
   },
   {
     sequelize,
@@ -96,6 +155,15 @@ Prediction.init(
       { fields: ["matchId", "round"] },
       { fields: ["matchId", "overNumber"] },
       { fields: ["matchId", "status"] },
+      // One live-player question per (match, subject, player, innings).
+      // Partial on subjectType IS NOT NULL keeps team-level questions unaffected.
+      // SQLite supports partial indexes; Postgres does too.
+      {
+        fields: ["matchId", "subjectType", "playerId", "inningsNumber"],
+        unique: true,
+        where: { subjectType: { [Op.ne]: null } },
+        name: "predictions_live_player_subject_uq",
+      },
     ],
   }
 );

@@ -15,9 +15,11 @@ interface MatchParticipantAttributes {
   round6Points: number;
   currentStreak: number;
   bestStreak: number;
-  boostsUsedRound: number; // boosts used in current round
+  boostsUsedRound: number; // boosts used in current round (1 allowed per phase/round)
   currentRound: number;
-  allInUsed: boolean;
+  allInUsed: boolean; // deprecated match-level flag, kept for backward compat
+  allInUsedInnings1: boolean; // all-in used in innings 1 (rounds 1-3)
+  allInUsedInnings2: boolean; // all-in used in innings 2 (rounds 4-6)
   totalPredictions: number;
   correctPredictions: number;
   joinedAt: Date;
@@ -25,7 +27,7 @@ interface MatchParticipantAttributes {
   updatedAt?: Date;
 }
 
-interface MatchParticipantCreationAttributes extends Optional<MatchParticipantAttributes, "id" | "totalPoints" | "round1Points" | "round2Points" | "round3Points" | "round4Points" | "round5Points" | "round6Points" | "currentStreak" | "bestStreak" | "boostsUsedRound" | "currentRound" | "allInUsed" | "totalPredictions" | "correctPredictions" | "joinedAt"> {}
+interface MatchParticipantCreationAttributes extends Optional<MatchParticipantAttributes, "id" | "totalPoints" | "round1Points" | "round2Points" | "round3Points" | "round4Points" | "round5Points" | "round6Points" | "currentStreak" | "bestStreak" | "boostsUsedRound" | "currentRound" | "allInUsed" | "allInUsedInnings1" | "allInUsedInnings2" | "totalPredictions" | "correctPredictions" | "joinedAt"> {}
 
 class MatchParticipant extends Model<MatchParticipantAttributes, MatchParticipantCreationAttributes> implements MatchParticipantAttributes {
   public id!: string;
@@ -44,6 +46,8 @@ class MatchParticipant extends Model<MatchParticipantAttributes, MatchParticipan
   public boostsUsedRound!: number;
   public currentRound!: number;
   public allInUsed!: boolean;
+  public allInUsedInnings1!: boolean;
+  public allInUsedInnings2!: boolean;
   public totalPredictions!: number;
   public correctPredictions!: number;
   public joinedAt!: Date;
@@ -100,6 +104,14 @@ MatchParticipant.init(
       defaultValue: 0,
     },
     allInUsed: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
+    allInUsedInnings1: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
+    allInUsedInnings2: {
       type: DataTypes.BOOLEAN,
       defaultValue: false,
     },

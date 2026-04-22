@@ -1,7 +1,47 @@
 import { Router, Response } from "express";
-import { Prediction, UserPrediction, MatchParticipant, User } from "../models";
+import { Op } from "sequelize";
+import { Prediction, UserPrediction, MatchParticipant, User, PredictionAggregate } from "../models";
+import { GLOBAL_SCOPE_ID } from "../models/PredictionAggregate";
 import { authenticateUser, AuthRequest } from "../middleware/auth";
 import sequelize from "../config/database";
+
+type AggregatePayload = {
+  totalAnswered: number;
+  correctCount: number;
+  correctPct: number;
+};
+
+async function buildAggregatesMap(
+  predictionIds: string[],
+  venueId: string | undefined
+): Promise<Map<string, { global?: AggregatePayload; venue?: AggregatePayload }>> {
+  const out = new Map<string, { global?: AggregatePayload; venue?: AggregatePayload }>();
+  if (predictionIds.length === 0) return out;
+
+  const scopeOr: any[] = [{ scope: "global", scopeId: GLOBAL_SCOPE_ID }];
+  if (venueId) scopeOr.push({ scope: "venue", scopeId: venueId });
+
+  const rows = await PredictionAggregate.findAll({
+    where: {
+      predictionId: { [Op.in]: predictionIds },
+      [Op.or]: scopeOr,
+    },
+  });
+
+  for (const row of rows) {
+    const entry = out.get(row.predictionId) || {};
+    const payload: AggregatePayload = {
+      totalAnswered: row.totalAnswered,
+      correctCount: row.correctCount,
+      correctPct: row.correctPct,
+    };
+    if (row.scope === "global") entry.global = payload;
+    else if (row.scope === "venue") entry.venue = payload;
+    out.set(row.predictionId, entry);
+  }
+
+  return out;
+}
 
 const router = Router();
 
@@ -35,9 +75,15 @@ router.get("/:matchId", authenticateUser, async (req: AuthRequest, res: Response
 
     const answeredMap = new Map(userAnswers.map((a) => [a.predictionId, a]));
 
+    const aggregatesMap = await buildAggregatesMap(
+      visible.map((p) => p.id),
+      venueId
+    );
+
     const result = visible.map((p) => ({
       ...p.toJSON(),
       userAnswer: answeredMap.get(p.id)?.toJSON() || null,
+      aggregates: aggregatesMap.get(p.id) || null,
     }));
 
     res.json(result);
@@ -103,11 +149,19 @@ router.post("/:predictionId/answer", authenticateUser, async (req: AuthRequest, 
         throw new Error("NOT_PARTICIPANT");
       }
 
-      if (boostType === "boost" && participant.boostsUsedRound >= 2) {
+      // Product rule: 1 boost per phase (round), 1 all-in per innings.
+      // Innings = 1 for rounds 1-3, 2 for rounds 4-6.
+      const predictionInnings = prediction.round >= 4 ? 2 : 1;
+      const allInFlagForInnings = predictionInnings === 1 ? "allInUsedInnings1" : "allInUsedInnings2";
+
+      if (boostType === "boost" && participant.boostsUsedRound >= 1) {
         throw new Error("NO_BOOSTS");
       }
 
-      if (boostType === "all_in" && participant.allInUsed) {
+      if (
+        boostType === "all_in" &&
+        (participant as any)[allInFlagForInnings] === true
+      ) {
         throw new Error("ALL_IN_USED");
       }
 
@@ -126,6 +180,9 @@ router.post("/:predictionId/answer", authenticateUser, async (req: AuthRequest, 
       if (boostType === "boost") {
         updateData.boostsUsedRound = participant.boostsUsedRound + 1;
       } else if (boostType === "all_in") {
+        updateData[allInFlagForInnings] = true;
+        // Keep legacy flag true so any older reader that still looks at `allInUsed`
+        // sees "used" instead of an unexpected refresh of the button.
         updateData.allInUsed = true;
       }
       await participant.update(updateData, { transaction: t });
@@ -181,7 +238,17 @@ router.get("/:matchId/my-predictions", authenticateUser, async (req: AuthRequest
       order: [["answeredAt", "DESC"]],
     });
 
-    res.json(userPredictions);
+    const aggregatesMap = await buildAggregatesMap(
+      userPredictions.map((up) => up.predictionId),
+      venueId
+    );
+
+    const result = userPredictions.map((up) => ({
+      ...up.toJSON(),
+      aggregates: aggregatesMap.get(up.predictionId) || null,
+    }));
+
+    res.json(result);
   } catch (error) {
     console.error("Get my predictions error:", error);
     res.status(500).json({ error: "Failed to get predictions" });

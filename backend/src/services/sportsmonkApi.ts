@@ -8,10 +8,13 @@ import {
   generateRoundRewards,
   recomputeParticipantScores,
 } from "./pointsEngine";
+import { overStatsToContext } from "./feedback";
 import { Server as SocketIOServer } from "socket.io";
 
-const API_BASE = "https://cricket.sportmonks.com/api/v2.0";
-// Read at call time, not module load time, so dotenv has loaded
+// Sportsmonk API base. Env-driven so local simulation can point at a mock
+// server: set SPORTSMONK_API_BASE=http://localhost:5001. Resolved at call
+// time so dotenv loads first.
+const getApiBase = () => process.env.SPORTSMONK_API_BASE || "https://cricket.sportmonks.com/api/v2.0";
 const getApiToken = () => process.env.SPORTSMONK_API_KEY || "";
 const SPORTSMONK_HEADERS = {
   accept: "application/json",
@@ -31,7 +34,7 @@ export async function fetchTeamData(teamId: number): Promise<CachedTeam> {
   if (teamCache.has(teamId)) return teamCache.get(teamId)!;
 
   try {
-    const url = `${API_BASE}/teams/${teamId}?api_token=${getApiToken()}`;
+    const url = `${getApiBase()}/teams/${teamId}?api_token=${getApiToken()}`;
     const res = await fetch(url, { headers: SPORTSMONK_HEADERS });
     const data: any = await res.json();
     const team: CachedTeam = {
@@ -141,7 +144,7 @@ interface OverStats {
 // Fetch fixture lineup (Playing XI) — available after toss
 async function fetchFixtureLineup(fixtureId: number): Promise<any[]> {
   try {
-    const url = `${API_BASE}/fixtures/${fixtureId}?api_token=${getApiToken()}&include=lineup`;
+    const url = `${getApiBase()}/fixtures/${fixtureId}?api_token=${getApiToken()}&include=lineup`;
     const res = await fetch(url, { headers: SPORTSMONK_HEADERS });
     const data: any = await res.json();
     return data.data?.lineup || [];
@@ -154,7 +157,7 @@ async function fetchFixtureLineup(fixtureId: number): Promise<any[]> {
 // Fetch fixture with runs only (fast — for score updates)
 async function fetchFixtureWithRuns(fixtureId: number): Promise<any> {
   try {
-    const url = `${API_BASE}/fixtures/${fixtureId}?api_token=${getApiToken()}&include=runs`;
+    const url = `${getApiBase()}/fixtures/${fixtureId}?api_token=${getApiToken()}&include=runs`;
     const res = await fetch(url, { headers: SPORTSMONK_HEADERS });
     const data: any = await res.json();
     return data.data || null;
@@ -167,7 +170,7 @@ async function fetchFixtureWithRuns(fixtureId: number): Promise<any> {
 // Fetch fixture with ball-by-ball data (slow — only for prediction resolution)
 async function fetchFixtureWithBalls(fixtureId: number): Promise<any> {
   try {
-    const url = `${API_BASE}/fixtures/${fixtureId}?api_token=${getApiToken()}&include=balls,runs`;
+    const url = `${getApiBase()}/fixtures/${fixtureId}?api_token=${getApiToken()}&include=balls,runs`;
     const res = await fetch(url, { headers: SPORTSMONK_HEADERS });
     const data: any = await res.json();
     return data.data || null;
@@ -189,7 +192,7 @@ async function fetchFixtureFromLivescores(
 
   for (const filter of filterVariants) {
     try {
-      const url = `${API_BASE}/livescores?api_token=${getApiToken()}&include=${include}&${filter}`;
+      const url = `${getApiBase()}/livescores?api_token=${getApiToken()}&include=${include}&${filter}`;
       const res = await fetch(url, { headers: SPORTSMONK_HEADERS });
       const data: any = await res.json();
       const fixtures = data.data || [];
@@ -203,6 +206,15 @@ async function fetchFixtureFromLivescores(
   }
 
   return null;
+}
+
+// Public alias used by the livePlayerTracker service (kept as a thin wrapper
+// so the tracker doesn't cross-import private helpers).
+export async function fetchLiveFixtureForTracker(
+  fixtureId: number,
+  includeBalls = true
+): Promise<any | null> {
+  return fetchLiveFixtureDetail(fixtureId, includeBalls);
 }
 
 async function fetchLiveFixtureDetail(
@@ -373,7 +385,7 @@ async function resolveOverPredictionsForOver(
       continue;
     }
 
-    await resolvePrediction(pred, correctOption, io);
+    await resolvePrediction(pred, correctOption, io, overStatsToContext(overStats));
     resolvedCount += 1;
   }
 
@@ -546,7 +558,7 @@ async function resolveRemainingPredictionsAtMatchEnd(
 // Fetch live scores
 export async function fetchSportsmonkLiveScores(): Promise<any[]> {
   try {
-    const url = `${API_BASE}/livescores?api_token=${getApiToken()}&include=balls,runs,localteam,visitorteam`;
+    const url = `${getApiBase()}/livescores?api_token=${getApiToken()}&include=balls,runs,localteam,visitorteam`;
     const res = await fetch(url, { headers: SPORTSMONK_HEADERS });
     const data: any = await res.json();
     const fixtures = data.data || [];
@@ -583,7 +595,7 @@ async function fetchAllPages(baseUrl: string): Promise<any[]> {
 export async function fetchTodayFixtures(): Promise<any[]> {
   try {
     const today = new Date().toISOString().split("T")[0];
-    const baseUrl = `${API_BASE}/fixtures?filter[starts_between]=${today},${today}&api_token=${getApiToken()}&include=runs,localteam,visitorteam`;
+    const baseUrl = `${getApiBase()}/fixtures?filter[starts_between]=${today},${today}&api_token=${getApiToken()}&include=runs,localteam,visitorteam`;
     const fixtures = await fetchAllPages(baseUrl);
     await enrichFixturesWithTeams(fixtures);
     return fixtures;
@@ -598,7 +610,7 @@ export async function fetchUpcomingFixtures(): Promise<any[]> {
   try {
     const today = new Date().toISOString().split("T")[0];
     const futureDate = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
-    const baseUrl = `${API_BASE}/fixtures?filter[starts_between]=${today},${futureDate}&api_token=${getApiToken()}&include=localteam,visitorteam,runs`;
+    const baseUrl = `${getApiBase()}/fixtures?filter[starts_between]=${today},${futureDate}&api_token=${getApiToken()}&include=localteam,visitorteam,runs`;
     console.log(`[Sportsmonk] Fetching upcoming: ${today} to ${futureDate}`);
     const fixtures = await fetchAllPages(baseUrl);
     console.log(`[Sportsmonk] Upcoming fixtures found: ${fixtures.length} (all pages)`);
@@ -1422,7 +1434,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
               const overStats = computeOverStats(balls, overNum, "S1");
               const correctOption = resolveOverPredictionFromStats(pred, overStats);
               if (correctOption) {
-                await resolvePrediction(pred, correctOption, io);
+                await resolvePrediction(pred, correctOption, io, overStatsToContext(overStats));
               } else {
                 console.warn(`[Sportsmonk] Inn-break: could not resolve "${pred.question}" (id=${pred.id})`);
               }
@@ -1548,7 +1560,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           for (const pred of overPredictions) {
             const correctOption = resolveOverPredictionFromStats(pred, overStats);
             if (correctOption) {
-              await resolvePrediction(pred, correctOption, io);
+              await resolvePrediction(pred, correctOption, io, overStatsToContext(overStats));
             } else {
               console.warn(`[Sportsmonk] Could not resolve prediction "${pred.question}" (id=${pred.id}) — no matching rule`);
             }
@@ -1753,26 +1765,19 @@ function getPhase(innings: number, over: number, totalOvers: number = 20): strin
   return "innings2_death";
 }
 
-// Resolve per-over prediction using computed over stats
+// Resolve per-over prediction using computed over stats.
+//
+// This resolves team-level per-over questions only. Player-specific live
+// questions (batsman_innings, bowler_innings) are resolved by the
+// livePlayerTracker service using stable Sportsmonk player IDs — never via
+// substring matching on question text, which was the source of the
+// "wrong-player-resolved" class of bug.
 export function resolveOverPredictionFromStats(prediction: Prediction, stats: OverStats): string | null {
-  const q = prediction.question.toLowerCase();
+  // Live player questions are keyed by playerId and resolved elsewhere.
+  // Return null so the over resolver leaves them alone.
+  if (prediction.subjectType) return null;
 
-  // IMPORTANT: Check player-specific "how many runs will [batter] score" BEFORE generic "how many runs"
-  // to avoid the generic pattern swallowing the player question
-  if (q.includes("how many runs will") && q.includes("score in over")) {
-    const findBatsman = (): BatsmanOverStats | null => {
-      for (const [name, st] of Object.entries(stats.batsmanStats)) {
-        if (q.includes(name.toLowerCase())) return st;
-      }
-      return stats.batsmanStats[stats.currentBatsman] || null;
-    };
-    const bs = findBatsman();
-    if (!bs) return "low"; // batter didn't face a ball this over → 0 runs
-    const r = bs.runs;
-    if (r <= 3) return "low";
-    if (r <= 8) return "medium";
-    return "high";
-  }
+  const q = prediction.question.toLowerCase();
 
   if (q.includes("how many runs")) {
     if (stats.runs <= 5) return "low";
@@ -1822,58 +1827,6 @@ export function resolveOverPredictionFromStats(prediction: Prediction, stats: Ov
     if (stats.extras <= 2) return "one_two";
     return "three_plus";
   }
-
-  // --- Player-specific per-over questions ---
-
-  // Helper: find player name from question by matching against stats keys
-  const findBatsmanInQuestion = (): BatsmanOverStats | null => {
-    for (const [name, st] of Object.entries(stats.batsmanStats)) {
-      if (q.includes(name.toLowerCase())) return st;
-    }
-    // Fallback: if no match found (name mismatch), use currentBatsman stats
-    return stats.batsmanStats[stats.currentBatsman] || null;
-  };
-
-  const findBowlerInQuestion = (): BowlerOverStats | null => {
-    for (const [name, st] of Object.entries(stats.bowlerStats)) {
-      if (q.includes(name.toLowerCase())) return st;
-    }
-    return stats.bowlerStats[stats.currentBowler] || null;
-  };
-
-  // "Will [batter] hit a six in over N?"
-  if (q.includes("hit a six in over")) {
-    const bs = findBatsmanInQuestion();
-    return (bs && bs.sixes > 0) ? "yes" : "no";
-  }
-
-  // "Will [batter] score 10+ runs in over N?"
-  if (q.includes("score 10+ runs in over")) {
-    const bs = findBatsmanInQuestion();
-    return (bs && bs.runs >= 10) ? "yes" : "no";
-  }
-
-  // "Will [batter] hit a boundary in over N?"
-  if (q.includes("hit a boundary in over")) {
-    const bs = findBatsmanInQuestion();
-    return (bs && bs.boundaries > 0) ? "yes" : "no";
-  }
-
-  // "Will [bowler] take a wicket in over N?"
-  if (q.includes("take a wicket in over")) {
-    const bw = findBowlerInQuestion();
-    return (bw && bw.wickets > 0) ? "yes" : "no";
-  }
-
-  // "Will [bowler] concede less than 5 runs in over N?"
-  if (q.includes("concede less than 5 runs in over")) {
-    const bw = findBowlerInQuestion();
-    if (!bw) return "yes"; // bowler didn't bowl = 0 runs conceded
-    return bw.runs < 5 ? "yes" : "no";
-  }
-
-  // NOTE: "How many runs will [batter] score in over N?" is handled at the TOP of this function
-  // (before generic "how many runs") to avoid pattern collision
 
   return null;
 }
@@ -2048,7 +2001,13 @@ function resolvePreMatchPrediction(
     }
 
     if (tossWinnerShort) {
-      const decision = elected === "batting" ? "bat" : "field";
+      // Match Sportsmonk's canonical elected values. Anything unexpected → null
+      // so we don't silently misclassify.
+      const electedLower = String(elected).toLowerCase();
+      let decision: "bat" | "field" | null = null;
+      if (electedLower === "batting" || electedLower === "bat") decision = "bat";
+      else if (electedLower === "bowling" || electedLower === "bowl" || electedLower === "field") decision = "field";
+      if (!decision) return null;
       return `${tossWinnerShort.toLowerCase()}_${decision}`;
     }
     return null;

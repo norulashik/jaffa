@@ -93,6 +93,13 @@ export const api = {
   getMyPredictions: (matchId: string, venueId: string) =>
     request<any[]>(`/predictions/${matchId}/my-predictions?venueId=${venueId}`),
 
+  getMyStory: (matchId: string, venueId: string) =>
+    request<{
+      summary: { right: number; wrong: number; totalPredictions: number; accuracy: number; totalPoints: number; rank?: number };
+      toneLine: string;
+      beats: Array<{ type: string; title: string; detail: string; data?: any }>;
+    }>(`/matches/${matchId}/my-story?venueId=${venueId}`),
+
   // Leaderboard
   getRoundLeaderboard: (matchId: string, venueId: string, round: number) =>
     request<{ round: number; leaderboard: any[] }>(`/leaderboard/${matchId}/${venueId}/round/${round}`),

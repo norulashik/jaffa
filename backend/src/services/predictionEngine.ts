@@ -288,15 +288,8 @@ const perOverPool = [
       { key: "no", label: "No — controlled over", points: 10 },
     ],
   },
-  {
-    key: "maiden_over",
-    semanticGroup: "maiden",
-    question: (over: number) => `Maiden over in over ${over}?`,
-    options: [
-      { key: "yes", label: "Yes — bowler dominance", points: 30 },
-      { key: "no", label: "No", points: 5 },
-    ],
-  },
+  // Maiden-over question removed per product decision (too binary, trivially
+  // answerable at T20 pace). Replaced with a tighter alternative below.
   {
     key: "extras_this_over",
     semanticGroup: "extras",
@@ -309,83 +302,30 @@ const perOverPool = [
   },
 ];
 
-// Player-specific per-over question pool (requires currentBatter/currentBowler)
-const playerPerOverPool = [
-  {
-    key: "batter_six",
-    semanticGroup: "batter",
-    type: "batter" as const,
-    question: (over: number, player: string) => `Will ${player} hit a six in over ${over}?`,
-    options: [
-      { key: "yes", label: "Yes", points: 20 },
-      { key: "no", label: "No", points: 10 },
-    ],
-  },
-  {
-    key: "batter_ten_plus",
-    semanticGroup: "batter",
-    type: "batter" as const,
-    question: (over: number, player: string) => `Will ${player} score 10+ runs in over ${over}?`,
-    options: [
-      { key: "yes", label: "Yes", points: 20 },
-      { key: "no", label: "No", points: 10 },
-    ],
-  },
-  {
-    key: "batter_boundary",
-    semanticGroup: "batter",
-    type: "batter" as const,
-    question: (over: number, player: string) => `Will ${player} hit a boundary in over ${over}?`,
-    options: [
-      { key: "yes", label: "Yes", points: 15 },
-      { key: "no", label: "No", points: 10 },
-    ],
-  },
-  {
-    key: "bowler_wicket",
-    semanticGroup: "bowler_player",
-    type: "bowler" as const,
-    question: (over: number, player: string) => `Will ${player} take a wicket in over ${over}?`,
-    options: [
-      { key: "yes", label: "Yes", points: 15 },
-      { key: "no", label: "No", points: 10 },
-    ],
-  },
-  {
-    key: "bowler_under_five",
-    semanticGroup: "bowler_player",
-    type: "bowler" as const,
-    question: (over: number, player: string) => `Will ${player} concede less than 5 runs in over ${over}?`,
-    options: [
-      { key: "yes", label: "Yes", points: 15 },
-      { key: "no", label: "No", points: 10 },
-    ],
-  },
-  {
-    key: "batter_runs_range",
-    semanticGroup: "batter",
-    type: "batter" as const,
-    question: (over: number, player: string) => `How many runs will ${player} score in over ${over}?`,
-    options: [
-      { key: "low", label: "0-3 runs", points: 10 },
-      { key: "medium", label: "4-8 runs", points: 10 },
-      { key: "high", label: "9+ runs", points: 20 },
-    ],
-  },
-];
-
-// Track recent player questions separately
-const recentPlayerQuestions: Map<string, string[]> = new Map();
+// --- Live player questions are no longer generated here ---
+// The per-over, name-stringly-matched player pool was deleted in favour of the
+// livePlayerTracker service, which creates one batsman question per crease
+// arrival and one bowler question per innings spell, keyed by Sportsmonk
+// player IDs. See backend/src/services/livePlayerTracker.ts.
 
 // Track which questions were used recently to avoid repeats within 3 overs
 const recentQuestions: Map<string, string[]> = new Map(); // matchId -> last N question keys
 
+/**
+ * Generate team-level per-over questions. Player-specific per-over questions
+ * have moved to the livePlayerTracker service, which creates exactly one
+ * batsman question per crease arrival and one bowler question per innings
+ * spell — keyed by Sportsmonk player IDs so resolution is never ambiguous.
+ *
+ * The `currentBatter` / `currentBowler` parameters are retained for backward
+ * compatibility with existing call sites but are now unused.
+ */
 export function generatePerOverPredictions(
   matchId: string,
   overNumber: number,
   round: number,
-  currentBatter?: string,
-  currentBowler?: string
+  _currentBatter?: string,
+  _currentBowler?: string
 ): Array<{
   matchId: string;
   category: string;
@@ -425,7 +365,7 @@ export function generatePerOverPredictions(
   const newRecent = [...recent, ...randomPicks.map((s) => s.key)].slice(-6);
   recentQuestions.set(recentKey, newRecent);
 
-  const results = selected.map((template) => ({
+  return selected.map((template) => ({
     matchId,
     category: "per_over" as const,
     round,
@@ -433,49 +373,6 @@ export function generatePerOverPredictions(
     question: template.question(overNumber),
     options: template.options,
   }));
-
-  // Pick 1 player question if batter or bowler is available
-  const hasBatter = currentBatter && currentBatter.trim() !== "";
-  const hasBowler = currentBowler && currentBowler.trim() !== "";
-
-  if (hasBatter || hasBowler) {
-    const recentPlayer = recentPlayerQuestions.get(recentKey) || [];
-
-    // Filter player pool: only batter questions if we have batter, only bowler if we have bowler
-    const availablePlayerPool = playerPerOverPool.filter((q) => {
-      if (q.type === "batter" && !hasBatter) return false;
-      if (q.type === "bowler" && !hasBowler) return false;
-      if (recentPlayer.includes(q.key)) return false;
-      return true;
-    });
-
-    const playerPool = availablePlayerPool.length > 0
-      ? availablePlayerPool
-      : playerPerOverPool.filter((q) => {
-          if (q.type === "batter" && !hasBatter) return false;
-          if (q.type === "bowler" && !hasBowler) return false;
-          return true;
-        });
-
-    if (playerPool.length > 0) {
-      const pick = playerPool[Math.floor(Math.random() * playerPool.length)];
-      const playerName = pick.type === "batter" ? currentBatter! : currentBowler!;
-
-      results.push({
-        matchId,
-        category: "per_over" as const,
-        round,
-        overNumber,
-        question: pick.question(overNumber, playerName),
-        options: pick.options,
-      });
-
-      const newRecentPlayer = [...recentPlayer, pick.key].slice(-6);
-      recentPlayerQuestions.set(recentKey, newRecentPlayer);
-    }
-  }
-
-  return results;
 }
 
 // Hot Takes — one per round start
@@ -592,14 +489,16 @@ export function generatePlayerHotTake(
 
   const hotTakes: Record<number, () => { question: string; options: { key: string; label: string; points: number }[] } | null> = {
     // Round 1: 1st Innings Powerplay — will either opener score 50+?
+    // Asymmetric scoring per product decision: 100 for a correct Yes (rare,
+    // high-reward), 5 for a correct No (common, low-reward).
     1: () => {
       const openers = (team1Players || []).slice(0, 2);
       if (openers.length < 2) return null;
       return {
         question: `Will either opener score 50+ in the powerplay?`,
         options: [
-          { key: "yes", label: "Yes — one of them goes big", points: 25 },
-          { key: "no", label: "No — both stay under 50", points: 20 },
+          { key: "yes", label: "Yes — one of them goes big", points: 100 },
+          { key: "no", label: "No — both stay under 50", points: 5 },
         ],
       };
     },

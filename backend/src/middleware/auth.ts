@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { JWT_SECRET } from "../config/secrets";
 
 export interface AuthRequest extends Request {
   userId?: string;
@@ -16,7 +17,7 @@ export function authenticateUser(req: AuthRequest, res: Response, next: NextFunc
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "dev-secret") as {
+    const decoded = jwt.verify(token, JWT_SECRET) as {
       userId: string;
       type: string;
     };
@@ -42,7 +43,7 @@ export function authenticateVenue(req: AuthRequest, res: Response, next: NextFun
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "dev-secret") as {
+    const decoded = jwt.verify(token, JWT_SECRET) as {
       venueId: string;
       type: string;
     };
@@ -68,7 +69,7 @@ export function authenticateOwner(req: AuthRequest, res: Response, next: NextFun
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || "dev-secret") as {
+    const decoded = jwt.verify(token, JWT_SECRET) as {
       ownerId: string;
       type: string;
     };
