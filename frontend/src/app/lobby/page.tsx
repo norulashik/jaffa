@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
-import { Flame, Share2, Loader2, Users, Plus, LogIn } from "lucide-react";
+import { Flame, Share2, Loader2, Users, Plus, LogIn, ChevronDown, ChevronUp } from "lucide-react";
 import { api } from "@/lib/api";
 import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 import { toast } from "sonner";
@@ -40,6 +40,10 @@ export default function HomeLiveMatches() {
   const [pastLoading, setPastLoading] = useState(false);
   const [pastHasMore, setPastHasMore] = useState(false);
   const [pastPage, setPastPage] = useState(1);
+  // Both lobby sections start collapsed — the user shouldn't have to scroll
+  // past every upcoming match to reach past battles. Headers expand on tap.
+  const [upcomingExpanded, setUpcomingExpanded] = useState(false);
+  const [pastExpanded, setPastExpanded] = useState(false);
 
   // Match code modal state
   const [codeModal, setCodeModal] = useState<{ match: Match; code: string; error: string; validating: boolean } | null>(null);
@@ -395,21 +399,31 @@ export default function HomeLiveMatches() {
           </div>
         )}
 
-        {/* Upcoming Matches Title */}
+        {/* Upcoming Battles — collapsible. Header toggles `upcomingExpanded`;
+            cards only render when expanded. Keeps the lobby short by default
+            so PAST BATTLES is reachable without scrolling past every fixture. */}
         {upcomingMatches.length > 0 && (
-          <h3
-            className="text-lg font-bold text-white mt-8 mb-4 pl-3 uppercase"
-            style={{
-              fontFamily: "'Bungee', 'Impact', cursive",
-              borderLeft: "4px solid #ff6341",
-            }}
+          <button
+            onClick={() => setUpcomingExpanded((v) => !v)}
+            className="w-full mt-8 mb-4 pl-3 pr-2 py-1 flex justify-between items-center"
+            style={{ borderLeft: "4px solid #ff6341" }}
           >
-            UPCOMING BATTLES
-          </h3>
+            <span
+              className="text-lg font-bold text-white uppercase"
+              style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+            >
+              Upcoming Battles ({upcomingMatches.length})
+            </span>
+            {upcomingExpanded ? (
+              <ChevronUp className="w-5 h-5 text-white/60" />
+            ) : (
+              <ChevronDown className="w-5 h-5 text-white/60" />
+            )}
+          </button>
         )}
 
-        {/* Upcoming Match Cards */}
-        {upcomingMatches.map((match) => {
+        {/* Upcoming Match Cards — gated on the dropdown */}
+        {upcomingExpanded && upcomingMatches.map((match) => {
           const startDate = match.startTime ? new Date(match.startTime) : null;
           const timeStr = startDate ? startDate.toLocaleString("en-IN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
 
@@ -556,20 +570,29 @@ export default function HomeLiveMatches() {
           );
         })}
 
-        {/* Past Battles — completed matches the user participated in. Clicking
-            a row opens /history/<matchId> which shows final leaderboard +
-            rewards so the user can screenshot for customer support. */}
+        {/* Past Battles — collapsible. Completed matches the user participated
+            in. Clicking a row opens /history/<matchId> which shows final
+            leaderboard + rewards so the user can screenshot for support. */}
         {(pastMatches.length > 0 || pastLoading) && (
           <>
-            <h3
-              className="text-lg font-bold text-white mt-8 mb-4 pl-3 uppercase"
-              style={{
-                fontFamily: "'Bungee', 'Impact', cursive",
-                borderLeft: "4px solid #6b7280",
-              }}
+            <button
+              onClick={() => setPastExpanded((v) => !v)}
+              className="w-full mt-8 mb-4 pl-3 pr-2 py-1 flex justify-between items-center"
+              style={{ borderLeft: "4px solid #6b7280" }}
             >
-              PAST BATTLES
-            </h3>
+              <span
+                className="text-lg font-bold text-white uppercase"
+                style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+              >
+                Past Battles ({pastMatches.length})
+              </span>
+              {pastExpanded ? (
+                <ChevronUp className="w-5 h-5 text-white/60" />
+              ) : (
+                <ChevronDown className="w-5 h-5 text-white/60" />
+              )}
+            </button>
+            {pastExpanded && (
             <div className="space-y-2">
               {pastMatches.map((pm) => {
                 const dt = pm.startTime ? new Date(pm.startTime) : null;
@@ -629,6 +652,7 @@ export default function HomeLiveMatches() {
                 </button>
               )}
             </div>
+            )}
           </>
         )}
       </main>

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
-import { Target, HelpCircle } from "lucide-react";
+import { Target, HelpCircle, ChevronDown, ChevronUp } from "lucide-react";
 import { useGame } from "@/context/GameContext";
 import { api } from "@/lib/api";
 import { cafeUrl, isCafeRoute } from "@/lib/navigation";
@@ -81,6 +81,9 @@ export default function MyPicksPage() {
   const [predictions, setPredictions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<"correct" | "wrong" | "all" | "pending">("all");
+  // Drawer state for the over-wise grouping (mirrors the in-match MY PICKS).
+  // Empty Set = all collapsed; we add the user's tap targets to expand them.
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   const matchId = state.matchId || (typeof window !== "undefined" ? localStorage.getItem("jaffa_match_id") : null);
   const venueId = state.venueId || (typeof window !== "undefined" ? localStorage.getItem("jaffa_venue_id") : null);
@@ -220,9 +223,11 @@ export default function MyPicksPage() {
               </button>
             </div>
 
-            {/* Filtered picks */}
-            <div className="space-y-3">
-              {allPicks.filter((pred: any) => {
+            {/* Filtered picks — bucketed into per-over drawers + an "Others"
+                drawer (hot takes, bold/rivalry calls, live-player, pre-match,
+                punter card). Each drawer is collapsed until tapped. */}
+            {(() => {
+              const filtered = allPicks.filter((pred: any) => {
                 const selectedKey = pred.userAnswer?.selectedOption;
                 const isClosed = pred.status === "resolved";
                 switch (activeFilter) {
@@ -231,7 +236,31 @@ export default function MyPicksPage() {
                   case "pending": return selectedKey && !isClosed;
                   case "all": return true;
                 }
-              }).map((pred: any) => {
+              });
+
+              const overBuckets = new Map<number, any[]>();
+              const others: any[] = [];
+              for (const p of filtered) {
+                if (p.category === "per_over" && typeof p.overNumber === "number") {
+                  const arr = overBuckets.get(p.overNumber) || [];
+                  arr.push(p);
+                  overBuckets.set(p.overNumber, arr);
+                } else {
+                  others.push(p);
+                }
+              }
+              const overKeys = Array.from(overBuckets.keys()).sort((a, b) => a - b);
+
+              const toggleGroup = (key: string) => {
+                setExpandedGroups((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(key)) next.delete(key);
+                  else next.add(key);
+                  return next;
+                });
+              };
+
+              const renderPickCard = (pred: any) => {
                 const selectedKey = pred.userAnswer?.selectedOption;
                 const selectedLabel = getOptionLabel(pred, selectedKey);
                 const isClosed = pred.status === "resolved";
@@ -302,7 +331,6 @@ export default function MyPicksPage() {
                         </span>
                       )}
                     </div>
-                    {/* "You missed by X runs" — shown only on wrong, only when resolver supplied context */}
                     {isClosed && isCorrect === false && pred.userAnswer?.feedbackText && (
                       <p className="text-xs mt-2 text-[#ff9b80] italic">
                         {pred.userAnswer.feedbackText}
@@ -313,8 +341,52 @@ export default function MyPicksPage() {
                     )}
                   </motion.div>
                 );
-              })}
-            </div>
+              };
+
+              const renderGroup = (key: string, title: string, picks: any[]) => {
+                if (picks.length === 0) return null;
+                const open = expandedGroups.has(key);
+                return (
+                  <div key={key} className="border-2 border-[#2a2a2a] rounded-[3px] bg-[#0d0d0d]">
+                    <button
+                      onClick={() => toggleGroup(key)}
+                      className="w-full flex justify-between items-center px-3 py-2.5"
+                    >
+                      <span className="text-xs font-black text-white/80 uppercase tracking-wider">
+                        {title} ({picks.length})
+                      </span>
+                      {open ? (
+                        <ChevronUp className="w-4 h-4 text-white/60" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4 text-white/60" />
+                      )}
+                    </button>
+                    {open && (
+                      <div className="px-2 pb-2 space-y-2">
+                        {picks.map(renderPickCard)}
+                      </div>
+                    )}
+                  </div>
+                );
+              };
+
+              if (filtered.length === 0) {
+                return (
+                  <div className="text-center text-white/40 text-sm font-bold uppercase tracking-wider py-10">
+                    No picks in this filter
+                  </div>
+                );
+              }
+
+              return (
+                <div className="space-y-2">
+                  {overKeys.map((n) =>
+                    renderGroup(`over-${n}`, `Over ${n}`, overBuckets.get(n) || [])
+                  )}
+                  {renderGroup("others", "Others", others)}
+                </div>
+              );
+            })()}
           </>
         )}
       </main>

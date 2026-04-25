@@ -1,6 +1,6 @@
 import { Op } from "sequelize";
 import { Match, Prediction, MatchParticipant } from "../models";
-import { generatePerOverPredictions, generateHotTake, generatePlayerHotTake, generateRivalryCalls, getCurrentRound, generatePlayerPreMatchQuestions } from "./predictionEngine";
+import { generatePerOverPredictions, generateHotTake, generatePlayerHotTake, generateRivalryCalls, getCurrentRound, generatePlayerPreMatchQuestions, generatePreMatchPredictions } from "./predictionEngine";
 import { ensurePunterCard, punterOpensAt, resolvePunterCard } from "./punterCard";
 import {
   ALL_CORRECT_OPTION,
@@ -780,7 +780,89 @@ export async function pollSportsmonkUpdates(io: SocketIOServer): Promise<void> {
   }
 }
 
+// Throttle: scan today's Sportsmonk fixtures for missing imports at most
+// once every 30 minutes. Cron-like daily-at-midnight is the product intent;
+// the 30-minute floor just covers backend restarts so a freshly-booted
+// process still discovers today's fixtures within half an hour.
+let lastTodayImportScanAt = 0;
+const TODAY_IMPORT_SCAN_INTERVAL_MS = 30 * 60_000;
+
+/**
+ * Discover today's IPL fixtures on Sportsmonk and create local Match rows for
+ * any that aren't yet in our DB. This is what makes the Punter Card hook +
+ * the lobby's "Open Punter Card" button work for matches users haven't
+ * tapped JOIN on yet — the card needs a real `Match` row to attach to.
+ */
+async function autoImportTodayFixtures(): Promise<void> {
+  if (Date.now() - lastTodayImportScanAt < TODAY_IMPORT_SCAN_INTERVAL_MS) return;
+  lastTodayImportScanAt = Date.now();
+
+  try {
+    const fixtures = await fetchTodayFixtures();
+    if (fixtures.length === 0) return;
+
+    for (const fixture of fixtures) {
+      const fixtureId = String(fixture.id);
+      const existing = await Match.findOne({ where: { externalId: fixtureId } });
+      if (existing) continue;
+
+      try {
+        const team1 = await fetchTeamData(fixture.localteam_id);
+        const team2 = await fetchTeamData(fixture.visitorteam_id);
+        const fStatus =
+          fixture.status === "Finished" ? "completed" :
+          fixture.status === "NS" ? "upcoming" : "live";
+        const match = await Match.create({
+          externalId: fixtureId,
+          team1: team1.name,
+          team2: team2.name,
+          team1Short: team1.code || "T1",
+          team2Short: team2.code || "T2",
+          team1Players: [],
+          team2Players: [],
+          startTime: new Date(fixture.starting_at),
+          status: fStatus as any,
+          scoreData: {
+            venue: fixture.venue_id,
+            team1Img: team1.image_path || "",
+            team2Img: team2.image_path || "",
+          } as any,
+        });
+
+        // Mirror the import endpoint's pre-match question setup so users can
+        // play the 4 team-level questions T-45 onwards. Player questions
+        // are added later at toss when the lineup arrives.
+        const preMatchQuestions = generatePreMatchPredictions(
+          match.id, match.team1, match.team2,
+          match.team1Short, match.team2Short,
+          match.team1Players, match.team2Players
+        );
+        for (const q of preMatchQuestions) {
+          await Prediction.create(q as any);
+        }
+        if (match.startTime) {
+          const opensAt = new Date(new Date(match.startTime).getTime() - 45 * 60_000);
+          await Prediction.update(
+            { opensAt },
+            { where: { matchId: match.id, category: "pre_match" } }
+          );
+        }
+
+        console.log(`[AutoImport] ${match.team1Short} vs ${match.team2Short} imported (today fixture)`);
+      } catch (err) {
+        console.error(`[AutoImport] Failed to import fixture ${fixtureId}:`, err);
+      }
+    }
+  } catch (err) {
+    console.error("[AutoImport] Today scan error:", err);
+  }
+}
+
 async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
+  // Pull today's Sportsmonk fixtures into the DB so Punter Card + pre-match
+  // predictions exist before users tap JOIN. Throttled internally.
+  await autoImportTodayFixtures();
+
   // Check both live AND upcoming matches (upcoming might have started)
   const matches = await Match.findAll({ where: { status: ["live", "upcoming"] } });
   if (matches.length === 0) return;

@@ -16,6 +16,43 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { connectSocket } from "@/lib/socket";
+import { api } from "@/lib/api";
+
+// Local-storage key + namespace strategy: store the entire history under one
+// key, tagged with the matchId it came from. On hydrate we drop the items if
+// the user has switched matches, so the bell never carries old wins from a
+// different match.
+const STORAGE_KEY = "jaffa_win_history_v1";
+
+type StoredHistory = { matchId: string; items: WinNotification[] };
+
+function readStoredHistory(currentMatchId: string | null): WinNotification[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: StoredHistory = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.items)) return [];
+    if (currentMatchId && parsed.matchId !== currentMatchId) return [];
+    return parsed.items;
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredHistory(matchId: string | null, items: WinNotification[]): void {
+  if (typeof window === "undefined" || !matchId) return;
+  try {
+    const payload: StoredHistory = { matchId, items };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Quota / SecurityError — bell still works in-memory.
+  }
+}
+
+function sortByReceivedDesc(items: WinNotification[]): WinNotification[] {
+  return [...items].sort((a, b) => b.receivedAt - a.receivedAt);
+}
 
 export interface WinNotification {
   id: string;              // unique client-side id
@@ -67,20 +104,78 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     }
   }, [currentPopup, queue]);
 
-  // Subscribe to the per-user socket room. The connection is a singleton
-  // so this doesn't fight the per-page socket consumers (match page etc.).
+  // Mount-time setup, in this order:
+  //   1. Hydrate from localStorage (instant — bell never visibly empties).
+  //   2. Backfill from /predictions/<matchId>/my-predictions so wins missed
+  //      while the user was offline / on a non-socket page still show up.
+  //      Backfilled items are pre-marked seen → no popup spam, no badge bump.
+  //   3. Subscribe to the per-user socket for live wins.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const token = localStorage.getItem("jaffa_token");
-    if (!token) return; // not signed in — nothing to subscribe to
+    if (!token) return; // not signed in — nothing to do
 
+    const matchId = localStorage.getItem("jaffa_match_id");
+    const venueId = localStorage.getItem("jaffa_venue_id");
+
+    // (1) hydrate from localStorage — drops items if matchId differs.
+    const stored = readStoredHistory(matchId);
+    if (stored.length > 0) {
+      for (const n of stored) seenIdsRef.current.add(n.predictionId);
+      setHistory(sortByReceivedDesc(stored));
+    }
+
+    // (2) backfill from API. Best-effort; failures are silent so the bell
+    // still works on hydrated state.
+    let cancelled = false;
+    if (matchId && venueId) {
+      api
+        .getMyPredictions(matchId, venueId)
+        .then((rows) => {
+          if (cancelled) return;
+          const wins: WinNotification[] = (rows || [])
+            .filter((r: any) =>
+              r.isCorrect === true &&
+              Number(r.pointsEarned) > 0 &&
+              r.prediction?.id &&
+              !seenIdsRef.current.has(r.prediction.id)
+            )
+            .map((r: any) => {
+              seenIdsRef.current.add(r.prediction.id);
+              const opt = r.prediction.options?.find(
+                (o: any) => (o.key || o.label) === r.selectedOption
+              );
+              const tsRaw = r.answeredAt ? new Date(r.answeredAt).getTime() : Date.now();
+              return {
+                id: `${r.prediction.id}-bf-${tsRaw}`,
+                predictionId: r.prediction.id,
+                matchId: r.matchId || matchId,
+                question: r.prediction.question || "Prediction",
+                pointsEarned: Number(r.pointsEarned) || 0,
+                selectedLabel: opt?.label || r.selectedOption || "",
+                streak: 0,
+                category: r.prediction.category || "",
+                overNumber: r.prediction.overNumber ?? null,
+                receivedAt: tsRaw,
+                seenInBell: true,    // historical — don't light the badge
+              };
+            });
+          if (wins.length === 0) return;
+          setHistory((prev) =>
+            sortByReceivedDesc([...prev, ...wins]).slice(0, HISTORY_LIMIT)
+          );
+        })
+        .catch(() => { /* silent */ });
+    }
+
+    // (3) subscribe to live wins.
     const socket = connectSocket();
-    if (!socket) return;
+    if (!socket) return () => { cancelled = true; };
 
     const handleWin = (data: any) => {
       if (!data || !data.predictionId) return;
 
-      // Drop duplicates (server retries, multiple resolver passes)
+      // Drop duplicates (server retries, multiple resolver passes, backfill).
       if (seenIdsRef.current.has(data.predictionId)) return;
       seenIdsRef.current.add(data.predictionId);
 
@@ -98,8 +193,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         seenInBell: false,
       };
 
-      // Add to history (newest first, capped).
-      setHistory((prev) => [note, ...prev].slice(0, HISTORY_LIMIT));
+      setHistory((prev) =>
+        sortByReceivedDesc([note, ...prev]).slice(0, HISTORY_LIMIT)
+      );
 
       // If nothing showing, surface immediately. Otherwise queue behind the
       // current popup; the effect above promotes it once the user dismisses.
@@ -112,9 +208,18 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
     socket.on("myPredictionWin", handleWin);
     return () => {
+      cancelled = true;
       socket.off("myPredictionWin", handleWin);
     };
   }, []);
+
+  // Persist history to localStorage on every change so reloads / cross-page
+  // navs keep the bell populated.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const matchId = localStorage.getItem("jaffa_match_id");
+    writeStoredHistory(matchId, history);
+  }, [history]);
 
   const dismissPopup = useCallback(() => {
     setCurrentPopup(null);
@@ -131,6 +236,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     setQueue([]);
     setCurrentPopup(null);
     seenIdsRef.current.clear();
+    if (typeof window !== "undefined") {
+      try { localStorage.removeItem(STORAGE_KEY); } catch { /* noop */ }
+    }
   }, []);
 
   const unreadCount = useMemo(
