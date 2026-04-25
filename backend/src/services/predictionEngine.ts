@@ -106,7 +106,7 @@ export function generatePreMatchPredictions(
 }
 
 // Generate player-based pre-match questions from lineup data
-function generatePlayerPreMatchQuestions(
+export function generatePlayerPreMatchQuestions(
   matchId: string,
   team1Players: string[],
   team2Players: string[]

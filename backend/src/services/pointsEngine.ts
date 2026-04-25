@@ -185,6 +185,12 @@ export async function resolvePrediction(
   for (const up of userPredictions) {
     let result: ReturnType<typeof calculatePoints> | undefined;
 
+    // Idempotency guard: if this UserPrediction already has isCorrect set,
+    // it's already been scored and the participant's totals were bumped.
+    // Calling resolvePrediction twice (e.g. once by the poll and once by
+    // resolveRemainingPredictionsAtMatchEnd) would otherwise double-count.
+    if (up.isCorrect !== null && up.isCorrect !== undefined) continue;
+
     await sequelize.transaction(async (t) => {
       const participant = await MatchParticipant.findOne({
         where: { userId: up.userId, matchId: up.matchId, venueId: up.venueId },
@@ -238,6 +244,24 @@ export async function resolvePrediction(
         await participant.update(updateData as Partial<MatchParticipant>, { transaction: t });
       }
     });
+
+    // Per-user win popup. Fires only on a successful correct pick that earned
+    // points. Targets the user-only socket room so this is private to them.
+    if (result && result.isCorrect && result.totalPoints > 0) {
+      const optLabel =
+        prediction.options.find((o) => o.key === up.selectedOption)?.label ||
+        up.selectedOption;
+      io.to(`user:${up.userId}`).emit("myPredictionWin", {
+        predictionId: prediction.id,
+        matchId: prediction.matchId,
+        question: prediction.question,
+        pointsEarned: result.totalPoints,
+        selectedLabel: optLabel,
+        streak: result.newStreak,
+        category: prediction.category,
+        overNumber: prediction.overNumber || null,
+      });
+    }
 
     // Accumulate weekly points
     if (result && result.totalPoints !== 0) {

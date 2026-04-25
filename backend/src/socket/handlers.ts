@@ -51,6 +51,13 @@ export function setupSocketHandlers(io: SocketIOServer): void {
   io.on("connection", (socket: AuthedSocket) => {
     console.log(`Client connected: ${socket.id} (${socket.data.authType})`);
 
+    // User-scoped room for direct, per-user notifications. The backend can
+    // emit to `user:<userId>` (e.g. correct-prediction popups) without
+    // broadcasting to the whole venue room.
+    if (socket.data.authType === "user" && socket.data.userId) {
+      socket.join(`user:${socket.data.userId}`);
+    }
+
     // Player joins its own venue-match room. Server verifies the user is
     // actually a participant of (matchId, venueId) before joining — stops
     // scripts from spying on rooms they don't belong to.

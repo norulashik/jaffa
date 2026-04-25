@@ -7,7 +7,7 @@ import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
 import CricketAvatar from "@/components/CricketAvatar";
 import AvatarCustomizer from "@/components/AvatarCustomizer";
-import { Settings, HelpCircle, LogOut, ChevronRight, User, MapPin, Trophy } from "lucide-react";
+import { Settings, HelpCircle, LogOut, ChevronRight, User, MapPin, Trophy, Ticket } from "lucide-react";
 import { api } from "@/lib/api";
 import { AvatarConfig } from "@/types/avatar";
 import { cafeUrl, isCafeRoute } from "@/lib/navigation";
@@ -213,6 +213,23 @@ export default function ProfilePage() {
               </div>
             </div>
             <ChevronRight size={20} className="text-[#ff6341]" />
+          </motion.button>
+
+          <motion.button
+            whileTap={{ scale: 0.98 }}
+            onClick={() => router.push("/profile/punter-cards")}
+            className="w-full game-card flex items-center justify-between cursor-pointer text-left"
+          >
+            <div className="flex items-center gap-4">
+              <Ticket size={20} className="text-[#3b9eff]" />
+              <div>
+                <span className="font-bold uppercase text-sm" style={{ fontFamily: "'Bungee', 'Impact', cursive" }}>
+                  My Punter Cards
+                </span>
+                <p className="text-[10px] text-[#6b7280]">Pre-match picks you've locked in</p>
+              </div>
+            </div>
+            <ChevronRight size={20} className="text-[#6b7280]" />
           </motion.button>
 
           <motion.button

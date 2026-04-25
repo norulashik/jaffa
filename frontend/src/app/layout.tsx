@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Toaster } from "sonner";
 import { GameProvider } from "@/context/GameContext";
+import { NotificationProvider } from "@/context/NotificationContext";
+import WinPopup from "@/components/WinPopup";
 import { SAFE_BOOT } from "@/lib/runtime-flags";
 import "./globals.css";
 
@@ -29,7 +31,19 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const content = SAFE_BOOT ? children : <GameProvider>{children}</GameProvider>;
+  // Wrap with NotificationProvider so the per-user "you got it right!" socket
+  // listener stays alive across all pages, not just the match page. WinPopup
+  // sits at the top so it floats above any page chrome.
+  const content = SAFE_BOOT ? (
+    children
+  ) : (
+    <GameProvider>
+      <NotificationProvider>
+        {children}
+        <WinPopup />
+      </NotificationProvider>
+    </GameProvider>
+  );
 
   return (
     <html lang="en" className="dark">

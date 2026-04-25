@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
-import { MatchParticipant, User } from "../models";
+import { Op } from "sequelize";
+import { MatchParticipant, User, UserPrediction, Prediction } from "../models";
 import { parsePagination, paginationMeta } from "../utils/pagination";
 
 const router = Router();
@@ -85,6 +86,77 @@ router.get("/:matchId/:venueId/match", async (req: Request, res: Response): Prom
   } catch (error) {
     console.error("Get match leaderboard error:", error);
     res.status(500).json({ error: "Failed to get leaderboard" });
+  }
+});
+
+// Get "extras" leaderboard — combined points from Punter Card + pre-match
+// predictions. Shown as a sub-branch under the round tabs so users can see
+// their off-round points broken down from their per-over / hot-take points.
+router.get("/:matchId/:venueId/extras", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { matchId, venueId } = req.params;
+
+    // Pull every resolved user-prediction for this match+venue whose parent
+    // prediction falls into the "extras" bucket.
+    const rows = await UserPrediction.findAll({
+      where: { matchId, venueId },
+      include: [
+        {
+          model: Prediction,
+          as: "prediction",
+          where: { category: { [Op.in]: ["punter_card", "pre_match"] } },
+          required: true,
+          attributes: ["id", "category"],
+        },
+      ],
+    });
+
+    // Aggregate per user, splitting by category for the breakdown.
+    type Agg = { userId: string; punter: number; preMatch: number };
+    const agg = new Map<string, Agg>();
+    for (const r of rows) {
+      const pred = (r as unknown as { prediction: { category: string } }).prediction;
+      if (!pred) continue;
+      const entry = agg.get(r.userId) || { userId: r.userId, punter: 0, preMatch: 0 };
+      const pts = r.pointsEarned || 0;
+      if (pred.category === "punter_card") entry.punter += pts;
+      else entry.preMatch += pts;
+      agg.set(r.userId, entry);
+    }
+
+    if (agg.size === 0) {
+      res.json({ leaderboard: [] });
+      return;
+    }
+
+    // Join to User for display info. One query, no per-row fetch.
+    const userIds = Array.from(agg.keys());
+    const users = await User.findAll({
+      where: { id: { [Op.in]: userIds } },
+      attributes: ["id", "displayName", "avatarConfig"],
+    });
+    const userMap = new Map(users.map((u) => [u.id, u]));
+
+    const leaderboard = Array.from(agg.values())
+      .map((a) => {
+        const u = userMap.get(a.userId);
+        return {
+          userId: a.userId,
+          displayName: u?.displayName || "Unknown",
+          avatarConfig: u?.avatarConfig
+            ? (() => { try { return JSON.parse(u.avatarConfig!); } catch { return null; } })()
+            : null,
+          points: a.punter + a.preMatch,
+          breakdown: { punterCard: a.punter, preMatch: a.preMatch },
+        };
+      })
+      .sort((a, b) => b.points - a.points)
+      .map((row, i) => ({ rank: i + 1, ...row }));
+
+    res.json({ leaderboard });
+  } catch (error) {
+    console.error("Get extras leaderboard error:", error);
+    res.status(500).json({ error: "Failed to get extras leaderboard" });
   }
 });
 

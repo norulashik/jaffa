@@ -13,6 +13,9 @@ function ignorePath(targetPath: string) {
 }
 
 const nextConfig: NextConfig = {
+  // Prod keeps strict mode on; dev copies (C:\dev) disable it for HMR memory
+  // reasons but `next build` is single-pass so we don't pay the dev cost in
+  // prod. Strict mode helps catch accidental double-effects.
   reactStrictMode: true,
   outputFileTracingRoot: frontendRoot,
   // Rewrite `react-icons/<family>` barrel imports into per-icon paths so dev
@@ -88,6 +91,25 @@ const nextConfig: NextConfig = {
     ];
 
     if (dev) {
+      // Disable source maps in dev — they balloon the worker's memory as
+      // the module graph grows. Stack traces still resolve via line/col.
+      config.devtool = false;
+
+      // Disable webpack's cache entirely in dev. The default in-memory cache
+      // retained compile artifacts across HMR passes and eventually OOMed on
+      // the match page. Trade-off: slower re-compiles, no stuck pack writes.
+      config.cache = false;
+
+      // Don't minimize in dev; dev should never minimize anyway but being
+      // explicit prevents TerserPlugin workers from spinning up.
+      config.optimization = {
+        ...(config.optimization ?? {}),
+        minimize: false,
+        removeAvailableModules: false,
+        removeEmptyChunks: false,
+        splitChunks: false,
+      };
+
       const ignoredPaths = [
         path.join(workspaceRoot, ".next"),
         path.join(workspaceRoot, "dist"),

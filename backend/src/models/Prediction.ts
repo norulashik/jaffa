@@ -1,7 +1,7 @@
 import { DataTypes, Model, Optional, Op } from "sequelize";
 import sequelize from "../config/database";
 
-export type PredictionCategory = "pre_match" | "per_over" | "hot_take" | "bold_call" | "rivalry_call";
+export type PredictionCategory = "pre_match" | "per_over" | "hot_take" | "bold_call" | "rivalry_call" | "punter_card";
 export type PredictionStatus = "open" | "locked" | "resolved" | "voided";
 // Live player-specific subjects. NULL for team-level / pre-match questions.
 // - batsman_innings       → how many runs will this batsman score?
@@ -72,6 +72,7 @@ class Prediction extends Model<PredictionAttributes, PredictionCreationAttribute
   public inningsNumber!: number | null;
   public voidedAt!: Date | null;
   public voidReason!: string | null;
+  public templateKey!: string | null;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
 }
@@ -144,6 +145,10 @@ Prediction.init(
     },
     voidReason: {
       type: DataTypes.STRING(50),
+      allowNull: true,
+    },
+    templateKey: {
+      type: DataTypes.STRING(40),
       allowNull: true,
     },
   },

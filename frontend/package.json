@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=8192 next dev --webpack",
-    "dev:turbo": "cross-env NODE_OPTIONS=--max-old-space-size=8192 next dev --turbopack",
-    "build": "cross-env NODE_OPTIONS=--max-old-space-size=8192 next build --webpack",
+    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=16384 next dev --webpack",
+    "dev:turbo": "cross-env NODE_OPTIONS=--max-old-space-size=16384 next dev --turbopack",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=16384 next build --webpack",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "powershell -ExecutionPolicy Bypass -Command \"Remove-Item tsconfig.tsbuildinfo -ErrorAction SilentlyContinue; next typegen; tsc --noEmit --incremental false\""
@@ -42,6 +42,7 @@
     "cmdk": "^1.1.1",
     "embla-carousel-react": "^8.6.0",
     "framer-motion": "^12.38.0",
+    "html-to-image": "^1.11.13",
     "input-otp": "^1.4.2",
     "lucide-react": "^1.7.0",
     "next": "^16.2.0",

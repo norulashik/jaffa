@@ -72,8 +72,10 @@ export default function MatchDashboard() {
     type: "boost" | "all_in";
   } | null>(null);
   const [submittingPredictionId, setSubmittingPredictionId] = useState<string | null>(null);
-  const [showAllPicks, setShowAllPicks] = useState(false);
-  const [picksExpanded, setPicksExpanded] = useState(true);
+  // Which over-groups inside My Picks are expanded. Keyed by "over-<n>" or
+  // "others". Starts empty — all groups collapsed.
+  const [expandedPickGroups, setExpandedPickGroups] = useState<Set<string>>(new Set());
+  const [picksExpanded, setPicksExpanded] = useState(false);
   const [userRank, setUserRank] = useState<number | null>(null);
   const [now, setNow] = useState(Date.now());
   const [scoreVersion, setScoreVersion] = useState(0);
@@ -267,6 +269,19 @@ export default function MatchDashboard() {
       }
     });
 
+    // Leaderboard changed → our points/streak may have shifted. Refresh participant.
+    socket.on("leaderboardUpdate", () => {
+      loadLiveData();
+    });
+
+    // Prediction voided (rain abandon / no-result) → refresh and let the UI
+    // fade the card. loadLiveData will pick up the status change.
+    socket.on("predictionVoided", (data: any) => {
+      if (data.matchId === matchId) {
+        loadLiveData();
+      }
+    });
+
     socket.on("predictionResult", (data: any) => {
       if (data.correct) {
         setFeedbackData(data);
@@ -284,6 +299,8 @@ export default function MatchDashboard() {
       socket.off("scoreUpdate");
       socket.off("inningsBreak");
       socket.off("predictionResolved");
+      socket.off("leaderboardUpdate");
+      socket.off("predictionVoided");
       socket.off("predictionResult");
       disconnectSocket();
     };
@@ -328,6 +345,8 @@ export default function MatchDashboard() {
               boostsUsedThisRound: matchState.participant.boostsUsedRound || 0,
               boostsUsedRound: matchState.participant.boostsUsedRound || 0,
               allInUsed: Boolean(matchState.participant.allInUsed),
+              allInUsedInnings1: Boolean(matchState.participant.allInUsedInnings1),
+              allInUsedInnings2: Boolean(matchState.participant.allInUsedInnings2),
             },
           });
         }
@@ -434,7 +453,10 @@ export default function MatchDashboard() {
         dispatch({ type: "USE_BOOST" });
       }
       if (boostType === "all_in") {
-        dispatch({ type: "USE_ALL_IN" });
+        // Innings from prediction's round: rounds 1-3 → innings 1, 4-6 → innings 2.
+        const pred = predictions.find((p: any) => p.id === predictionId) as any;
+        const predInnings: 1 | 2 = pred && pred.round >= 4 ? 2 : 1;
+        dispatch({ type: "USE_ALL_IN", innings: predInnings });
       }
       if (activeBoostForPrediction) {
         setActiveBoost(null);
@@ -769,7 +791,7 @@ export default function MatchDashboard() {
               <>
                 <div className="text-center py-2">
                   <p className="text-sm text-[#ff6341] font-bold uppercase">
-                    Make predictions for Over {nextOver} before this over ends!
+                    Lock in your next-over picks
                   </p>
                 </div>
                 <OverBallsPanel matchId={matchId} scoreVersion={scoreVersion} />
@@ -817,8 +839,27 @@ export default function MatchDashboard() {
           const inn2Overs = Number(sd?.innings2?.overs || 0);
           const innings2Started = currInn === 2 && inn2Overs > 0;
 
+          // All live-player subject types — covered uniformly in the sort,
+          // filter, and label functions below.
+          const LIVE_PLAYER_SUBJECTS = new Set([
+            "batsman_innings",
+            "batsman_sixes",
+            "bowler_innings",
+            "bowler_innings_wkts",
+          ]);
+          const LOCK_GRACE_MS = 30_000;
           const unanswered = predictions.filter((p: any) => {
-            if (p.status !== "open") return false;
+            // Show open questions AND recently-locked live-player questions
+            // (30 s grace after lock). After the grace window they drop out of
+            // the live feed — they remain in My Picks / post-match recap.
+            const isLockedLivePlayer =
+              p.status === "locked" && LIVE_PLAYER_SUBJECTS.has(p.subjectType);
+            if (isLockedLivePlayer) {
+              const lockedAt = new Date(p.updatedAt || p.createdAt || 0).getTime();
+              if (Date.now() - lockedAt > LOCK_GRACE_MS) return false;
+            } else if (p.status !== "open") {
+              return false;
+            }
             if (selectedAnswers[p.id] || p.userAnswer?.selectedOption) return false;
             // Hide rivalry_call once innings 2 overs begin (they were for innings break only)
             if (innings2Started && p.category === "rivalry_call") return false;
@@ -826,17 +867,43 @@ export default function MatchDashboard() {
             if (p.category === "pre_match") return false;
             return true;
           });
-          const openPreds = unanswered.filter((p: any) => !p.expiresAt || new Date(p.expiresAt).getTime() > now);
+          // Priority ordering: live player questions (batsman at crease / bowler in spell)
+          // come first — they feel most relevant and time-sensitive. Then per-over team
+          // questions, then hot-takes / bold-calls / rivalry.
+          const predictionRank = (p: any): number => {
+            // Batsman-centric live questions (at crease + first-six bonus) on top.
+            if (p.subjectType === "batsman_innings") return 0;
+            if (p.subjectType === "batsman_sixes")   return 0;
+            // Bowler-centric live questions next (runs-conceded + wickets variant).
+            if (p.subjectType === "bowler_innings")  return 1;
+            if (p.subjectType === "bowler_innings_wkts") return 1;
+            if (p.category === "per_over") return 2;
+            if (p.category === "hot_take") return 3;
+            if (p.category === "bold_call") return 4;
+            if (p.category === "rivalry_call") return 5;
+            return 9;
+          };
+          const openPreds = unanswered
+            .filter((p: any) => !p.expiresAt || new Date(p.expiresAt).getTime() > now)
+            .sort((a: any, b: any) => predictionRank(a) - predictionRank(b));
           const missedPreds = unanswered.filter((p: any) => p.expiresAt && new Date(p.expiresAt).getTime() <= now);
           const answeredPreds = predictions.filter((p: any) => selectedAnswers[p.id] || p.userAnswer?.selectedOption);
+          // Product rule: 1 boost per phase (= round). Backend enforces the same cap.
           const boostsRemaining = Math.max(0, 1 - (gameState.boostsUsedThisRound || 0));
-          const allInAvailable = !gameState.allInUsed;
+          // All-in availability is per-innings (innings 1 = rounds 1-3, innings 2 = rounds 4-6).
+          // Computed per-card below using the prediction's own round.
+          const isAllInAvailableForRound = (round: number): boolean => {
+            const innings = round >= 4 ? 2 : 1;
+            return innings === 1 ? !gameState.allInUsedInnings1 : !gameState.allInUsedInnings2;
+          };
 
           const liveOver = matchData?.scoreData?.currentOver || matchData?.currentOver || 0;
           const getCategoryLabel = (pred: any) => {
             if (pred.category === "per_over") {
-              if (pred.subjectType === "batsman_innings") return "Live: at crease";
-              if (pred.subjectType === "bowler_innings") return "Live: bowling";
+              if (pred.subjectType === "batsman_innings")      return "Live: at crease";
+              if (pred.subjectType === "batsman_sixes")        return "Live: big hitter";
+              if (pred.subjectType === "bowler_innings")       return "Live: bowling";
+              if (pred.subjectType === "bowler_innings_wkts")  return "Live: hunting wickets";
               const n = pred.overNumber;
               if (!n) return "Over";
               if (liveOver && n === liveOver) return `Over ${n} — live`;
@@ -857,7 +924,10 @@ export default function MatchDashboard() {
                   {openPreds.map((pred: any) => {
                     const expiresAt = pred.expiresAt ? new Date(pred.expiresAt).getTime() : null;
                     const timeLeft = expiresAt ? Math.max(0, Math.ceil((expiresAt - now) / 1000)) : null;
-                    const isExpired = timeLeft !== null && timeLeft <= 0;
+                    // Live-player questions lock 30 s after creation; treat "locked"
+                    // status as expired so the card is visible but non-interactive.
+                    const isLockedByStatus = pred.status === "locked";
+                    const isExpired = (timeLeft !== null && timeLeft <= 0) || isLockedByStatus;
                     const selectedOption = draftAnswers[pred.id] || "";
                     const isSubmitting = submittingPredictionId === pred.id;
                     const boostStateForPrediction =
@@ -866,8 +936,17 @@ export default function MatchDashboard() {
                     const isBoostActive = boostType === "boost";
                     const isAllInActive = boostType === "all_in";
                     const hasBoost = isBoostActive || isAllInActive;
-                    const canUseBoost = boostsRemaining > 0;
-                    const canUseAllIn = allInAvailable;
+                    // "In flight" guards — if the user has already toggled 2x or 3x on
+                    // another card, hide the same option on THIS card. The token is
+                    // one-per-scope and committing it elsewhere means it isn't
+                    // available here either.
+                    const boostToggledElsewhere =
+                      !!activeBoost && activeBoost.predId !== pred.id && activeBoost.type === "boost";
+                    const allInToggledElsewhere =
+                      !!activeBoost && activeBoost.predId !== pred.id && activeBoost.type === "all_in";
+                    const canUseBoost = boostsRemaining > 0 && !boostToggledElsewhere;
+                    const canUseAllIn =
+                      isAllInAvailableForRound(Number(pred.round) || 1) && !allInToggledElsewhere;
 
                     return (
                     <section
@@ -1000,11 +1079,132 @@ export default function MatchDashboard() {
                     </div>
                   )}
 
-                  {/* My Picks */}
+                  {/* My Picks — grouped into per-over drawers with an "Others"
+                      drawer for non-per-over picks (hot takes, bold calls,
+                      rivalry calls, live-player, pre-match, punter card).
+                      Each drawer starts collapsed; user taps to expand. */}
                   {(answeredPreds.length > 0 || missedPreds.length > 0) && (() => {
-                    const allPicks = [...answeredPreds, ...missedPreds].reverse();
-                    const visiblePicks = showAllPicks ? allPicks : allPicks.slice(0, 5);
-                    const hasMore = allPicks.length > 5;
+                    const allPicks = [...answeredPreds, ...missedPreds];
+
+                    // Bucket picks: per-over cards go under their overNumber;
+                    // everything else goes under "others".
+                    const overBuckets = new Map<number, any[]>();
+                    const others: any[] = [];
+                    for (const p of allPicks) {
+                      if (p.category === "per_over" && typeof p.overNumber === "number") {
+                        const arr = overBuckets.get(p.overNumber) || [];
+                        arr.push(p);
+                        overBuckets.set(p.overNumber, arr);
+                      } else {
+                        others.push(p);
+                      }
+                    }
+                    const overKeys = Array.from(overBuckets.keys()).sort((a, b) => a - b);
+
+                    const toggleGroup = (key: string) => {
+                      setExpandedPickGroups((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(key)) next.delete(key);
+                        else next.add(key);
+                        return next;
+                      });
+                    };
+
+                    const renderPickCard = (pred: any) => {
+                      const selectedKey = selectedAnswers[pred.id] || pred.userAnswer?.selectedOption;
+                      const isMissed = !selectedKey;
+                      const selectedLabel = isMissed ? null : getOptionLabel(pred, selectedKey);
+                      const isClosed = pred.status === "resolved";
+                      const isCorrect = isClosed && !isMissed ? (selectedKey === pred.correctOption) : undefined;
+                      const pointsEarned = pred.userAnswer?.pointsEarned || (isCorrect ? (pred.options?.find((o: any) => (o.key || o.label) === selectedKey)?.points || 10) : 0);
+                      const correctAnswerLabel = isClosed && !isCorrect && pred.correctOption
+                        ? getOptionLabel(pred, pred.correctOption)
+                        : null;
+
+                      let statusText = "PENDING";
+                      let statusColor = "text-[#ffd60a]";
+                      let cardClass = "game-card";
+                      if (isMissed) {
+                        statusText = "MISSED";
+                        statusColor = "text-white/40";
+                        cardClass = "game-card opacity-50";
+                      } else if (isClosed && isCorrect === true) {
+                        statusText = `+${pointsEarned || 0} pts`;
+                        statusColor = "text-[#22c55e]";
+                        cardClass = "card-green";
+                      } else if (isClosed && isCorrect === false) {
+                        statusText = "WRONG";
+                        statusColor = "text-[#ff6341]";
+                        cardClass = "card-orange";
+                      }
+
+                      return (
+                        <div key={pred.id} className={`${cardClass} p-4`}>
+                          <div className="flex justify-between items-start mb-1">
+                            <span className="info-pill inline-block w-fit text-white/50 !text-[10px]">
+                              {getCategoryLabel(pred)}
+                            </span>
+                            <span className={`text-xs font-black ${statusColor}`}>{statusText}</span>
+                          </div>
+                          <p className="text-sm font-bold text-white mb-2">{pred.question}</p>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {isMissed ? (
+                              <span className="info-pill text-white/40">
+                                Not answered
+                              </span>
+                            ) : (
+                              <span className={`info-pill ${
+                                isClosed && isCorrect === false
+                                  ? "!border-[#ff6341] text-[#ff6341]"
+                                  : isClosed && isCorrect === true
+                                  ? "!border-[#22c55e] text-[#22c55e]"
+                                  : "text-white/60"
+                              }`}>
+                                Your pick: {selectedLabel}
+                              </span>
+                            )}
+                            {correctAnswerLabel && (
+                              <span className="text-xs text-white/40">
+                                Answer: {correctAnswerLabel}
+                              </span>
+                            )}
+                          </div>
+                          {isClosed && isCorrect === false && pred.userAnswer?.feedbackText && (
+                            <p className="text-xs mt-2 text-[#ff9b80] italic">
+                              {pred.userAnswer.feedbackText}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    };
+
+                    const renderGroup = (key: string, title: string, picks: any[]) => {
+                      if (picks.length === 0) return null;
+                      const open = expandedPickGroups.has(key);
+                      return (
+                        <div key={key} className="border-2 border-[#2a2a2a] rounded-[3px] bg-[#0d0d0d]">
+                          <button
+                            onClick={() => toggleGroup(key)}
+                            className="w-full flex justify-between items-center px-3 py-2.5"
+                          >
+                            <span className="text-xs font-black text-white/80 uppercase tracking-wider">
+                              {title} ({picks.length})
+                            </span>
+                            {open ? (
+                              <ChevronUp className="w-4 h-4 text-white/60" />
+                            ) : (
+                              <ChevronDown className="w-4 h-4 text-white/60" />
+                            )}
+                          </button>
+                          {open && (
+                            <div className="px-2 pb-2 space-y-2">
+                              {picks.map(renderPickCard)}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    };
+
                     return (
                     <div className="mt-2">
                       <button
@@ -1021,85 +1221,12 @@ export default function MatchDashboard() {
                         )}
                       </button>
                       {picksExpanded && (
-                        <>
-                          <div className="space-y-2">
-                            {visiblePicks.map((pred: any) => {
-                              const selectedKey = selectedAnswers[pred.id] || pred.userAnswer?.selectedOption;
-                              const isMissed = !selectedKey;
-                              const selectedLabel = isMissed ? null : getOptionLabel(pred, selectedKey);
-                              const isClosed = pred.status === "resolved";
-                              const isCorrect = isClosed && !isMissed ? (selectedKey === pred.correctOption) : undefined;
-                              const pointsEarned = pred.userAnswer?.pointsEarned || (isCorrect ? (pred.options?.find((o: any) => (o.key || o.label) === selectedKey)?.points || 10) : 0);
-                              const correctAnswerLabel = isClosed && !isCorrect && pred.correctOption
-                                ? getOptionLabel(pred, pred.correctOption)
-                                : null;
-
-                              let statusText = "PENDING";
-                              let statusColor = "text-[#ffd60a]";
-                              let cardClass = "game-card";
-                              if (isMissed) {
-                                statusText = "MISSED";
-                                statusColor = "text-white/40";
-                                cardClass = "game-card opacity-50";
-                              } else if (isClosed && isCorrect === true) {
-                                statusText = `+${pointsEarned || 0} pts`;
-                                statusColor = "text-[#22c55e]";
-                                cardClass = "card-green";
-                              } else if (isClosed && isCorrect === false) {
-                                statusText = "WRONG";
-                                statusColor = "text-[#ff6341]";
-                                cardClass = "card-orange";
-                              }
-
-                              return (
-                                <div key={pred.id} className={`${cardClass} p-4`}>
-                                  <div className="flex justify-between items-start mb-1">
-                                    <span className="info-pill inline-block w-fit text-white/50 !text-[10px]">
-                                      {getCategoryLabel(pred)}
-                                    </span>
-                                    <span className={`text-xs font-black ${statusColor}`}>{statusText}</span>
-                                  </div>
-                                  <p className="text-sm font-bold text-white mb-2">{pred.question}</p>
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    {isMissed ? (
-                                      <span className="info-pill text-white/40">
-                                        Not answered
-                                      </span>
-                                    ) : (
-                                      <span className={`info-pill ${
-                                        isClosed && isCorrect === false
-                                          ? "!border-[#ff6341] text-[#ff6341]"
-                                          : isClosed && isCorrect === true
-                                          ? "!border-[#22c55e] text-[#22c55e]"
-                                          : "text-white/60"
-                                      }`}>
-                                        Your pick: {selectedLabel}
-                                      </span>
-                                    )}
-                                    {correctAnswerLabel && (
-                                      <span className="text-xs text-white/40">
-                                        Answer: {correctAnswerLabel}
-                                      </span>
-                                    )}
-                                  </div>
-                                  {isClosed && isCorrect === false && pred.userAnswer?.feedbackText && (
-                                    <p className="text-xs mt-2 text-[#ff9b80] italic">
-                                      {pred.userAnswer.feedbackText}
-                                    </p>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                          {hasMore && (
-                            <button
-                              onClick={() => setShowAllPicks(!showAllPicks)}
-                              className="w-full py-3 text-center text-xs font-black text-[#ff6341] uppercase tracking-widest hover:text-[#ff6341]/80 transition-colors"
-                            >
-                              {showAllPicks ? "Show less" : `See more (${allPicks.length - 5} more)`}
-                            </button>
+                        <div className="space-y-2">
+                          {overKeys.map((n) =>
+                            renderGroup(`over-${n}`, `Over ${n}`, overBuckets.get(n) || [])
                           )}
-                        </>
+                          {renderGroup("others", "Others", others)}
+                        </div>
                       )}
                     </div>
                     );

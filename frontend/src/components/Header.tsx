@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useGame } from "@/context/GameContext";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cafeUrl, isCafeRoute } from "@/lib/navigation";
+import NotificationBell from "@/components/NotificationBell";
 
 export default function Header() {
   const { state } = useGame();
@@ -44,8 +45,9 @@ export default function Header() {
           </Link>
         </div>
 
-        {/* Right: Profile avatar */}
-        <div className="flex items-center justify-end">
+        {/* Right: Bell + Profile avatar */}
+        <div className="flex items-center justify-end gap-2">
+          <NotificationBell />
           <button
             onClick={() => router.push(profileHref)}
             className="border-2 border-[#ff6341] rounded-[3px] overflow-hidden"

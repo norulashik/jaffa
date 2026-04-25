@@ -274,6 +274,7 @@ export async function processLivePlayers(
     const seenBowlers = new Set<number>();
     const battedBalls = new Map<number, Ball[]>();   // batsman_id -> balls where they were striker
     const bowledBalls = new Map<number, Ball[]>();   // bowler_id -> balls delivered
+    const batsmanNameById = new Map<number, string>();
 
     for (const b of ballsThisInnings) {
       if (b.batsman_id) {
@@ -281,6 +282,8 @@ export async function processLivePlayers(
         const arr = battedBalls.get(b.batsman_id) || [];
         arr.push(b);
         battedBalls.set(b.batsman_id, arr);
+        const nm = b.batsman?.fullname;
+        if (nm && !batsmanNameById.has(b.batsman_id)) batsmanNameById.set(b.batsman_id, nm);
       }
       if (b.bowler_id) {
         seenBowlers.add(b.bowler_id);
@@ -288,6 +291,17 @@ export async function processLivePlayers(
         arr.push(b);
         bowledBalls.set(b.bowler_id, arr);
       }
+    }
+
+    // Diagnostic: log per-innings ball counts + unique striker IDs so we can
+    // tell at a glance whether the upstream API is returning middle-order balls.
+    // Matches the "only openers get questions" complaint — if this log shows
+    // only 2 IDs after many overs, the upstream balls feed is the culprit.
+    if (seenBatsmen.size > 0) {
+      const idNames = Array.from(seenBatsmen).map((id) => `${id}(${batsmanNameById.get(id) || "?"})`).join(",");
+      console.log(
+        `[livePlayerTracker] match=${match.id} innings=${innings} balls=${ballsThisInnings.length} strikers=[${idNames}]`
+      );
     }
 
     // --- Generation pass ---

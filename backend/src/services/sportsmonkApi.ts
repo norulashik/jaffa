@@ -1,6 +1,7 @@
 import { Op } from "sequelize";
 import { Match, Prediction, MatchParticipant } from "../models";
-import { generatePerOverPredictions, generateHotTake, generatePlayerHotTake, generateRivalryCalls, getCurrentRound } from "./predictionEngine";
+import { generatePerOverPredictions, generateHotTake, generatePlayerHotTake, generateRivalryCalls, getCurrentRound, generatePlayerPreMatchQuestions } from "./predictionEngine";
+import { ensurePunterCard, punterOpensAt, resolvePunterCard } from "./punterCard";
 import {
   ALL_CORRECT_OPTION,
   resolvePrediction,
@@ -791,6 +792,24 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
     const fixtureId = parseInt(match.externalId);
     if (isNaN(fixtureId)) continue;
 
+    // Punter Card midnight trigger — opens at start-of-match-day, expires at match start.
+    // ensurePunterCard is idempotent; it no-ops once the full card exists and
+    // only backfills the 3 player-pool questions once lineup data becomes available.
+    if (match.status === "upcoming" && match.startTime) {
+      const opensAt = punterOpensAt(match).getTime();
+      const startAt = new Date(match.startTime).getTime();
+      if (Date.now() >= opensAt && Date.now() < startAt) {
+        try {
+          const res = await ensurePunterCard(match);
+          if (res.created > 0) {
+            console.log(`[PunterCard] Generated ${res.created} questions for ${match.team1Short} vs ${match.team2Short}`);
+          }
+        } catch (err) {
+          console.error("[PunterCard] ensure error:", err);
+        }
+      }
+    }
+
     // Initialize lastProcessedOver from DB state on first encounter (survives server restarts)
     if (!lastProcessedOver.has(match.id) && match.status === "live") {
       lastProcessedOver.set(match.id, await getTrackingSeed(match));
@@ -850,6 +869,38 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
                 team2Players: team2Lineup.length > 0 ? team2Lineup : match.team2Players,
               });
               console.log(`[Sportsmonk] Lineup fetched: ${team1Lineup.length} + ${team2Lineup.length} players`);
+
+              // Backfill player-level pre-match questions if they weren't created at import time
+              // (happens whenever a match was imported before Sportsmonk published the Playing XI)
+              try {
+                const existingPlayerQs = await Prediction.count({
+                  where: {
+                    matchId: match.id,
+                    category: "pre_match",
+                    question: {
+                      [Op.in]: [
+                        "Who will be tonight's top scorer?",
+                        "Who will take the most wickets tonight?",
+                        "Man of the Match — who takes the award?",
+                      ],
+                    },
+                  },
+                });
+                if (existingPlayerQs === 0 && match.startTime) {
+                  const t1 = team1Lineup.length > 0 ? team1Lineup : (match.team1Players || []);
+                  const t2 = team2Lineup.length > 0 ? team2Lineup : (match.team2Players || []);
+                  const playerQs = generatePlayerPreMatchQuestions(match.id, t1, t2);
+                  const opensAt = new Date(new Date(match.startTime).getTime() - 45 * 60_000);
+                  for (const q of playerQs) {
+                    await Prediction.create({ ...q, opensAt } as any);
+                  }
+                  if (playerQs.length > 0) {
+                    console.log(`[Sportsmonk] Generated ${playerQs.length} player pre-match questions at toss`);
+                  }
+                }
+              } catch (err) {
+                console.error("[Sportsmonk] Player pre-match backfill error:", err);
+              }
             }
           }
         } catch (err) {
@@ -1219,9 +1270,14 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           }
         }
 
-        // Generate next over's predictions (to be answered during current over)
+        // Generate next over's predictions, but only AFTER ball 3 of the live
+        // over has been bowled. This gives users time to follow the current
+        // over before being asked about the next one. Sportsmonk's `overs`
+        // decimal is "balls bowled into the in-progress over" (0.3 = 3 balls
+        // into Over 1, 1.3 = 3 balls into Over 2). We trigger on ≥ 3.
+        const legalBallsInCurrentOver = Math.round((nowOvers - Math.floor(nowOvers)) * 10);
         const nextOverNum = currentOver + 1;
-        if (nextOverNum <= (match.totalOvers || 20)) {
+        if (legalBallsInCurrentOver >= 3 && nextOverNum <= (match.totalOvers || 20)) {
           const nextOverRound = getCurrentRound(currentInnings, nextOverNum, match.totalOvers);
           const existingNextPreds = await Prediction.findAll({
             where: { matchId: match.id, overNumber: nextOverNum, round: nextOverRound, category: "per_over" },
@@ -1232,7 +1288,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
               await Prediction.create(p as any);
             }
             io.to(`match:${match.id}`).emit("newPrediction", { matchId: match.id, type: "per_over", overNumber: nextOverNum, round: nextOverRound });
-            console.log(`[Sportsmonk] Generated over ${nextOverNum} predictions (during over ${currentOver})`);
+            console.log(`[Sportsmonk] Generated over ${nextOverNum} predictions (over ${currentOver} at ball ${legalBallsInCurrentOver})`);
           }
         }
       }
@@ -1287,6 +1343,14 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           await resolveRemainingPredictionsAtMatchEnd(match, fixture, runs, allBalls, io);
         } catch (resolveErr) {
           console.error("[Sportsmonk] Error resolving pre-match predictions:", resolveErr);
+        }
+
+        // === Resolve Punter Card questions ===
+        try {
+          const r = await resolvePunterCard(match.id);
+          if (r.resolved > 0) console.log(`[PunterCard] Resolved ${r.resolved} questions for ${match.id}`);
+        } catch (err) {
+          console.error("[PunterCard] resolve error:", err);
         }
 
         // Generate final rewards
@@ -1638,20 +1702,26 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
               // Top scorer: sum all runs per batsman in the current innings
               const currentInn = currentInnings === 1 ? "S1" : "S2";
               const batsmanRunTotals: Record<string, number> = {};
+              const dismissedSet = new Set<string>();
               for (const b of balls) {
                 if (b.scoreboard !== currentInn) continue;
                 const name = b.batsman?.fullname;
                 if (name) batsmanRunTotals[name] = (batsmanRunTotals[name] || 0) + (b.score?.runs || 0);
+                // Track every batsman dismissed this innings so we don't base
+                // hot-takes on someone who's already out
+                if ((b.score?.is_wicket || b.batsmanout_id) && name) dismissedSet.add(name);
               }
               let topScorerName: string | undefined;
               let topScorerRuns = 0;
               for (const [name, r] of Object.entries(batsmanRunTotals)) {
+                if (dismissedSet.has(name)) continue;
                 if (r > topScorerRuns) { topScorerRuns = r; topScorerName = name; }
               }
-              // Current batsmen at crease: from the latest over's stats
+              // Current batsmen at crease: from the latest over's stats (excluding any dismissed mid-over)
+              const stillBatting = Object.keys(overStats.batsmanStats).filter(n => !dismissedSet.has(n));
               const currentBatsmen: [string, string] | undefined =
-                Object.keys(overStats.batsmanStats).length >= 2
-                  ? [Object.keys(overStats.batsmanStats)[0], Object.keys(overStats.batsmanStats)[1]]
+                stillBatting.length >= 2
+                  ? [stillBatting[0], stillBatting[1]]
                   : undefined;
               const playerHotTake = generatePlayerHotTake(match.id, newRound, {
                 team1Players: match.team1Players,
@@ -1665,45 +1735,11 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
             }
           }
 
-          // Generate predictions TWO overs ahead (to be answered during the next over)
-          const twoAhead = currentOver + 1;
-          const twoAheadRound = getCurrentRound(currentInnings, twoAhead, match.totalOvers);
-          if (twoAhead <= (match.totalOvers || 20)) {
-            // Check if innings can continue (not all-out or target already chased)
-            const currentInningsRuns = runs.find((r: any) => r.inning === currentInnings);
-            const isAllOut = currentInningsRuns && currentInningsRuns.wickets >= 10;
-            const inn1Data = liveScore.innings1 as any;
-            const targetChased = currentInnings === 2 && currentInningsRuns && inn1Data &&
-              currentInningsRuns.score >= (inn1Data.score + 1);
-
-            if (!isAllOut && !targetChased) {
-              const nextBatsman = overStats.currentBatsman;
-              const nextBowler = overStats.currentBowler;
-
-              // Deduplication: check if predictions for this over+round already exist
-              const existingPreds = await Prediction.findAll({
-                where: { matchId: match.id, overNumber: twoAhead, round: twoAheadRound, category: "per_over" },
-              });
-
-              if (existingPreds.length === 0) {
-                const newPreds = generatePerOverPredictions(match.id, twoAhead, twoAheadRound, nextBatsman, nextBowler);
-                for (const p of newPreds) {
-                  await Prediction.create(p as any);
-                }
-                io.to(`match:${match.id}`).emit("newPrediction", {
-                  matchId: match.id,
-                  type: "per_over",
-                  overNumber: twoAhead,
-                  round: twoAheadRound,
-                });
-                console.log(`[Sportsmonk] Over ${twoAhead} predictions generated (2 ahead)`);
-              } else {
-                console.log(`[Sportsmonk] Over ${twoAhead} predictions already exist — skipping`);
-              }
-            } else {
-              console.log(`[Sportsmonk] Innings cannot continue (allOut=${!!isAllOut}, targetChased=${!!targetChased}) — skipping prediction generation`);
-            }
-          }
+          // Per-over generation for the NEXT over now happens mid-over via the
+          // ball-bowled trigger above (gated on legalBallsInCurrentOver >= 3).
+          // The old end-of-over "two-ahead" path fired too early — right at
+          // the over transition — which contradicted the product rule that
+          // users shouldn't see Over N+1 until 3 balls into Over N.
         }
       } catch (overErr) {
         console.error(`[Sportsmonk] Error processing over change for ${match.team1Short} vs ${match.team2Short}:`, overErr);

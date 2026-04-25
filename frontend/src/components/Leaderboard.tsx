@@ -26,12 +26,15 @@ export default function Leaderboard({ matchId, venueId }: LeaderboardProps) {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"round" | "match">("round");
-  const [selectedRound, setSelectedRound] = useState(currentRound || 1);
+  // selectedRound values 1–6 are per-round; "extras" is the punter-card +
+  // pre-match combined sub-view that sits alongside the round pills.
+  const [selectedRound, setSelectedRound] = useState<number | "extras">(currentRound || 1);
 
-  // Sync selectedRound when currentRound changes
+  // Sync selectedRound when currentRound changes — but don't clobber the user's
+  // explicit "extras" selection when the round ticks over in the background.
   useEffect(() => {
     if (currentRound && currentRound > 0) {
-      setSelectedRound(currentRound);
+      setSelectedRound((prev) => (prev === "extras" ? "extras" : currentRound));
     }
   }, [currentRound]);
 
@@ -43,8 +46,13 @@ export default function Leaderboard({ matchId, venueId }: LeaderboardProps) {
     setLoading(true);
     try {
       if (activeTab === "round") {
-        const result = await api.getRoundLeaderboard(matchId, venueId, selectedRound);
-        setData(result.leaderboard || []);
+        if (selectedRound === "extras") {
+          const result = await api.getExtrasLeaderboard(matchId, venueId);
+          setData(result.leaderboard || []);
+        } else {
+          const result = await api.getRoundLeaderboard(matchId, venueId, selectedRound);
+          setData(result.leaderboard || []);
+        }
       } else {
         const result = await api.getMatchLeaderboard(matchId, venueId);
         setData(result.leaderboard || []);
@@ -73,7 +81,7 @@ export default function Leaderboard({ matchId, venueId }: LeaderboardProps) {
           onClick={() => setActiveTab("round")}
           className={tabClass(activeTab === "round")}
         >
-          Round {selectedRound}
+          {selectedRound === "extras" ? "Extras" : `Round ${selectedRound}`}
         </button>
         <button
           onClick={() => setActiveTab("match")}
@@ -83,8 +91,9 @@ export default function Leaderboard({ matchId, venueId }: LeaderboardProps) {
         </button>
       </div>
 
-      {/* Round selector — only visible when "round" tab is active and there are past rounds */}
-      {activeTab === "round" && roundNumbers.length > 1 && (
+      {/* Round selector — pills for each round + an "Extras" pill that
+          shows punter-card + pre-match points combined. */}
+      {activeTab === "round" && (
         <div className="flex gap-2 overflow-x-auto pb-1">
           {roundNumbers.map((r) => (
             <button
@@ -99,6 +108,17 @@ export default function Leaderboard({ matchId, venueId }: LeaderboardProps) {
               {ROUND_LABELS[r] || `R${r}`}
             </button>
           ))}
+          <button
+            onClick={() => setSelectedRound("extras")}
+            className={`px-3 py-1.5 text-xs font-black uppercase tracking-wider rounded-[3px] border-2 transition-all whitespace-nowrap ${
+              selectedRound === "extras"
+                ? "bg-[#3b9eff] text-black border-black shadow-[2px_2px_0_0_#000]"
+                : "bg-[#1a1a1a] text-white/50 border-[#2a2a2a]"
+            }`}
+            title="Punter Card + Pre-match picks combined"
+          >
+            Extras
+          </button>
         </div>
       )}
 
@@ -149,7 +169,7 @@ export default function Leaderboard({ matchId, venueId }: LeaderboardProps) {
                   {rank}
                 </div>
 
-                {/* Player name */}
+                {/* Player name + (extras) breakdown */}
                 <div className="flex-1 min-w-0">
                   <span
                     className={`player-name truncate block ${
@@ -159,6 +179,11 @@ export default function Leaderboard({ matchId, venueId }: LeaderboardProps) {
                     {player.displayName}
                     {isMe && " (You)"}
                   </span>
+                  {activeTab === "round" && selectedRound === "extras" && player.breakdown && (
+                    <span className="text-[10px] text-white/45 font-bold uppercase tracking-wider">
+                      Punter {player.breakdown.punterCard} · Pre-match {player.breakdown.preMatch}
+                    </span>
+                  )}
                 </div>
 
                 {/* Points */}

@@ -5,6 +5,7 @@ import { authenticateUser, AuthRequest } from "../middleware/auth";
 import { fetchUpcomingFixtures, fetchSportsmonkLiveScores, fetchTeamData } from "../services/sportsmonkApi";
 import { generatePreMatchPredictions, getCurrentRound } from "../services/predictionEngine";
 import { buildStory } from "../services/storyBuilder";
+import { parsePagination, paginationMeta } from "../utils/pagination";
 
 const router = Router();
 
@@ -189,6 +190,66 @@ router.post("/import/:fixtureId", async (req: Request, res: Response): Promise<v
   } catch (error) {
     console.error("Auto-import fixture error:", error);
     res.status(500).json({ error: "Failed to import fixture" });
+  }
+});
+
+// User's past matches — every completed match the user joined, across all
+// venues. Used for audit-trail / support screenshots (leaderboard + rewards).
+// Must be declared BEFORE "/:matchId" so Express matches the literal path.
+router.get("/my-past", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.userId!;
+    const p = parsePagination(req, { defaultPageSize: 10, maxPageSize: 50 });
+
+    // Pull this user's participant rows, include the Match only if it's completed.
+    // findAndCountAll's `distinct: true` is needed because the include can fan out.
+    const { count, rows } = await MatchParticipant.findAndCountAll({
+      where: { userId },
+      include: [
+        {
+          model: Match,
+          as: "match",
+          required: true,
+          where: { status: "completed" },
+        },
+        {
+          model: Venue,
+          as: "venue",
+          attributes: ["id", "name", "slug"],
+        },
+      ],
+      order: [[{ model: Match, as: "match" }, "startTime", "DESC"]],
+      limit: p.limit,
+      offset: p.offset,
+      distinct: true,
+    });
+
+    const matches = rows.map((r: any) => ({
+      matchId: r.matchId,
+      venueId: r.venueId,
+      venueName: r.venue?.name || null,
+      venueSlug: r.venue?.slug || null,
+      team1Short: r.match?.team1Short || null,
+      team2Short: r.match?.team2Short || null,
+      team1: r.match?.team1 || null,
+      team2: r.match?.team2 || null,
+      startTime: r.match?.startTime || null,
+      status: r.match?.status || "completed",
+      // Enough to render a summary row. The detail page fetches the full
+      // scoreData + leaderboard + rewards via existing endpoints.
+      scoreData: r.match?.scoreData || {},
+      myStats: {
+        totalPoints: r.totalPoints || 0,
+        correctPredictions: r.correctPredictions || 0,
+        totalPredictions: r.totalPredictions || 0,
+        bestStreak: r.bestStreak || 0,
+      },
+    }));
+
+    res.json({ matches, ...paginationMeta(p, count) });
+  } catch (error) {
+    console.error("Get my past matches error:", error);
+    res.status(500).json({ error: "Failed to get past matches" });
   }
 });
 

@@ -10,11 +10,31 @@ import {
   generateRivalryCalls,
   getCurrentRound,
 } from "../services/predictionEngine";
-import { resolvePrediction, generateRoundRewards } from "../services/pointsEngine";
+import { resolvePrediction, generateRoundRewards, recomputeParticipantScores } from "../services/pointsEngine";
 import { fetchTodayFixtures, fetchSportsmonkLiveScores, resolveOverPredictionFromStats } from "../services/sportsmonkApi";
 import { overStatsToContext } from "../services/feedback";
 
 const router = Router();
+
+// Rebuild MatchParticipant.totalPoints + round{N}Points from the UserPrediction
+// history for a match (or match + venue). Use this to repair leaderboards
+// after fixing an accounting bug or after any drift between totalPoints and
+// the round columns. Safe/idempotent — reads the resolved-answer history
+// and overwrites the cached totals.
+router.post("/recompute-scores", authenticateOwner, async (req: any, res: Response): Promise<void> => {
+  try {
+    const { matchId, venueId, userId } = req.body as { matchId?: string; venueId?: string; userId?: string };
+    if (!matchId && !venueId && !userId) {
+      res.status(400).json({ error: "Provide at least one of matchId / venueId / userId" });
+      return;
+    }
+    const summary = await recomputeParticipantScores({ matchId, venueId, userId });
+    res.json(summary);
+  } catch (error) {
+    console.error("Recompute scores error:", error);
+    res.status(500).json({ error: "Failed to recompute scores" });
+  }
+});
 
 // Create a match (admin/dev endpoint)
 router.post("/match", authenticateOwner, async (req: any, res: Response): Promise<void> => {

@@ -25,6 +25,10 @@ interface GameState {
   boostsUsedThisRound: number;
   boostsUsedRound: number;
   allInUsed: boolean;
+  // Per-innings all-in flags (innings 1 = rounds 1-3, innings 2 = rounds 4-6).
+  // Product rule: one 3x all-in allowed per innings (not per match).
+  allInUsedInnings1: boolean;
+  allInUsedInnings2: boolean;
   currentStreak: number;
   bestStreak: number;
   totalPoints: number;
@@ -43,7 +47,7 @@ type GameAction =
   | { type: "CLEAR_MATCH" }
   | { type: "UPDATE_PARTICIPANT"; data: Partial<GameState> }
   | { type: "USE_BOOST" }
-  | { type: "USE_ALL_IN" }
+  | { type: "USE_ALL_IN"; innings?: 1 | 2 }
   | { type: "UPDATE_STREAK"; streak: number }
   | { type: "ADD_POINTS"; points: number; round: number }
   | { type: "SET_ROUND"; round: number }
@@ -68,6 +72,8 @@ const initialState: GameState = {
   boostsUsedThisRound: 0,
   boostsUsedRound: 0,
   allInUsed: false,
+  allInUsedInnings1: false,
+  allInUsedInnings2: false,
   currentStreak: 0,
   bestStreak: 0,
   totalPoints: 0,
@@ -103,8 +109,16 @@ function gameReducer(state: GameState, action: GameAction): GameState {
       return { ...state, ...action.data };
     case "USE_BOOST":
       return { ...state, boostsUsedThisRound: state.boostsUsedThisRound + 1, boostsUsedRound: state.boostsUsedRound + 1 };
-    case "USE_ALL_IN":
-      return { ...state, allInUsed: true };
+    case "USE_ALL_IN": {
+      // Optimistic update: set the innings-specific flag. Backend confirms
+      // via the next /state fetch. If innings isn't passed, we mark BOTH
+      // innings true to be safe — backend is authoritative regardless.
+      const patch: Partial<GameState> = { allInUsed: true };
+      if (action.innings === 1) patch.allInUsedInnings1 = true;
+      else if (action.innings === 2) patch.allInUsedInnings2 = true;
+      else { patch.allInUsedInnings1 = true; patch.allInUsedInnings2 = true; }
+      return { ...state, ...patch };
+    }
     case "UPDATE_STREAK":
       return { ...state, currentStreak: action.streak, bestStreak: Math.max(state.bestStreak, action.streak) };
     case "ADD_POINTS":

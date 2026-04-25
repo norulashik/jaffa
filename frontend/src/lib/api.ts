@@ -100,9 +100,44 @@ export const api = {
       beats: Array<{ type: string; title: string; detail: string; data?: any }>;
     }>(`/matches/${matchId}/my-story?venueId=${venueId}`),
 
+  // Past matches the logged-in user participated in (completed only). Paginated.
+  getMyPastMatches: (page: number = 1, pageSize: number = 10) =>
+    request<{
+      matches: Array<{
+        matchId: string;
+        venueId: string;
+        venueName: string | null;
+        venueSlug: string | null;
+        team1Short: string | null;
+        team2Short: string | null;
+        team1: string | null;
+        team2: string | null;
+        startTime: string | null;
+        status: string;
+        scoreData: any;
+        myStats: { totalPoints: number; correctPredictions: number; totalPredictions: number; bestStreak: number };
+      }>;
+      page: number;
+      pageSize: number;
+      totalCount: number;
+      totalPages: number;
+    }>(`/matches/my-past?page=${page}&pageSize=${pageSize}`),
+
   // Leaderboard
   getRoundLeaderboard: (matchId: string, venueId: string, round: number) =>
     request<{ round: number; leaderboard: any[] }>(`/leaderboard/${matchId}/${venueId}/round/${round}`),
+
+  getExtrasLeaderboard: (matchId: string, venueId: string) =>
+    request<{
+      leaderboard: Array<{
+        rank: number;
+        userId: string;
+        displayName: string;
+        avatarConfig: any;
+        points: number;
+        breakdown: { punterCard: number; preMatch: number };
+      }>;
+    }>(`/leaderboard/${matchId}/${venueId}/extras`),
 
   getMatchLeaderboard: (matchId: string, venueId: string) =>
     request<{ leaderboard: any[] }>(`/leaderboard/${matchId}/${venueId}/match`),
@@ -185,6 +220,70 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ rewardKey }),
     }),
+
+  // Punter Card
+  getPunterCard: (matchId: string, venueId?: string) =>
+    request<{
+      matchId: string;
+      match: {
+        team1: string | null;
+        team2: string | null;
+        team1Short: string | null;
+        team2Short: string | null;
+        startTime: string | null;
+        status: string;
+      };
+      questions: Array<{
+        id: string;
+        templateKey: string;
+        question: string;
+        options: { key: string; label: string; points: number }[];
+        opensAt?: string | null;
+        expiresAt?: string | null;
+        status: string;
+        correctOption?: string | null;
+        userAnswer: {
+          selectedOption: string;
+          pointsEarned: number;
+          isCorrect: boolean | null;
+        } | null;
+      }>;
+      allAnswered: boolean;
+    }>(`/punter-card/${matchId}${venueId ? `?venueId=${venueId}` : ""}`),
+
+  submitPunterCard: (
+    matchId: string,
+    venueId: string,
+    answers: { predictionId: string; selectedOption: string }[]
+  ) =>
+    request<{ saved: number }>(`/punter-card/${matchId}/answer`, {
+      method: "POST",
+      body: JSON.stringify({ venueId, answers }),
+    }),
+
+  getMyPunterCards: () =>
+    request<{
+      cards: Array<{
+        matchId: string;
+        team1: string | null;
+        team2: string | null;
+        team1Short: string | null;
+        team2Short: string | null;
+        startTime: string | null;
+        status: string | null;
+        answers: Array<{
+          id: string;
+          predictionId: string;
+          selectedOption: string;
+          pointsEarned: number;
+          isCorrect: boolean | null;
+        }>;
+        correctCount: number;
+        resolvedCount: number;
+        totalCount: number;
+        totalPoints: number;
+      }>;
+    }>("/punter-card/my/cards"),
 
   // Global Leaderboard
   getGlobalLeaderboard: (scope: "city" | "state" | "all") =>

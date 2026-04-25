@@ -34,6 +34,12 @@ export default function HomeLiveMatches() {
   const [loading, setLoading] = useState(true);
   const [myRooms, setMyRooms] = useState<any[]>([]);
   const [roomsLoading, setRoomsLoading] = useState(false);
+  // Past matches the user participated in (completed). Used for audit-trail /
+  // screenshot support for customer queries.
+  const [pastMatches, setPastMatches] = useState<Awaited<ReturnType<typeof api.getMyPastMatches>>["matches"]>([]);
+  const [pastLoading, setPastLoading] = useState(false);
+  const [pastHasMore, setPastHasMore] = useState(false);
+  const [pastPage, setPastPage] = useState(1);
 
   // Match code modal state
   const [codeModal, setCodeModal] = useState<{ match: Match; code: string; error: string; validating: boolean } | null>(null);
@@ -46,7 +52,22 @@ export default function HomeLiveMatches() {
     }
     loadMatches();
     loadMyRooms();
+    loadPastMatches(1);
   }, []);
+
+  const loadPastMatches = async (page: number) => {
+    setPastLoading(true);
+    try {
+      const data = await api.getMyPastMatches(page, 10);
+      setPastMatches((prev) => (page === 1 ? data.matches : [...prev, ...data.matches]));
+      setPastHasMore(page < data.totalPages);
+      setPastPage(page);
+    } catch {
+      // Silently fail; list just stays empty.
+    } finally {
+      setPastLoading(false);
+    }
+  };
 
   const loadMatches = async () => {
     try {
@@ -490,22 +511,126 @@ export default function HomeLiveMatches() {
                   </div>
                 )
               ) : (
-                <div className="space-y-2">
-                  <button
-                    className="w-full btn-gray uppercase tracking-widest text-xs font-bold py-2.5 cursor-not-allowed opacity-60"
-                    disabled
-                    title="Match reminders are not enabled yet"
-                  >
-                    NOTIFY ME SOON
-                  </button>
-                  <p className="text-[10px] text-white/35 uppercase tracking-wider text-center">
-                    Match reminders are coming soon. Join from the lobby when the match goes live.
-                  </p>
-                </div>
+                (() => {
+                  // Punter Card opens at midnight on match day; before that,
+                  // keep the "notify me" placeholder. Card is only available
+                  // for imported matches (real UUIDs, not sportsmonk_ stubs).
+                  const storedVenueId = typeof window !== "undefined" ? (localStorage.getItem("jaffa_venue_id") || "") : "";
+                  const isImported = !match.id.startsWith("sportsmonk_");
+                  const startDateObj = match.startTime ? new Date(match.startTime) : null;
+                  const cardOpensAt = startDateObj ? new Date(startDateObj.getFullYear(), startDateObj.getMonth(), startDateObj.getDate()) : null;
+                  const cardOpen = isImported && !!cardOpensAt && now >= cardOpensAt.getTime();
+                  if (cardOpen) {
+                    return (
+                      <div className="space-y-2">
+                        <button
+                          onClick={() => router.push(`/punter-card/${match.id}${storedVenueId ? `?venueId=${storedVenueId}` : ""}`)}
+                          className="w-full btn-sticker uppercase tracking-tight"
+                          style={{ background: "#1a1a1a", color: "#fff", border: "2px solid #3b9eff" }}
+                        >
+                          OPEN PUNTER CARD
+                        </button>
+                        <p className="text-[10px] text-white/40 uppercase tracking-wider text-center">
+                          10 pre-match picks · points count toward the match leaderboard
+                        </p>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="space-y-2">
+                      <button
+                        className="w-full btn-gray uppercase tracking-widest text-xs font-bold py-2.5 cursor-not-allowed opacity-60"
+                        disabled
+                        title="Punter Card opens at 12 AM on match day"
+                      >
+                        PUNTER CARD OPENS AT 12 AM
+                      </button>
+                      <p className="text-[10px] text-white/35 uppercase tracking-wider text-center">
+                        10 pre-match picks unlock on match day
+                      </p>
+                    </div>
+                  );
+                })()
               )}
             </motion.div>
           );
         })}
+
+        {/* Past Battles — completed matches the user participated in. Clicking
+            a row opens /history/<matchId> which shows final leaderboard +
+            rewards so the user can screenshot for customer support. */}
+        {(pastMatches.length > 0 || pastLoading) && (
+          <>
+            <h3
+              className="text-lg font-bold text-white mt-8 mb-4 pl-3 uppercase"
+              style={{
+                fontFamily: "'Bungee', 'Impact', cursive",
+                borderLeft: "4px solid #6b7280",
+              }}
+            >
+              PAST BATTLES
+            </h3>
+            <div className="space-y-2">
+              {pastMatches.map((pm) => {
+                const dt = pm.startTime ? new Date(pm.startTime) : null;
+                const dateStr = dt
+                  ? dt.toLocaleDateString("en-IN", { day: "numeric", month: "short" })
+                  : "";
+                const acc = pm.myStats.totalPredictions > 0
+                  ? Math.round((pm.myStats.correctPredictions / pm.myStats.totalPredictions) * 100)
+                  : 0;
+                return (
+                  <button
+                    key={pm.matchId + ":" + pm.venueId}
+                    onClick={() => router.push(`/history/${pm.matchId}?venueId=${pm.venueId}`)}
+                    className="w-full game-card text-left hover:border-[#ff6341] transition-colors"
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <span
+                        className="text-sm font-bold text-white uppercase"
+                        style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                      >
+                        {pm.team1Short || "T1"} vs {pm.team2Short || "T2"}
+                      </span>
+                      <span className="info-pill text-[10px]">{dateStr}</span>
+                    </div>
+                    {pm.venueName && (
+                      <div className="text-[10px] text-[#6b7280] uppercase tracking-wider mb-2">
+                        {pm.venueName}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-3 text-xs text-[#9ca3af]">
+                      <span>
+                        <span className="text-[#ffd60a] font-bold">{pm.myStats.totalPoints}</span> pts
+                      </span>
+                      <span>·</span>
+                      <span>
+                        {pm.myStats.correctPredictions}/{pm.myStats.totalPredictions} correct
+                      </span>
+                      <span>·</span>
+                      <span>{acc}%</span>
+                      <span className="ml-auto text-[#6b7280]">›</span>
+                    </div>
+                  </button>
+                );
+              })}
+              {pastLoading && (
+                <div className="flex justify-center py-3">
+                  <Loader2 size={18} className="animate-spin text-[#6b7280]" />
+                </div>
+              )}
+              {!pastLoading && pastHasMore && (
+                <button
+                  onClick={() => loadPastMatches(pastPage + 1)}
+                  className="w-full btn-sticker py-2 text-xs uppercase tracking-widest font-bold"
+                  style={{ background: "#1a1a1a", color: "#fff", border: "2px solid #333" }}
+                >
+                  Load more
+                </button>
+              )}
+            </div>
+          </>
+        )}
       </main>
 
       {/* Match Code Modal */}
