@@ -273,6 +273,69 @@ function extractInnings(scoreboard: string): number {
   return 0; // super over / unknown
 }
 
+/**
+ * Pure resolver for a single live-player prediction. Returns the bucketed
+ * correctOption it WOULD stamp, or null when the prediction can't be resolved
+ * from the supplied balls (wrong category, wrong subjectType, no innings/
+ * playerId metadata, no balls for that player).
+ *
+ * Stays mutation-free so callers can probe answers without touching DB rows.
+ * Used by the at-match-end fallback in sportsmonkApi (catches questions the
+ * live poll missed) and by reResolveMatch's delta evaluator.
+ */
+export function computeLivePlayerCorrectOption(
+  pred: Prediction,
+  allBalls: any[]
+): string | null {
+  if (pred.category !== "per_over") return null;
+  const subj = (pred as any).subjectType as string | undefined;
+  if (!subj) return null;
+  const playerId = (pred as any).playerId as number | undefined;
+  const inningsNumber = (pred as any).inningsNumber as number | undefined;
+  if (!playerId || !inningsNumber) return null;
+
+  const inningsScoreboard = inningsNumber === 1 ? "S1" : inningsNumber === 2 ? "S2" : null;
+  if (!inningsScoreboard) return null;
+
+  const inningsBalls = allBalls.filter((b: any) => b.scoreboard === inningsScoreboard) as Ball[];
+  if (inningsBalls.length === 0) return null;
+
+  if (subj === "batsman_innings") {
+    const ballsForBatter = inningsBalls.filter((b) => b.batsman_id === playerId);
+    if (ballsForBatter.length === 0) return null;
+    const runs = ballsForBatter.reduce((s, b) => s + batsmanRunsOnBall(b), 0);
+    return bucket(runs, batsmanBandsForPred(pred));
+  }
+
+  if (subj === "batsman_sixes") {
+    const ballsForBatter = inningsBalls.filter((b) => b.batsman_id === playerId);
+    if (ballsForBatter.length === 0) return null;
+    const sixes = ballsForBatter.filter((b) => !!b.score?.six).length;
+    return bucket(sixes, batsmanSixesBandsForPred(pred));
+  }
+
+  if (subj === "bowler_innings") {
+    const ballsForBowler = inningsBalls.filter((b) => b.bowler_id === playerId);
+    if (ballsForBowler.length === 0) return null;
+    const runs = ballsForBowler.reduce((s, b) => s + bowlerRunsOnBall(b), 0);
+    return bucket(runs, BOWLER_BANDS);
+  }
+
+  if (subj === "bowler_innings_wkts") {
+    const ballsForBowler = inningsBalls.filter((b) => b.bowler_id === playerId);
+    if (ballsForBowler.length === 0) return null;
+    const wickets = ballsForBowler.filter((b) => {
+      if (!b.score?.is_wicket) return false;
+      const name = (b.score?.name || "").toLowerCase();
+      if (name.includes("run out")) return false;
+      return true;
+    }).length;
+    return bucket(wickets, BOWLER_WICKETS_BANDS);
+  }
+
+  return null;
+}
+
 export interface LivePlayerProcessResult {
   generated: number;
   locked: number;

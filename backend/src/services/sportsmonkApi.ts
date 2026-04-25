@@ -2,6 +2,7 @@ import { Op } from "sequelize";
 import { Match, Prediction, MatchParticipant } from "../models";
 import { generatePerOverPredictions, generateHotTake, generatePlayerHotTake, generateRivalryCalls, getCurrentRound, generatePlayerPreMatchQuestions, generatePreMatchPredictions } from "./predictionEngine";
 import { ensurePunterCard, punterOpensAt, resolvePunterCard, resolvePunterCardEarly, computeCorrectFromBalls } from "./punterCard";
+import { computeLivePlayerCorrectOption } from "./livePlayerTracker";
 import {
   ALL_CORRECT_OPTION,
   resolvePrediction,
@@ -597,6 +598,27 @@ export async function resolveRemainingPredictionsAtMatchEnd(
       await resolvePrediction(pred, correctOption, io);
     }
   }
+
+  // Live-player innings questions (per_over rows with subjectType set) are
+  // normally resolved by livePlayerTracker on innings-end during the live
+  // poll. If the poll missed the window — match ended between ticks, the
+  // bowler/batter never appeared in a generated bowled-balls map, status
+  // jumped straight to Finished — they stay PENDING forever. Walk them
+  // here as a final safety net.
+  const livePlayerOpen = await Prediction.findAll({
+    where: {
+      matchId: match.id,
+      category: "per_over",
+      subjectType: { [Op.in]: ["batsman_innings", "bowler_innings", "bowler_innings_wkts", "batsman_sixes"] },
+      status: ["open", "locked"],
+    },
+  });
+  for (const pred of livePlayerOpen) {
+    const correctOption = computeLivePlayerCorrectOption(pred, allBalls);
+    if (correctOption) {
+      await resolvePrediction(pred, correctOption, io);
+    }
+  }
 }
 
 // Fetch live scores
@@ -1023,6 +1045,12 @@ function computeCorrectOptionForPrediction(
     case "rivalry_call":
       return resolveEndOfMatchPrediction(prediction, fixture, match, runs, allBalls);
     case "per_over": {
+      // Live-player innings questions (batsman_innings / bowler_innings /
+      // bowler_innings_wkts / batsman_sixes) live under per_over but are
+      // keyed by playerId, not over number. They have their own resolver.
+      if ((prediction as any).subjectType) {
+        return computeLivePlayerCorrectOption(prediction, allBalls);
+      }
       if (!prediction.overNumber) return null;
       const innings = getPredictionInnings(prediction);
       const inningsStr = innings === 1 ? "S1" : "S2";
