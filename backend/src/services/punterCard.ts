@@ -386,6 +386,64 @@ export function punterOpensAt(match: Match): Date {
 // Resolve all 10 punter-card questions for a finished match. Reads
 // match.scoreData / final scorecard to pick correct options. Idempotent —
 // skips already-resolved rows.
+// Early-resolver: resolve only the templateKeys whose answer is known at the
+// caller's current moment. The match-end `resolvePunterCard` later picks up
+// whatever's still unresolved. Each call is idempotent — already-resolved
+// rows are skipped via the status filter.
+//
+// Usage:
+//   - At toss detection:   { tossWinnerShort: "RR" }
+//   - At innings break:    { inn1AnyHit50, inn1AnyHit100 } (boolean each)
+export async function resolvePunterCardEarly(
+  matchId: string,
+  opts: {
+    tossWinnerShort?: string | null;
+    inn1AnyHit50?: boolean | null;
+    inn1AnyHit100?: boolean | null;
+  }
+): Promise<{ resolved: number }> {
+  const match = await Match.findByPk(matchId);
+  if (!match) return { resolved: 0 };
+
+  // Build a map of (templateKey → correctOption) for the templates we can
+  // answer right now. Anything not in the map is left for the next caller.
+  const correctByTemplate = new Map<PunterTemplate, string>();
+
+  if (opts.tossWinnerShort) {
+    if (opts.tossWinnerShort === match.team1Short) correctByTemplate.set("punter_toss_winner", "team1");
+    else if (opts.tossWinnerShort === match.team2Short) correctByTemplate.set("punter_toss_winner", "team2");
+  }
+  if (opts.inn1AnyHit50 != null) {
+    correctByTemplate.set("punter_inn1_50", opts.inn1AnyHit50 ? "yes" : "no");
+  }
+  if (opts.inn1AnyHit100 != null) {
+    correctByTemplate.set("punter_inn1_100", opts.inn1AnyHit100 ? "yes" : "no");
+  }
+
+  if (correctByTemplate.size === 0) return { resolved: 0 };
+
+  const cards = await Prediction.findAll({
+    where: {
+      matchId,
+      category: "punter_card",
+      status: { [Op.ne]: "resolved" },
+      templateKey: { [Op.in]: Array.from(correctByTemplate.keys()) },
+    },
+  });
+
+  let resolved = 0;
+  for (const pred of cards) {
+    const tk = (pred as any).templateKey as PunterTemplate | null;
+    if (!tk) continue;
+    const correct = correctByTemplate.get(tk);
+    if (!correct) continue;
+    await pred.update({ correctOption: correct, status: "resolved" });
+    await scorePunterUserAnswers(pred.id, correct, pred.options);
+    resolved += 1;
+  }
+  return { resolved };
+}
+
 export async function resolvePunterCard(matchId: string): Promise<{ resolved: number }> {
   const match = await Match.findByPk(matchId);
   if (!match) return { resolved: 0 };

@@ -1,7 +1,7 @@
 import { Op } from "sequelize";
 import { Match, Prediction, MatchParticipant } from "../models";
 import { generatePerOverPredictions, generateHotTake, generatePlayerHotTake, generateRivalryCalls, getCurrentRound, generatePlayerPreMatchQuestions, generatePreMatchPredictions } from "./predictionEngine";
-import { ensurePunterCard, punterOpensAt, resolvePunterCard } from "./punterCard";
+import { ensurePunterCard, punterOpensAt, resolvePunterCard, resolvePunterCardEarly } from "./punterCard";
 import {
   ALL_CORRECT_OPTION,
   resolvePrediction,
@@ -1087,6 +1087,21 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
         io.to(`match:${match.id}`).emit("tossLocked", { matchId: match.id });
         console.log(`[Sportsmonk] Toss resolved; remaining pre-match questions stay open until first ball`);
 
+        // Punter Card early-resolve: the toss-winner question is answerable now,
+        // ~3.5 hours before the match ends. Players see points + popup
+        // immediately instead of waiting for the final whistle.
+        try {
+          let tossWinnerShort: string | null = null;
+          if (fixture.toss_won_team_id === fixture.localteam_id) tossWinnerShort = match.team1Short;
+          else if (fixture.toss_won_team_id === fixture.visitorteam_id) tossWinnerShort = match.team2Short;
+          if (tossWinnerShort) {
+            const r = await resolvePunterCardEarly(match.id, { tossWinnerShort });
+            if (r.resolved > 0) console.log(`[PunterCard] Early-resolved ${r.resolved} (toss)`);
+          }
+        } catch (err) {
+          console.error("[PunterCard] Toss early-resolve error:", err);
+        }
+
         // If rain delay caused skipped overs, resolve any early-generated predictions for completed overs
         const transitionCompletedLimit = Math.max(actualCurrentOver - 1, 0);
         if (transitionCompletedLimit >= 1) {
@@ -1716,6 +1731,37 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           }
         } catch (err) {
           console.error("[Sportsmonk] Error resolving innings 1 predictions at innings break:", err);
+        }
+
+        // Punter Card early-resolve: at innings break we know whether anyone
+        // hit a 50 or 100 in innings 1. Compute from the inn1 balls we
+        // already pulled above so users see those points rolling in instead
+        // of waiting until match end.
+        try {
+          const runsByBatsman = new Map<string, number>();
+          for (const b of inn1Balls) {
+            const name = b.batsman?.fullname;
+            if (!name) continue;
+            // batsmanRunsOnBall isn't exported here; replicate the simple
+            // inn-totals math: ball.score.runs minus extras.
+            const s = b.score || ({} as any);
+            const extras = Number(s.bye || 0) + Number(s.leg_bye || 0) + Number(s.noball_runs || 0);
+            const batRuns = Math.max(0, Number(s.runs || 0) - extras);
+            runsByBatsman.set(name, (runsByBatsman.get(name) || 0) + batRuns);
+          }
+          let anyHit50 = false;
+          let anyHit100 = false;
+          for (const r of runsByBatsman.values()) {
+            if (r >= 100) { anyHit100 = true; anyHit50 = true; break; }
+            if (r >= 50) anyHit50 = true;
+          }
+          const r = await resolvePunterCardEarly(match.id, {
+            inn1AnyHit50: anyHit50,
+            inn1AnyHit100: anyHit100,
+          });
+          if (r.resolved > 0) console.log(`[PunterCard] Early-resolved ${r.resolved} (innings break)`);
+        } catch (err) {
+          console.error("[PunterCard] Innings-break early-resolve error:", err);
         }
 
         // Update tracking so over-completion block doesn't re-run, AND mark
