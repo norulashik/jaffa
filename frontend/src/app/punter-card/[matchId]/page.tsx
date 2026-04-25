@@ -36,6 +36,35 @@ export default function PunterCardPage() {
   const [allAnswered, setAllAnswered] = useState(false);
   const [sharing, setSharing] = useState(false);
   const shareRef = useRef<HTMLDivElement>(null);
+  // Logo as a data URL so html-to-image's snapshot is guaranteed to include
+  // it. <img src="/jaffa-logo-mark.png"> alone won't reliably appear in the
+  // rasterized JPEG: the image lives in an offscreen DOM subtree, and even
+  // if it's loaded by the browser, the canvas paint can drop it on iOS due
+  // to opaque-canvas rules around CORS-tainted same-origin images. Fetching
+  // the bytes ourselves and inlining as base64 sidesteps both problems.
+  const [logoDataUrl, setLogoDataUrl] = useState<string>("");
+
+  // Preload the brand mark as a data URL once on mount so it's always in
+  // memory by the time the user taps Share.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/jaffa-logo-mark.png");
+        const blob = await res.blob();
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (!cancelled && typeof reader.result === "string") {
+            setLogoDataUrl(reader.result);
+          }
+        };
+        reader.readAsDataURL(blob);
+      } catch {
+        // Leave logoDataUrl empty; ShareCard falls back to plain <img src>.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     const token = typeof window !== "undefined" ? localStorage.getItem("jaffa_token") : null;
@@ -123,6 +152,28 @@ export default function PunterCardPage() {
     if (!shareRef.current || sharing) return;
     setSharing(true);
     try {
+      // Make sure the brand mark is in memory as a data URL before
+      // rasterizing — otherwise the snapshot can land before the <img>
+      // decode finishes and the JAFFA logo silently goes missing.
+      let logo = logoDataUrl;
+      if (!logo) {
+        try {
+          const res = await fetch("/jaffa-logo-mark.png");
+          const blob = await res.blob();
+          logo = await new Promise<string>((resolve, reject) => {
+            const r = new FileReader();
+            r.onloadend = () => typeof r.result === "string" ? resolve(r.result) : reject(new Error("logo read failed"));
+            r.onerror = () => reject(r.error);
+            r.readAsDataURL(blob);
+          });
+          setLogoDataUrl(logo);
+          // Yield a frame so React commits the new src into the offscreen
+          // <img> before html-to-image takes the snapshot.
+          await new Promise((r) => requestAnimationFrame(() => r(null)));
+        } catch {
+          // proceed without the logo rather than blocking the share
+        }
+      }
       // JPEG (not PNG) at pixelRatio 1.5 — keeps the image under ~700KB,
       // which is the practical ceiling for iOS WhatsApp's "Send to" share
       // sheet. Bigger PNGs trigger "This item cannot be shared." Quality
@@ -338,7 +389,7 @@ export default function PunterCardPage() {
           layout tree so html-to-image can rasterize it. 1080×1350 is the
           Instagram story / portrait post size. */}
       <div style={{ position: "fixed", left: -10000, top: 0, pointerEvents: "none" }} aria-hidden>
-        <ShareCard ref={shareRef} match={match} questions={questions} selections={selections} />
+        <ShareCard ref={shareRef} match={match} questions={questions} selections={selections} logoDataUrl={logoDataUrl} />
       </div>
     </main>
   );
@@ -350,7 +401,8 @@ const ShareCard = forwardRef<HTMLDivElement, {
   match: any;
   questions: Question[];
   selections: Record<string, string>;
-}>(function ShareCard({ match, questions, selections }, ref) {
+  logoDataUrl: string;
+}>(function ShareCard({ match, questions, selections, logoDataUrl }, ref) {
   const t1 = match?.team1Short || match?.team1 || "T1";
   const t2 = match?.team2Short || match?.team2 || "T2";
   const startLabel = match?.startTime ? new Date(match.startTime).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "";
@@ -395,9 +447,8 @@ const ShareCard = forwardRef<HTMLDivElement, {
           as the focal point of the card. */}
       <div style={{ position: "relative", marginBottom: 36, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 140 }}>
         <img
-          src="/jaffa-logo-mark.png"
+          src={logoDataUrl || "/jaffa-logo-mark.png"}
           alt="JAFFA"
-          crossOrigin="anonymous"
           style={{ height: 140, width: "auto", objectFit: "contain", filter: "drop-shadow(0 0 22px rgba(255,255,255,0.45))" }}
         />
         <div
