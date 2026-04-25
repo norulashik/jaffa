@@ -686,6 +686,27 @@ export default function MatchDashboard() {
             ? (((runsNeeded || 0) / (totalOvers - overs))).toFixed(2)
             : null;
 
+          // Compute the result string for completed matches:
+          //   - Chasing side scored ≥ target → won by N wickets (10 - inn2.wickets)
+          //   - Else defending side won by (inn1.score - inn2.score) runs
+          let resultText: string | null = null;
+          if (matchData?.status === "completed" && innings1) {
+            const inn1Score = Number(innings1.score || 0);
+            const inn2Score = Number(innings2?.score || 0);
+            const inn2Wkts = Number(innings2?.wickets || 0);
+            if (innings2 && inn2Score > inn1Score) {
+              const wktsLeft = Math.max(0, 10 - inn2Wkts);
+              resultText = `${bowlingFirstShort} won by ${wktsLeft} wkt${wktsLeft === 1 ? "" : "s"}`;
+            } else if (innings2 && inn2Score < inn1Score) {
+              const runs = inn1Score - inn2Score;
+              resultText = `${battingFirstShort} won by ${runs} run${runs === 1 ? "" : "s"}`;
+            } else if (innings2) {
+              resultText = "Match tied";
+            } else {
+              resultText = `${battingFirstShort} won`;
+            }
+          }
+
           return (
             <section className="game-card p-5 relative overflow-hidden">
               {/* Series & Live badge */}
@@ -738,9 +759,19 @@ export default function MatchDashboard() {
                   </div>
                 </div>
 
-                {/* VS / Target */}
+                {/* VS / Target / Result */}
                 <div className="text-center">
-                  {target ? (
+                  {resultText ? (
+                    <div className="px-3">
+                      <div className="text-[10px] text-white/50 uppercase tracking-widest font-bold mb-1">Result</div>
+                      <div
+                        className="text-sm font-black text-[#22c55e] leading-tight"
+                        style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                      >
+                        {resultText}
+                      </div>
+                    </div>
+                  ) : target ? (
                     <div>
                       <div className="text-[10px] text-white/50 uppercase tracking-widest font-bold">Need</div>
                       <div

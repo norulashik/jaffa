@@ -328,6 +328,23 @@ function topBowlerOptions(pool: SquadSource): Option[] {
 
 export async function ensurePunterCard(match: Match): Promise<{ created: number; existing: number }> {
   if (!match.startTime) return { created: 0, existing: 0 };
+
+  // Repair pass: pre-existing rows may have been created with the OLD
+  // (server-local) midnight calculation, so opensAt could be 5h30m late on a
+  // UTC host. Snap any over-late opensAt down to the correct IST-midnight
+  // value before counting / responding.
+  const correctOpensAt = punterOpensAt(match);
+  await Prediction.update(
+    { opensAt: correctOpensAt },
+    {
+      where: {
+        matchId: match.id,
+        category: "punter_card",
+        opensAt: { [Op.gt]: correctOpensAt },
+      },
+    }
+  );
+
   const existing = await Prediction.count({
     where: { matchId: match.id, category: "punter_card" },
   });
@@ -371,14 +388,18 @@ export async function ensurePunterCard(match: Match): Promise<{ created: number;
   return { created, existing: 0 };
 }
 
-// "Midnight on match day" — use the local-time start of match.startTime's day.
-// We compute it as startTime minus its time-of-day, in UTC. Good enough for
-// IST-only operation; switch to a tz-aware library if we expand regions.
+// "Midnight on match day" — IST midnight, computed explicitly so this works
+// on a UTC EC2 host. Without the explicit IST math, `setHours(0,0,0,0)` on
+// a UTC server gives midnight UTC = 5:30 AM IST, and the lobby would refuse
+// to open the card until then. IST-only product so the offset is hardcoded.
+const IST_OFFSET_MS = (5 * 60 + 30) * 60_000;
+
 export function punterOpensAt(match: Match): Date {
   const start = new Date(match.startTime);
-  const d = new Date(start);
-  d.setHours(0, 0, 0, 0);
-  return d;
+  // Shift to IST wall-clock, snap to the IST date's start-of-day, shift back.
+  const istWall = new Date(start.getTime() + IST_OFFSET_MS);
+  istWall.setUTCHours(0, 0, 0, 0);
+  return new Date(istWall.getTime() - IST_OFFSET_MS);
 }
 
 // ---- Resolver ----
@@ -444,7 +465,15 @@ export async function resolvePunterCardEarly(
   return { resolved };
 }
 
-export async function resolvePunterCard(matchId: string): Promise<{ resolved: number }> {
+// Match-end resolver. Computes every templateKey from raw fixture + balls
+// data — does NOT trust `match.scoreData.innings1.batsmen[]` etc. because
+// those fields are never reliably populated by the poll. fixture/balls are
+// passed in by the caller (sportsmonkApi finalizeMatch).
+export async function resolvePunterCard(
+  matchId: string,
+  fixture?: any,
+  allBalls?: any[]
+): Promise<{ resolved: number }> {
   const match = await Match.findByPk(matchId);
   if (!match) return { resolved: 0 };
   const cards = await Prediction.findAll({
@@ -452,15 +481,14 @@ export async function resolvePunterCard(matchId: string): Promise<{ resolved: nu
   });
   if (cards.length === 0) return { resolved: 0 };
 
-  const sd: any = match.scoreData || {};
-  const inn1 = sd.innings1 || {};
-  const inn2 = sd.innings2 || {};
+  const balls: any[] = Array.isArray(allBalls) ? allBalls : [];
+  const fix: any = fixture || {};
 
   let resolved = 0;
   for (const pred of cards) {
     const tk = (pred as any).templateKey as PunterTemplate | null;
     if (!tk) continue;
-    const correct = computeCorrect(tk, match, inn1, inn2);
+    const correct = computeCorrectFromBalls(tk, fix, balls);
     if (!correct) continue;
     await pred.update({ correctOption: correct, status: "resolved" });
     await scorePunterUserAnswers(pred.id, correct, pred.options);
@@ -469,113 +497,220 @@ export async function resolvePunterCard(matchId: string): Promise<{ resolved: nu
   return { resolved };
 }
 
-function computeCorrect(
+function computeCorrectFromBalls(
   tk: PunterTemplate,
-  match: Match,
-  inn1: any,
-  inn2: any
+  fixture: any,
+  allBalls: any[]
 ): string | null {
-  const t1 = match.team1Short;
-  const t2 = match.team2Short;
-  const sd: any = match.scoreData || {};
-
   switch (tk) {
     case "punter_match_winner": {
-      const winner = sd.winnerTeamShort || sd.winner;
-      if (winner === t1) return "team1";
-      if (winner === t2) return "team2";
+      const wid = fixture?.winner_team_id;
+      if (wid == null) return null;
+      if (wid === fixture.localteam_id) return "team1";
+      if (wid === fixture.visitorteam_id) return "team2";
       return null;
     }
     case "punter_toss_winner": {
-      const tossWinner = sd.tossWinnerShort || sd.tossWinner;
-      if (tossWinner === t1) return "team1";
-      if (tossWinner === t2) return "team2";
+      const tid = fixture?.toss_won_team_id;
+      if (tid == null) return null;
+      if (tid === fixture.localteam_id) return "team1";
+      if (tid === fixture.visitorteam_id) return "team2";
       return null;
     }
-    case "punter_inn1_50":  return anyPlayerReached(inn1, 50)  ? "yes" : "no";
-    case "punter_inn1_100": return anyPlayerReached(inn1, 100) ? "yes" : "no";
-    case "punter_inn2_50":  return anyPlayerReached(inn2, 50)  ? "yes" : "no";
-    case "punter_inn2_100": return anyPlayerReached(inn2, 100) ? "yes" : "no";
+    case "punter_inn1_50":  return anyBatsmanReached(allBalls, "S1", 50)  ? "yes" : "no";
+    case "punter_inn1_100": return anyBatsmanReached(allBalls, "S1", 100) ? "yes" : "no";
+    case "punter_inn2_50":  return anyBatsmanReached(allBalls, "S2", 50)  ? "yes" : "no";
+    case "punter_inn2_100": return anyBatsmanReached(allBalls, "S2", 100) ? "yes" : "no";
     case "punter_highest_at_1st_dismissal": {
-      // Highest team score at the moment the first dismissal happened in EITHER innings.
-      // We approximate using runs at fall-of-1st-wicket in each innings.
-      const t1Score = scoreAtFirstWicket(inn1);
-      const t2Score = scoreAtFirstWicket(inn2);
+      const t1Score = scoreAtFirstWicketFromBalls(allBalls, "S1");
+      const t2Score = scoreAtFirstWicketFromBalls(allBalls, "S2");
       if (t1Score == null || t2Score == null) return null;
       if (t1Score > t2Score) return "team1";
       if (t2Score > t1Score) return "team2";
       return "draw";
     }
     case "punter_motm": {
-      const motm = sd.manOfTheMatch || sd.motm;
-      if (!motm) return null;
-      return playerKey(motm);
+      // Sportsmonk reports man_of_match_id post-game. Try to map the id back
+      // to a name from balls. Fall back to the top batter winners (already
+      // tie-broken). Single winner only — no multi-MoM in cricket.
+      const motmId = fixture?.man_of_match_id;
+      if (motmId) {
+        const name = nameForPlayerId(allBalls, Number(motmId));
+        if (name) return playerKey(name);
+      }
+      const winners = topBatterWinners(allBalls);
+      if (winners.length === 0) return null;
+      return playerKey(winners[0]);
     }
     case "punter_top_batter": {
-      const name = topScorerFromInnings([inn1, inn2]);
-      return name ? playerKey(name) : null;
+      // Tie-break: most runs, then fewer balls, then award all tied. Encoded
+      // as a comma-joined list of player keys; scorePunterUserAnswers grants
+      // points to anyone who picked any winner.
+      const winners = topBatterWinners(allBalls);
+      if (winners.length === 0) return null;
+      return winners.map(playerKey).join(",");
     }
     case "punter_top_bowler": {
-      const name = topWicketTakerFromInnings([inn1, inn2]);
-      return name ? playerKey(name) : null;
+      // Tie-break: most wickets, then fewer runs conceded, then award all tied.
+      const winners = topBowlerWinners(allBalls);
+      if (winners.length === 0) return null;
+      return winners.map(playerKey).join(",");
     }
   }
   return null;
 }
 
-function anyPlayerReached(innings: any, threshold: number): boolean {
-  const batsmen: any[] = innings?.batsmen || innings?.batting || [];
-  for (const b of batsmen) {
-    const r = Number(b?.runs ?? b?.score ?? 0);
+// ---- Ball-level helpers ----
+
+// Sum of batsman runs from a single ball (extras stripped out).
+function batRunsOnBall(b: any): number {
+  const s = b?.score || {};
+  const extras = Number(s.bye || 0) + Number(s.leg_bye || 0) + Number(s.noball_runs || 0);
+  return Math.max(0, Number(s.runs || 0) - extras);
+}
+
+// Builds {name -> total runs} for a given innings's striker-faced balls.
+function runsByBatsman(allBalls: any[], scoreboard: "S1" | "S2"): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const b of allBalls) {
+    if (b.scoreboard !== scoreboard) continue;
+    const name = b.batsman?.fullname;
+    if (!name) continue;
+    m.set(name, (m.get(name) || 0) + batRunsOnBall(b));
+  }
+  return m;
+}
+
+function anyBatsmanReached(allBalls: any[], scoreboard: "S1" | "S2", threshold: number): boolean {
+  for (const r of runsByBatsman(allBalls, scoreboard).values()) {
     if (r >= threshold) return true;
   }
   return false;
 }
 
-function scoreAtFirstWicket(innings: any): number | null {
-  // Sportsmonk scorecard: each batsman row has a `dismissal` block when out,
-  // including `team_score` snapshot (varies by plan). Fall back: take the
-  // smallest team_score value across dismissed batsmen — that's the first wicket.
-  const batsmen: any[] = innings?.batsmen || innings?.batting || [];
-  let minScore: number | null = null;
-  for (const b of batsmen) {
-    const ts = Number(b?.team_score ?? b?.dismissalScore ?? NaN);
-    if (Number.isFinite(ts)) {
-      if (minScore == null || ts < minScore) minScore = ts;
+// Count legal balls each batsman faced in an innings (no-ball / wide are
+// not faced; bye / leg-bye ARE faced legal balls).
+function ballsFacedByBatsman(allBalls: any[], scoreboard: "S1" | "S2"): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const b of allBalls) {
+    if (b.scoreboard !== scoreboard) continue;
+    const name = b.batsman?.fullname;
+    if (!name) continue;
+    if (b.score?.ball === false) continue; // not a legal delivery
+    m.set(name, (m.get(name) || 0) + 1);
+  }
+  return m;
+}
+
+// Top batter winners across BOTH innings — applies the strike-rate tie-break
+// rule: highest runs wins; tie on runs → fewer balls faced wins; tie on
+// both → award all tied batters. Returns the list of winning names (1+).
+function topBatterWinners(allBalls: any[]): string[] {
+  // Aggregate per-batsman across both innings.
+  const runs = new Map<string, number>();
+  const balls = new Map<string, number>();
+  for (const sb of ["S1", "S2"] as const) {
+    for (const [n, r] of runsByBatsman(allBalls, sb).entries()) {
+      runs.set(n, (runs.get(n) || 0) + r);
+    }
+    for (const [n, b] of ballsFacedByBatsman(allBalls, sb).entries()) {
+      balls.set(n, (balls.get(n) || 0) + b);
     }
   }
-  if (minScore != null) return minScore;
-  // No reliable signal — return total score if no dismissals at all
-  if (Number(innings?.wickets ?? 0) === 0) return Number(innings?.score ?? 0);
+  if (runs.size === 0) return [];
+  let bestRuns = -1;
+  for (const r of runs.values()) if (r > bestRuns) bestRuns = r;
+  const runLeaders = Array.from(runs.entries()).filter(([, r]) => r === bestRuns).map(([n]) => n);
+  if (runLeaders.length <= 1) return runLeaders;
+  let bestBalls = Infinity;
+  for (const n of runLeaders) {
+    const bf = balls.get(n) ?? Infinity;
+    if (bf < bestBalls) bestBalls = bf;
+  }
+  return runLeaders.filter((n) => (balls.get(n) ?? Infinity) === bestBalls);
+}
+
+// Sum of total runs (incl. extras) conceded by each bowler in an innings.
+function runsConcededByBowler(allBalls: any[], scoreboard: "S1" | "S2"): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const b of allBalls) {
+    if (b.scoreboard !== scoreboard) continue;
+    const bowlerName = b.bowler?.fullname;
+    if (!bowlerName) continue;
+    m.set(bowlerName, (m.get(bowlerName) || 0) + Number(b.score?.runs || 0));
+  }
+  return m;
+}
+
+// Wickets per bowler. Run-outs excluded — bowler doesn't get credit.
+function wicketsByBowler(allBalls: any[], scoreboard: "S1" | "S2"): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const b of allBalls) {
+    if (b.scoreboard !== scoreboard) continue;
+    if (!b.score?.is_wicket && !b.batsmanout_id) continue;
+    const wicketName = (b.score?.name || "").toLowerCase();
+    if (wicketName.includes("run out")) continue;
+    const bowlerName = b.bowler?.fullname;
+    if (!bowlerName) continue;
+    m.set(bowlerName, (m.get(bowlerName) || 0) + 1);
+  }
+  return m;
+}
+
+// Top bowler winners across BOTH innings — most wickets wins; tie on
+// wickets → fewer runs conceded wins; tie on both → award all tied.
+function topBowlerWinners(allBalls: any[]): string[] {
+  const wkts = new Map<string, number>();
+  const conceded = new Map<string, number>();
+  for (const sb of ["S1", "S2"] as const) {
+    for (const [n, w] of wicketsByBowler(allBalls, sb).entries()) {
+      wkts.set(n, (wkts.get(n) || 0) + w);
+    }
+    for (const [n, r] of runsConcededByBowler(allBalls, sb).entries()) {
+      conceded.set(n, (conceded.get(n) || 0) + r);
+    }
+  }
+  if (wkts.size === 0) return [];
+  let bestWkts = -1;
+  for (const w of wkts.values()) if (w > bestWkts) bestWkts = w;
+  const wktLeaders = Array.from(wkts.entries()).filter(([, w]) => w === bestWkts).map(([n]) => n);
+  if (wktLeaders.length <= 1) return wktLeaders;
+  let bestRuns = Infinity;
+  for (const n of wktLeaders) {
+    const r = conceded.get(n) ?? Infinity;
+    if (r < bestRuns) bestRuns = r;
+  }
+  return wktLeaders.filter((n) => (conceded.get(n) ?? Infinity) === bestRuns);
+}
+
+// Team's running total at the moment the first wicket fell. We walk balls
+// in order, summing total ball runs (Sportsmonk's `score.runs` already
+// includes extras for the team total). First ball with `is_wicket` ends the
+// scan. Returns null if the innings never lost a wicket and never started.
+function scoreAtFirstWicketFromBalls(allBalls: any[], scoreboard: "S1" | "S2"): number | null {
+  const innBalls = allBalls
+    .filter((b) => b.scoreboard === scoreboard)
+    .sort((a, b) => parseFloat(String(a.ball || "0")) - parseFloat(String(b.ball || "0")));
+  if (innBalls.length === 0) return null;
+  let total = 0;
+  for (const b of innBalls) {
+    total += Number(b.score?.runs || 0);
+    if (b.score?.is_wicket || b.batsmanout_id) return total;
+  }
+  // No wicket in this innings — return final total (rare but possible).
+  return total;
+}
+
+// Look up a player's display name from any ball where they appear as
+// batsman, non-striker, bowler, or dismissed. Used to map fixture's
+// numeric man_of_match_id to a name.
+function nameForPlayerId(allBalls: any[], id: number): string | null {
+  for (const b of allBalls) {
+    if (b.batsman_id === id && b.batsman?.fullname) return b.batsman.fullname;
+    if (b.bowler_id === id && b.bowler?.fullname) return b.bowler.fullname;
+    if (b.batsmanout_id === id && b.catchstump?.fullname) return b.catchstump.fullname;
+  }
   return null;
-}
-
-function topScorerFromInnings(innings: any[]): string | null {
-  let best: { name: string; runs: number } | null = null;
-  for (const inn of innings) {
-    const batsmen: any[] = inn?.batsmen || inn?.batting || [];
-    for (const b of batsmen) {
-      const name = b?.fullname || b?.name || b?.batsman?.fullname;
-      const runs = Number(b?.runs ?? b?.score ?? 0);
-      if (!name) continue;
-      if (!best || runs > best.runs) best = { name, runs };
-    }
-  }
-  return best?.name || null;
-}
-
-function topWicketTakerFromInnings(innings: any[]): string | null {
-  let best: { name: string; wkts: number } | null = null;
-  for (const inn of innings) {
-    const bowlers: any[] = inn?.bowlers || inn?.bowling || [];
-    for (const b of bowlers) {
-      const name = b?.fullname || b?.name || b?.bowler?.fullname;
-      const wkts = Number(b?.wickets ?? 0);
-      if (!name) continue;
-      if (!best || wkts > best.wkts) best = { name, wkts };
-    }
-  }
-  return best?.name || null;
 }
 
 async function scorePunterUserAnswers(
@@ -583,9 +718,13 @@ async function scorePunterUserAnswers(
   correctOption: string,
   options: { key: string; label: string; points: number }[]
 ): Promise<void> {
+  // correctOption may be a comma-joined list of keys when multiple players
+  // tied (e.g. two batters on the same runs+balls); award points to anyone
+  // who picked any of them.
+  const correctSet = new Set(correctOption.split(",").map((k) => k.trim()).filter(Boolean));
   const userAnswers = await UserPrediction.findAll({ where: { predictionId } });
   for (const ua of userAnswers) {
-    const isCorrect = ua.selectedOption === correctOption;
+    const isCorrect = correctSet.has(ua.selectedOption);
     const opt = options.find(o => o.key === ua.selectedOption);
     const pointsEarned = isCorrect && opt ? opt.points : 0;
 

@@ -11,10 +11,31 @@ import {
   getCurrentRound,
 } from "../services/predictionEngine";
 import { resolvePrediction, generateRoundRewards, recomputeParticipantScores } from "../services/pointsEngine";
-import { fetchTodayFixtures, fetchSportsmonkLiveScores, resolveOverPredictionFromStats } from "../services/sportsmonkApi";
+import { fetchTodayFixtures, fetchSportsmonkLiveScores, resolveOverPredictionFromStats, reResolveMatch } from "../services/sportsmonkApi";
 import { overStatsToContext } from "../services/feedback";
 
 const router = Router();
+
+// One-shot re-resolution of every prediction in a finished match. Wipes
+// stamped correctOption / isCorrect / pointsEarned, re-runs the resolvers
+// against fresh fixture+balls, and recomputes participant totals so the
+// leaderboard reflects the new outcomes. Use this after shipping resolver
+// fixes to repair matches that were resolved with the old buggy logic.
+router.post("/re-resolve-match", authenticateOwner, async (req: any, res: Response): Promise<void> => {
+  try {
+    const { matchId } = req.body as { matchId?: string };
+    if (!matchId) {
+      res.status(400).json({ error: "matchId required" });
+      return;
+    }
+    const io = req.app.get("io");
+    const summary = await reResolveMatch(matchId, io);
+    res.json(summary);
+  } catch (err: any) {
+    console.error("Re-resolve match error:", err);
+    res.status(500).json({ error: err?.message || "Failed to re-resolve match" });
+  }
+});
 
 // Rebuild MatchParticipant.totalPoints + round{N}Points from the UserPrediction
 // history for a match (or match + venue). Use this to repair leaderboards

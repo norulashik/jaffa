@@ -1,5 +1,5 @@
 import { Op } from "sequelize";
-import { Match, Prediction, MatchParticipant } from "../models";
+import { Match, Prediction, MatchParticipant, UserPrediction } from "../models";
 import { generatePerOverPredictions, generateHotTake, generatePlayerHotTake, generateRivalryCalls, getCurrentRound, generatePlayerPreMatchQuestions, generatePreMatchPredictions } from "./predictionEngine";
 import { ensurePunterCard, punterOpensAt, resolvePunterCard, resolvePunterCardEarly } from "./punterCard";
 import {
@@ -541,7 +541,7 @@ async function catchUpUnresolvedPredictions(
   return resolvedCount;
 }
 
-async function resolveRemainingPredictionsAtMatchEnd(
+export async function resolveRemainingPredictionsAtMatchEnd(
   match: Match,
   fixture: any,
   runs: any[],
@@ -914,18 +914,31 @@ async function finalizeMatch(
   if (match.status === "completed") return;
   await match.update({ status: "completed", currentPhase: "completed" as any });
 
+  // Pull full fixture + balls once; both resolvers below need them. The
+  // Punter Card resolver in particular CANNOT trust match.scoreData (its
+  // batsmen/bowlers fields are never reliably populated by the poll), so we
+  // pass raw balls + fixture metadata through and let it compute everything
+  // from there.
+  let fullFixture: any = null;
+  let allBalls: BallData[] = [];
+  try {
+    fullFixture = await fetchLiveFixtureDetail(fixtureId, true);
+    allBalls = fullFixture?.balls?.data || [];
+  } catch (err) {
+    console.error("[Sportsmonk] Failed to fetch full fixture for match-end:", err);
+  }
+
   // Resolve pre-match + per-over + hot-take + rivalry predictions.
   try {
-    const fullFixture = await fetchLiveFixtureDetail(fixtureId, true);
-    const allBalls: BallData[] = fullFixture?.balls?.data || [];
-    await resolveRemainingPredictionsAtMatchEnd(match, fixture, runs, allBalls, io);
+    await resolveRemainingPredictionsAtMatchEnd(match, fullFixture || fixture, runs, allBalls, io);
   } catch (resolveErr) {
     console.error("[Sportsmonk] Error resolving predictions at match-end:", resolveErr);
   }
 
-  // Resolve Punter Card questions.
+  // Resolve Punter Card questions — feed the fixture (for winner/toss/MoM
+  // ids) + balls (for batsman/bowler stats).
   try {
-    const r = await resolvePunterCard(match.id);
+    const r = await resolvePunterCard(match.id, fullFixture || fixture, allBalls);
     if (r.resolved > 0) console.log(`[PunterCard] Resolved ${r.resolved} questions for ${match.id}`);
   } catch (err) {
     console.error("[PunterCard] resolve error:", err);
@@ -952,6 +965,105 @@ async function finalizeMatch(
 
   io.to(`match:${match.id}`).emit("matchEnd", { matchId: match.id, winner: fixture.winner_team_id });
   console.log(`[Sportsmonk] Match ${match.id} ended — all predictions resolved`);
+}
+
+// Sportsmonk's `score.four` / `score.six` boolean flags are inconsistent
+// across plans / fixtures — sometimes they're missing on legitimate
+// boundaries. Fall back to the runs-on-the-ball value, but only if no
+// extras are involved (otherwise a "5 off a no-ball + bye" would count).
+export function isFour(b: any): boolean {
+  const s = b?.score || {};
+  if (s.four === true) return true;
+  if (Number(s.runs) !== 4) return false;
+  return !Number(s.bye || 0) && !Number(s.leg_bye || 0) && !Number(s.noball_runs || 0);
+}
+export function isSix(b: any): boolean {
+  const s = b?.score || {};
+  if (s.six === true) return true;
+  if (Number(s.runs) !== 6) return false;
+  return !Number(s.bye || 0) && !Number(s.leg_bye || 0) && !Number(s.noball_runs || 0);
+}
+
+// Wipes existing resolutions on a finished match and runs every resolver
+// (per-over, hot-take, rivalry, pre-match, punter card) again from raw
+// fixture + balls — then recomputes participant totals so leaderboards
+// reflect the new outcomes. Call after shipping resolver fixes to repair
+// matches that were resolved with the old buggy logic.
+export async function reResolveMatch(
+  matchId: string,
+  io: SocketIOServer
+): Promise<{
+  predictionsReset: number;
+  userPredictionsReset: number;
+  punterResolved: number;
+  participantsRecomputed: number;
+}> {
+  const match = await Match.findByPk(matchId);
+  if (!match) throw new Error("Match not found");
+  if (!match.externalId) throw new Error("Match has no externalId — can't fetch fixture");
+  const fixtureId = parseInt(match.externalId);
+  if (Number.isNaN(fixtureId)) throw new Error("externalId is not numeric");
+
+  // Lazy-import the recompute helper to avoid circular import at module load.
+  const { recomputeParticipantScores } = await import("./pointsEngine");
+
+  // 1. Pick every prediction the resolvers can re-stamp.
+  const targetPreds = await Prediction.findAll({
+    where: {
+      matchId,
+      category: ["punter_card", "hot_take", "pre_match", "per_over", "rivalry_call", "bold_call"],
+      status: "resolved",
+    },
+  });
+  const predIds = targetPreds.map((p) => p.id);
+
+  if (predIds.length === 0) {
+    return { predictionsReset: 0, userPredictionsReset: 0, punterResolved: 0, participantsRecomputed: 0 };
+  }
+
+  // 2. Reset linked UserPrediction rows so the resolver's idempotency guard
+  //    (skip when isCorrect != null) doesn't short-circuit re-scoring.
+  const upReset = await UserPrediction.update(
+    { isCorrect: null as any, pointsEarned: 0, feedbackText: null },
+    { where: { predictionId: { [Op.in]: predIds } } }
+  );
+
+  // 3. Reset Predictions to status='locked' + clear correctOption so the
+  //    resolvers can write fresh values (resolvePrediction throws if the
+  //    row is already 'resolved').
+  await Prediction.update(
+    { status: "locked", correctOption: null as any },
+    { where: { id: { [Op.in]: predIds } } }
+  );
+
+  // 4. Pull fresh fixture + balls.
+  const fixture = await fetchLiveFixtureDetail(fixtureId, true);
+  const allBalls: BallData[] = fixture?.balls?.data || [];
+  const runs = fixture?.runs?.data || (Array.isArray(fixture?.runs) ? fixture.runs : []);
+
+  // 5. Re-run each resolver path with the fixed logic.
+  let punterResolvedCount = 0;
+  try {
+    await resolveRemainingPredictionsAtMatchEnd(match, fixture, runs, allBalls, io);
+  } catch (err) {
+    console.error("[reResolveMatch] resolveRemaining error:", err);
+  }
+  try {
+    const r = await resolvePunterCard(matchId, fixture, allBalls);
+    punterResolvedCount = r.resolved;
+  } catch (err) {
+    console.error("[reResolveMatch] resolvePunterCard error:", err);
+  }
+
+  // 6. Rebuild leaderboard totals from the freshly-stamped UserPredictions.
+  const recompute = await recomputeParticipantScores({ matchId });
+
+  return {
+    predictionsReset: predIds.length,
+    userPredictionsReset: upReset[0] || 0,
+    punterResolved: punterResolvedCount,
+    participantsRecomputed: recompute.participantsRecomputed,
+  };
 }
 
 async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
@@ -1647,7 +1759,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
               if (!isDeathBall(b)) continue;
               const name = b.batsman?.fullname;
               if (!name || !sixesByName.has(name)) continue;
-              if (b.score?.six) sixesByName.set(name, (sixesByName.get(name) || 0) + 1);
+              if (isSix(b)) sixesByName.set(name, (sixesByName.get(name) || 0) + 1);
             }
             const [a, c] = opts;
             const aSixes = sixesByName.get(a.label) || 0;
@@ -2573,7 +2685,7 @@ function resolveEndOfMatchPrediction(
     const s2Balls = allBalls.filter((b) => b.scoreboard === "S2");
     let boundaries = 0;
     for (const b of s2Balls) {
-      if (b.score?.four || b.score?.six) boundaries++;
+      if (isFour(b) || isSix(b)) boundaries++;
     }
     if (boundaries < 10) return "under_10";
     if (boundaries <= 20) return "10_20";
@@ -2657,7 +2769,7 @@ function resolveEndOfMatchPrediction(
     for (const b of allBalls) {
       if (b.scoreboard !== "S1") continue;
       if (Math.floor(b.ball) < deathStart) continue;
-      if (b.score?.six) {
+      if (isSix(b)) {
         const name = b.batsman?.fullname;
         if (name) batter1Sixes[name] = (batter1Sixes[name] || 0) + 1;
       }
@@ -2717,7 +2829,7 @@ function resolveEndOfMatchPrediction(
     for (const b of allBalls) {
       if (b.scoreboard !== "S2") continue;
       if (Math.floor(b.ball) < deathStart) continue;
-      if (b.score?.six && b.batsman?.fullname && q.includes(b.batsman.fullname.toLowerCase())) {
+      if (isSix(b) && b.batsman?.fullname && q.includes(b.batsman.fullname.toLowerCase())) {
         return "yes";
       }
     }
