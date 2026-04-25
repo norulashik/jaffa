@@ -37,6 +37,26 @@ interface Prediction {
 
 type Phase = "loading" | "prematch" | "live";
 
+// Mirrors backend predictionEngine.getCurrentRound — used as a client-side
+// fallback when participant.currentRound on the API hasn't caught up to the
+// live innings/over (e.g. Sportsmonk poll missed an over transition).
+function deriveRound(currentInnings: number, currentOver: number, totalOvers: number = 20): number {
+  if (!currentInnings || currentInnings === 0) return 0;
+  const overs = totalOvers || 20;
+  let ppEnd = Math.min(6, overs);
+  let midEnd = Math.ceil(overs * 0.75);
+  if (overs <= 3) { ppEnd = 1; midEnd = 2; }
+  else if (ppEnd >= midEnd) { midEnd = ppEnd + 1; }
+  if (currentInnings === 1) {
+    if (currentOver <= ppEnd) return 1;
+    if (currentOver <= midEnd) return 2;
+    return 3;
+  }
+  if (currentOver <= ppEnd) return 4;
+  if (currentOver <= midEnd) return 5;
+  return 6;
+}
+
 const QUESTION_LABELS = [
   "Match Winner",
   "Toss Call",
@@ -336,12 +356,25 @@ export default function MatchDashboard() {
           roomId ? api.getRoomLeaderboard(roomId) : api.getMatchLeaderboard(matchId, venueId),
         ]);
         if (matchState.participant) {
+          // Server stores `currentRound` on MatchParticipant, but it only
+          // bumps at over transitions caught by the poll. If Sportsmonk
+          // momentarily fails to return fixture data, the transition can be
+          // missed and the round stays stale (e.g. user is in innings-2
+          // over 4 but participant.currentRound still reads 3). Derive the
+          // round from the live innings + over and take the higher value
+          // so the leaderboard pills don't lag behind real play.
+          const liveInn = matchState.match?.currentInnings || matchState.match?.scoreData?.currentInnings || 1;
+          const liveOver = matchState.match?.currentOver || matchState.match?.scoreData?.currentOver || 0;
+          const totalOvers = matchState.match?.totalOvers || 20;
+          const derivedRound = deriveRound(liveInn, liveOver, totalOvers);
+          const serverRound = matchState.participant.currentRound || 1;
+          const effectiveRound = Math.max(serverRound, derivedRound);
           dispatch({
             type: "UPDATE_PARTICIPANT",
             data: {
               totalPoints: matchState.participant.totalPoints || 0,
               currentStreak: matchState.participant.currentStreak || 0,
-              currentRound: matchState.participant.currentRound || 1,
+              currentRound: effectiveRound,
               boostsUsedThisRound: matchState.participant.boostsUsedRound || 0,
               boostsUsedRound: matchState.participant.boostsUsedRound || 0,
               allInUsed: Boolean(matchState.participant.allInUsed),

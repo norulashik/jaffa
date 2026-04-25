@@ -54,6 +54,61 @@ function sortByReceivedDesc(items: WinNotification[]): WinNotification[] {
   return [...items].sort((a, b) => b.receivedAt - a.receivedAt);
 }
 
+// Persisted set of predictionIds whose popup the user has already seen +
+// dismissed. Lets us safely fire popups for backfilled wins (which the user
+// never saw a popup for, e.g. while they were offline) without re-popping
+// stuff they've already acknowledged. Lives across reloads.
+const POPPED_KEY = "jaffa_win_popped_v1";
+
+function readPoppedIds(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = localStorage.getItem(POPPED_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function persistPoppedIds(ids: Set<string>): void {
+  if (typeof window === "undefined") return;
+  try {
+    // Cap at 200 to keep storage small; oldest naturally evict via insertion order.
+    const arr = Array.from(ids).slice(-200);
+    localStorage.setItem(POPPED_KEY, JSON.stringify(arr));
+  } catch {
+    // ignore quota issues
+  }
+}
+
+// How many backfilled missed-wins to actually pop on app open. Anything beyond
+// this lands silently in the bell drawer so a user who was away for a long
+// time doesn't get bombarded with 15 modals on launch.
+const BACKFILL_POPUP_CAP = 5;
+
+// Persistent "cleared at" timestamp. When the user taps Clear in the bell
+// drawer, we stash Date.now() here. The backfill on the next mount then
+// drops every UserPrediction whose answeredAt is <= this timestamp, so the
+// cleared list doesn't resurrect on refresh / new event arrival.
+const CLEARED_AT_KEY = "jaffa_win_cleared_at_v1";
+
+function readClearedAt(): number {
+  if (typeof window === "undefined") return 0;
+  try {
+    const raw = localStorage.getItem(CLEARED_AT_KEY);
+    return raw ? Number(raw) || 0 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeClearedAt(at: number): void {
+  if (typeof window === "undefined") return;
+  try { localStorage.setItem(CLEARED_AT_KEY, String(at)); } catch { /* noop */ }
+}
+
 export interface WinNotification {
   id: string;              // unique client-side id
   predictionId: string;
@@ -91,6 +146,10 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const queueRef = useRef<WinNotification[]>([]);
   const currentRef = useRef<WinNotification | null>(null);
   const seenIdsRef = useRef<Set<string>>(new Set());
+  // predictionIds the user already saw a popup for and dismissed. Persisted
+  // so live events that arrived during a disconnect get popped on the next
+  // app open via backfill, but already-acked ones stay silent.
+  const poppedIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => { queueRef.current = queue; }, [queue]);
   useEffect(() => { currentRef.current = currentPopup; }, [currentPopup]);
@@ -118,35 +177,55 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     const matchId = localStorage.getItem("jaffa_match_id");
     const venueId = localStorage.getItem("jaffa_venue_id");
 
-    // (1) hydrate from localStorage — drops items if matchId differs.
-    const stored = readStoredHistory(matchId);
+    // Hydrate the popped-id set from localStorage so we know which wins the
+    // user has already acknowledged across reloads.
+    poppedIdsRef.current = readPoppedIds();
+    // Anything answered at-or-before this is treated as cleared and dropped
+    // by the backfill. Live events with newer timestamps still come through.
+    const clearedAt = readClearedAt();
+
+    // (1) hydrate from localStorage — drops items if matchId differs OR if
+    // they're older than the cleared-at marker (user tapped Clear earlier).
+    const stored = readStoredHistory(matchId).filter(
+      (n) => !clearedAt || n.receivedAt > clearedAt
+    );
     if (stored.length > 0) {
       for (const n of stored) seenIdsRef.current.add(n.predictionId);
       setHistory(sortByReceivedDesc(stored));
     }
 
     // (2) backfill from API. Best-effort; failures are silent so the bell
-    // still works on hydrated state.
+    // still works on hydrated state. Wins the user has NOT yet popped
+    // (i.e. not in poppedIdsRef) are queued as popups, capped per burst so
+    // a long absence doesn't blast 15 modals at once.
     let cancelled = false;
     if (matchId && venueId) {
       api
         .getMyPredictions(matchId, venueId)
         .then((rows) => {
           if (cancelled) return;
+          let popsBudget = BACKFILL_POPUP_CAP;
           const wins: WinNotification[] = (rows || [])
-            .filter((r: any) =>
-              r.isCorrect === true &&
-              Number(r.pointsEarned) > 0 &&
-              r.prediction?.id &&
-              !seenIdsRef.current.has(r.prediction.id)
-            )
+            .filter((r: any) => {
+              if (r.isCorrect !== true) return false;
+              if (Number(r.pointsEarned) <= 0) return false;
+              if (!r.prediction?.id) return false;
+              if (seenIdsRef.current.has(r.prediction.id)) return false;
+              // Drop anything answered before the user tapped Clear.
+              if (clearedAt && r.answeredAt) {
+                const answeredMs = new Date(r.answeredAt).getTime();
+                if (answeredMs <= clearedAt) return false;
+              }
+              return true;
+            })
             .map((r: any) => {
               seenIdsRef.current.add(r.prediction.id);
               const opt = r.prediction.options?.find(
                 (o: any) => (o.key || o.label) === r.selectedOption
               );
               const tsRaw = r.answeredAt ? new Date(r.answeredAt).getTime() : Date.now();
-              return {
+              const alreadyPopped = poppedIdsRef.current.has(r.prediction.id);
+              const note: WinNotification = {
                 id: `${r.prediction.id}-bf-${tsRaw}`,
                 predictionId: r.prediction.id,
                 matchId: r.matchId || matchId,
@@ -157,8 +236,20 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
                 category: r.prediction.category || "",
                 overNumber: r.prediction.overNumber ?? null,
                 receivedAt: tsRaw,
-                seenInBell: true,    // historical — don't light the badge
+                seenInBell: alreadyPopped,
               };
+              // Queue a popup if the user has never seen this win before AND
+              // we still have headroom in this backfill burst.
+              if (!alreadyPopped && popsBudget > 0) {
+                popsBudget -= 1;
+                if (currentRef.current === null) {
+                  setCurrentPopup(note);
+                  currentRef.current = note;
+                } else {
+                  setQueue((prev) => [...prev, note]);
+                }
+              }
+              return note;
             });
           if (wins.length === 0) return;
           setHistory((prev) =>
@@ -222,6 +313,13 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   }, [history]);
 
   const dismissPopup = useCallback(() => {
+    // Persist this win as already-popped so on next app open we don't
+    // re-pop it via backfill.
+    const cur = currentRef.current;
+    if (cur?.predictionId) {
+      poppedIdsRef.current.add(cur.predictionId);
+      persistPoppedIds(poppedIdsRef.current);
+    }
     setCurrentPopup(null);
   }, []);
 
@@ -236,8 +334,17 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     setQueue([]);
     setCurrentPopup(null);
     seenIdsRef.current.clear();
+    poppedIdsRef.current.clear();
     if (typeof window !== "undefined") {
-      try { localStorage.removeItem(STORAGE_KEY); } catch { /* noop */ }
+      try {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(POPPED_KEY);
+        // Stamp "cleared at = now" so the next mount's API backfill drops
+        // every UserPrediction answered before this point. Without this,
+        // refresh / new live event would re-pull all the cleared wins from
+        // the server.
+        writeClearedAt(Date.now());
+      } catch { /* noop */ }
     }
   }, []);
 

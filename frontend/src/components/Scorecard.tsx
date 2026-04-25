@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { api } from "@/lib/api";
 
 interface BattingEntry {
@@ -47,6 +47,10 @@ export default function Scorecard({ matchId, scoreVersion, matchData }: Scorecar
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [activeInnings, setActiveInnings] = useState<"S1" | "S2">("S1");
+  // Once the user manually picks an innings tab, stop overriding it on every
+  // background refresh. Without this, inspecting the 1st-innings scorecard
+  // during the 2nd innings would snap back to S2 every poll tick.
+  const userPickedInningsRef = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -55,16 +59,23 @@ export default function Scorecard({ matchId, scoreVersion, matchData }: Scorecar
       setBatting(data.batting || []);
       setBowling(data.bowling || []);
 
-      // Auto-select current innings
-      const sd = matchData?.scoreData || {};
-      const currInn = sd.currentInnings || matchData?.currentInnings || 1;
-      setActiveInnings(currInn === 2 ? "S2" : "S1");
+      // Auto-select current innings ONLY if the user hasn't manually toggled.
+      if (!userPickedInningsRef.current) {
+        const sd = matchData?.scoreData || {};
+        const currInn = sd.currentInnings || matchData?.currentInnings || 1;
+        setActiveInnings(currInn === 2 ? "S2" : "S1");
+      }
     } catch {
       setError(true);
     } finally {
       setLoading(false);
     }
   }, [matchId, matchData]);
+
+  const pickInnings = useCallback((inn: "S1" | "S2") => {
+    userPickedInningsRef.current = true;
+    setActiveInnings(inn);
+  }, []);
 
   useEffect(() => {
     load();
@@ -128,7 +139,7 @@ export default function Scorecard({ matchId, scoreVersion, matchData }: Scorecar
       {/* Innings Toggle */}
       <div className="flex gap-2">
         <button
-          onClick={() => setActiveInnings("S1")}
+          onClick={() => pickInnings("S1")}
           className={`flex-1 py-2 text-xs font-black uppercase tracking-wider rounded-[3px] border-2 transition-all ${
             activeInnings === "S1"
               ? "bg-[#ff6341] text-black border-black shadow-[2px_2px_0_0_#000]"
@@ -139,7 +150,7 @@ export default function Scorecard({ matchId, scoreVersion, matchData }: Scorecar
         </button>
         {hasInnings2 && (
           <button
-            onClick={() => setActiveInnings("S2")}
+            onClick={() => pickInnings("S2")}
             className={`flex-1 py-2 text-xs font-black uppercase tracking-wider rounded-[3px] border-2 transition-all ${
               activeInnings === "S2"
                 ? "bg-[#ff6341] text-black border-black shadow-[2px_2px_0_0_#000]"

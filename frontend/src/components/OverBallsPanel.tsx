@@ -103,10 +103,21 @@ export default function OverBallsPanel({ matchId, scoreVersion }: OverBallsPanel
       }}
       ref={scrollRef}
     >
-      <div style={{ display: "flex", gap: "12px", paddingLeft: "8px", paddingRight: "8px", minWidth: "max-content" }}>
+      <div style={{ display: "flex", gap: "0", paddingLeft: "8px", paddingRight: "8px", minWidth: "max-content" }}>
         {/* Show newest overs on left — reverse the array */}
-        {overs.map((over) => (
-          <div key={`${over.innings}-${over.overNumber}`} style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+        {overs.map((over, idx) => (
+          <div
+            key={`${over.innings}-${over.overNumber}`}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "4px",
+              padding: "0 14px",
+              // Vertical separator between overs so the eye groups balls
+              // by over instead of reading one continuous line of dots.
+              borderRight: idx < overs.length - 1 ? "1.5px solid #3a3a3a" : "none",
+            }}
+          >
             {/* Over label */}
             <span
               style={{

@@ -8,10 +8,31 @@ import Leaderboard from "@/components/Leaderboard";
 import RoomLeaderboard from "@/components/RoomLeaderboard";
 import { Trophy } from "lucide-react";
 import { useGame } from "@/context/GameContext";
+import { api } from "@/lib/api";
 import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 
+// Mirrors backend predictionEngine.getCurrentRound. Used as a client-side
+// fallback so the Ranks page can populate context.currentRound even when
+// the user lands here before opening the match page.
+function deriveRound(currentInnings: number, currentOver: number, totalOvers: number = 20): number {
+  if (!currentInnings || currentInnings === 0) return 0;
+  const overs = totalOvers || 20;
+  let ppEnd = Math.min(6, overs);
+  let midEnd = Math.ceil(overs * 0.75);
+  if (overs <= 3) { ppEnd = 1; midEnd = 2; }
+  else if (ppEnd >= midEnd) { midEnd = ppEnd + 1; }
+  if (currentInnings === 1) {
+    if (currentOver <= ppEnd) return 1;
+    if (currentOver <= midEnd) return 2;
+    return 3;
+  }
+  if (currentOver <= ppEnd) return 4;
+  if (currentOver <= midEnd) return 5;
+  return 6;
+}
+
 export default function LeaderboardPage() {
-  const { state } = useGame();
+  const { state, dispatch } = useGame();
   const router = useRouter();
 
   // Use context values with localStorage fallback
@@ -30,6 +51,43 @@ export default function LeaderboardPage() {
     if (!venueId) setVenueId(localStorage.getItem("jaffa_venue_id"));
     if (!roomId) setRoomId(localStorage.getItem("jaffa_room_id"));
   }, [state.matchId, state.venueId, state.roomId, matchId, venueId, roomId, router]);
+
+  // Pull match state when this page is the user's first stop, so context's
+  // currentRound is set before <Leaderboard> mounts. Without this, the round
+  // pills would default to R1 even mid-match, until the user visits the
+  // match page. We take max(server, derived) so a stale backend round still
+  // leads to the correct UI.
+  useEffect(() => {
+    if (!matchId || !venueId) return;
+    let cancelled = false;
+    api.getMatchState(matchId, venueId).then((ms: any) => {
+      if (cancelled || !ms?.participant) return;
+      const liveInn = ms.match?.currentInnings || ms.match?.scoreData?.currentInnings || 1;
+      const liveOver = ms.match?.currentOver || ms.match?.scoreData?.currentOver || 0;
+      const totalOvers = ms.match?.totalOvers || 20;
+      const derived = deriveRound(liveInn, liveOver, totalOvers);
+      const server = Number(ms.participant.currentRound) || 1;
+      const effective = Math.max(server, derived);
+      // Only push UP — the Leaderboard sync is also monotonic, but mirroring
+      // the rule here keeps the context honest if multiple pages disagree.
+      if (effective > (state.currentRound || 0)) {
+        dispatch({
+          type: "UPDATE_PARTICIPANT",
+          data: {
+            currentRound: effective,
+            totalPoints: ms.participant.totalPoints || 0,
+            currentStreak: ms.participant.currentStreak || 0,
+            boostsUsedThisRound: ms.participant.boostsUsedRound || 0,
+            boostsUsedRound: ms.participant.boostsUsedRound || 0,
+            allInUsed: Boolean(ms.participant.allInUsed),
+            allInUsedInnings1: Boolean(ms.participant.allInUsedInnings1),
+            allInUsedInnings2: Boolean(ms.participant.allInUsedInnings2),
+          },
+        });
+      }
+    }).catch(() => { /* silent */ });
+    return () => { cancelled = true; };
+  }, [matchId, venueId, state.currentRound, dispatch]);
 
   return (
     <div className="bg-[#0d0d0d] text-white min-h-screen">

@@ -218,20 +218,47 @@ export async function fetchLiveFixtureForTracker(
   return fetchLiveFixtureDetail(fixtureId, includeBalls);
 }
 
+// Last-good fixture cache. When Sportsmonk hiccups (returns nothing for a
+// few minutes — happens regularly on the cricket plan), we serve the most
+// recent good response so the rest of the app keeps moving. Capped at 60s
+// of staleness for "withRuns" (fast lane) and 30s for "withBalls" (the
+// tracker pass) — beyond that we'd risk acting on data that's drifted too
+// far from reality.
+const lastGoodFixture: Map<string, { at: number; data: any }> = new Map();
+const STALE_OK_MS_RUNS = 60_000;
+const STALE_OK_MS_BALLS = 30_000;
+
+// Reduce log spam: at most one "no fixture data" line per fixture per minute.
+const lastNoDataLogAt: Map<number, number> = new Map();
+const NO_DATA_LOG_INTERVAL_MS = 60_000;
+
+function maybeLogNoData(fixtureId: number): void {
+  const now = Date.now();
+  const last = lastNoDataLogAt.get(fixtureId) || 0;
+  if (now - last < NO_DATA_LOG_INTERVAL_MS) return;
+  lastNoDataLogAt.set(fixtureId, now);
+  console.log(`[Sportsmonk] No fixture data for ${fixtureId} (will retry; further misses suppressed for 60s)`);
+}
+
 async function fetchLiveFixtureDetail(
   fixtureId: number,
   includeBalls = false
 ): Promise<any | null> {
+  const cacheKey = `${fixtureId}:${includeBalls ? "balls" : "runs"}`;
+  const staleOkMs = includeBalls ? STALE_OK_MS_BALLS : STALE_OK_MS_RUNS;
+
   if (includeBalls) {
     const fixture = await fetchFixtureWithBalls(fixtureId);
     const ballCount = fixture?.balls?.data?.length || (Array.isArray(fixture?.balls) ? fixture.balls.length : 0);
     if (fixture && ballCount > 0) {
+      lastGoodFixture.set(cacheKey, { at: Date.now(), data: fixture });
       return fixture;
     }
   } else {
     const fixture = await fetchFixtureWithRuns(fixtureId);
     const runCount = fixture?.runs?.data?.length || (Array.isArray(fixture?.runs) ? fixture.runs.length : 0);
     if (fixture && runCount > 0) {
+      lastGoodFixture.set(cacheKey, { at: Date.now(), data: fixture });
       return fixture;
     }
   }
@@ -239,10 +266,26 @@ async function fetchLiveFixtureDetail(
   const include = includeBalls ? "balls,runs" : "runs";
   const liveFixture = await fetchFixtureFromLivescores(fixtureId, include);
   if (liveFixture) {
+    lastGoodFixture.set(cacheKey, { at: Date.now(), data: liveFixture });
     return liveFixture;
   }
 
-  return includeBalls ? fetchFixtureWithBalls(fixtureId) : fetchFixtureWithRuns(fixtureId);
+  const lastResort = includeBalls
+    ? await fetchFixtureWithBalls(fixtureId)
+    : await fetchFixtureWithRuns(fixtureId);
+  if (lastResort) {
+    // Don't cache a totally-empty payload, but return it so callers fall through
+    return lastResort;
+  }
+
+  // Sportsmonk gave us nothing on every path. Serve last-good if recent.
+  const cached = lastGoodFixture.get(cacheKey);
+  if (cached && Date.now() - cached.at < staleOkMs) {
+    return cached.data;
+  }
+
+  maybeLogNoData(fixtureId);
+  return null;
 }
 
 function getPredictionInnings(prediction: Prediction): number {
@@ -898,12 +941,12 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
       console.log(`[Sportsmonk] Initialized tracking for ${match.team1Short} vs ${match.team2Short}: innings=${match.currentInnings}, over=${match.currentOver}`);
     }
 
-    // Fast fetch: runs only (for score updates)
+    // Fast fetch: runs only (for score updates).
+    // fetchLiveFixtureDetail already serves a recent cached payload during
+    // upstream hiccups and rate-limits the "no fixture data" log itself,
+    // so we just silently skip when nothing is available.
     const fixture = await fetchLiveFixtureDetail(fixtureId, false);
-    if (!fixture) {
-      console.log(`[Sportsmonk] No fixture data for ${fixtureId}`);
-      continue;
-    }
+    if (!fixture) continue;
 
     // Auto-start: if match is "upcoming" in our DB but toss has happened on Sportsmonk
     if (match.status === "upcoming") {

@@ -30,12 +30,18 @@ export default function Leaderboard({ matchId, venueId }: LeaderboardProps) {
   // pre-match combined sub-view that sits alongside the round pills.
   const [selectedRound, setSelectedRound] = useState<number | "extras">(currentRound || 1);
 
-  // Sync selectedRound when currentRound changes — but don't clobber the user's
-  // explicit "extras" selection when the round ticks over in the background.
+  // Sync selectedRound when currentRound changes. Two guards:
+  //   - keep "extras" if the user explicitly picked it
+  //   - never DECREASE: if the API returns a stale participant.currentRound
+  //     (backend round counter lags during Sportsmonk hiccups), don't yank
+  //     the user from R4 back to R1.
   useEffect(() => {
-    if (currentRound && currentRound > 0) {
-      setSelectedRound((prev) => (prev === "extras" ? "extras" : currentRound));
-    }
+    if (!currentRound || currentRound <= 0) return;
+    setSelectedRound((prev) => {
+      if (prev === "extras") return "extras";
+      if (typeof prev === "number" && currentRound <= prev) return prev;
+      return currentRound;
+    });
   }, [currentRound]);
 
   useEffect(() => {
@@ -63,7 +69,11 @@ export default function Leaderboard({ matchId, venueId }: LeaderboardProps) {
     setLoading(false);
   };
 
-  const effectiveRound = currentRound || 1;
+  // Render pills up to whichever is higher: the live round we know about
+  // OR the round the user is currently looking at. Prevents pills from
+  // vanishing when the backend round counter regresses.
+  const selectedRoundNum = typeof selectedRound === "number" ? selectedRound : 0;
+  const effectiveRound = Math.max(currentRound || 1, selectedRoundNum);
   const roundNumbers = Array.from({ length: effectiveRound }, (_, i) => i + 1);
 
   const tabClass = (isActive: boolean) =>

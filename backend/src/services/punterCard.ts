@@ -16,7 +16,11 @@ import {
 // hot take = 20-25). Formula: round(odds * 5), clamped [5, 200].
 export function oddsToPoints(odds: number): number {
   if (!isFinite(odds) || odds <= 1) return 5;
-  return Math.max(5, Math.min(200, Math.round(odds * 5)));
+  // Round to nearest multiple of 5 so the on-screen number always reads as
+  // a clean tens/fives value (35, 40, 45, … never 42 or 49).
+  const raw = Math.round(odds * 5);
+  const snapped = Math.round(raw / 5) * 5;
+  return Math.max(5, Math.min(200, snapped));
 }
 
 const PUNTER_TEMPLATES = [

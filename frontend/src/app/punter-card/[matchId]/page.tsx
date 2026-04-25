@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, forwardRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronUp, Share2, ArrowLeft } from "lucide-react";
+import { ChevronDown, ChevronUp, Share2, ArrowLeft, Link as LinkIcon } from "lucide-react";
 import { toast } from "sonner";
 import { toPng } from "html-to-image";
 import { api } from "@/lib/api";
@@ -109,6 +109,16 @@ export default function PunterCardPage() {
     }
   };
 
+  const handleCopyLink = async () => {
+    try {
+      const url = typeof window !== "undefined" ? window.location.href : "";
+      await navigator.clipboard.writeText(url);
+      toast.success("Link copied — paste anywhere");
+    } catch {
+      toast.error("Couldn't copy link");
+    }
+  };
+
   const handleShare = async () => {
     if (!shareRef.current || sharing) return;
     setSharing(true);
@@ -197,13 +207,24 @@ export default function PunterCardPage() {
             <p className="text-xs opacity-60 truncate">{startLabel}</p>
           </div>
           {allAnswered && (
-            <button
-              onClick={handleShare}
-              className="px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-400 text-sm font-semibold flex items-center gap-1.5"
-            >
-              <Share2 className="w-4 h-4" />
-              Share
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleCopyLink}
+                className="px-3 py-1.5 rounded-lg border border-orange-500 text-orange-300 hover:bg-orange-500/10 text-sm font-semibold flex items-center gap-1.5"
+                title="Copy link to this card"
+              >
+                <LinkIcon className="w-4 h-4" />
+                Copy Link
+              </button>
+              <button
+                onClick={handleShare}
+                className="px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-400 text-sm font-semibold flex items-center gap-1.5"
+                title="Share card image"
+              >
+                <Share2 className="w-4 h-4" />
+                Share
+              </button>
+            </div>
           )}
         </div>
       </div>
