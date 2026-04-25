@@ -47,9 +47,15 @@ export default function LeaderboardPage() {
       return;
     }
 
-    if (!matchId) setMatchId(localStorage.getItem("jaffa_match_id"));
-    if (!venueId) setVenueId(localStorage.getItem("jaffa_venue_id"));
-    if (!roomId) setRoomId(localStorage.getItem("jaffa_room_id"));
+    // Treat poisoned "null"/"undefined" strings as missing — see my-picks
+    // for why these can end up in localStorage from past-battle nav.
+    const readLs = (k: string) => {
+      const v = localStorage.getItem(k);
+      return !v || v === "null" || v === "undefined" ? null : v;
+    };
+    if (!matchId) setMatchId(readLs("jaffa_match_id"));
+    if (!venueId) setVenueId(readLs("jaffa_venue_id"));
+    if (!roomId) setRoomId(readLs("jaffa_room_id"));
   }, [state.matchId, state.venueId, state.roomId, matchId, venueId, roomId, router]);
 
   // Pull match state when this page is the user's first stop, so context's

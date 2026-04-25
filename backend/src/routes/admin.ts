@@ -16,11 +16,14 @@ import { overStatsToContext } from "../services/feedback";
 
 const router = Router();
 
-// One-shot re-resolution of every prediction in a finished match. Wipes
-// stamped correctOption / isCorrect / pointsEarned, re-runs the resolvers
-// against fresh fixture+balls, and recomputes participant totals so the
-// leaderboard reflects the new outcomes. Use this after shipping resolver
-// fixes to repair matches that were resolved with the old buggy logic.
+// Delta re-resolution of every prediction in a match. For each row, asks
+// the resolver what the answer SHOULD be from fresh fixture+balls and only
+// flips the stored correctOption when the new value is non-null AND differs.
+// When Sportsmonk has aged out the fixture (no balls returned) the resolver
+// returns null and the row is left untouched — so this endpoint is a safe
+// no-op rather than a wipe. After delta updates, recomputeParticipantScores
+// rebuilds UserPrediction.isCorrect/pointsEarned + MatchParticipant totals
+// from the updated correctOptions. Idempotent: second run reports updated=0.
 router.post("/re-resolve-match", authenticateOwner, async (req: any, res: Response): Promise<void> => {
   try {
     const { matchId } = req.body as { matchId?: string };

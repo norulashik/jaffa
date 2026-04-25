@@ -180,6 +180,14 @@ export function GameProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    // Purge any "null"/"undefined" string poison that older builds wrote
+     // into localStorage from the past-battle nav path, so the rest of the
+     // hydration treats the slot as genuinely empty.
+    for (const k of ["jaffa_venue_id", "jaffa_match_id", "jaffa_room_id"]) {
+      const v = localStorage.getItem(k);
+      if (v === "null" || v === "undefined") localStorage.removeItem(k);
+    }
+
     const token = localStorage.getItem("jaffa_token");
     if (!token) {
       dispatch({ type: "SET_LOADING", isLoading: false });

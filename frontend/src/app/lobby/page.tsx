@@ -624,11 +624,16 @@ export default function HomeLiveMatches() {
                     onClick={() => {
                       // Stash match + venue so any subsequent tab nav (MY PICKS,
                       // RANKS) inside /match scopes to this completed match.
+                      // Guard against undefined/null venueId, which would
+                      // otherwise be saved as the literal string "undefined"
+                      // and poison every downstream check that does `|| ls.get`.
                       try {
-                        localStorage.setItem("jaffa_match_id", pm.matchId);
-                        localStorage.setItem("jaffa_venue_id", pm.venueId);
+                        if (pm.matchId) localStorage.setItem("jaffa_match_id", pm.matchId);
+                        if (pm.venueId) localStorage.setItem("jaffa_venue_id", pm.venueId);
+                        else localStorage.removeItem("jaffa_venue_id");
                       } catch {}
-                      router.push(`/match/${pm.matchId}?venueId=${pm.venueId}`);
+                      const qs = pm.venueId ? `?venueId=${pm.venueId}` : "";
+                      router.push(`/match/${pm.matchId}${qs}`);
                     }}
                     className="w-full game-card text-left hover:border-[#ff6341] transition-colors"
                   >

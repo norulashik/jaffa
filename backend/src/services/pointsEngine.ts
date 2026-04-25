@@ -41,7 +41,19 @@ function isAllCorrectPrediction(prediction: Prediction): boolean {
 }
 
 function isSelectedOptionCorrect(prediction: Prediction, selectedOption: string): boolean {
-  return isAllCorrectPrediction(prediction) || prediction.correctOption === selectedOption;
+  if (isAllCorrectPrediction(prediction)) return true;
+  const co = prediction.correctOption;
+  if (!co) return false;
+  // Punter card tie-breaks store a comma-joined list of winning keys
+  // (e.g. two batters tied on runs+balls). Anyone who picked any winner
+  // counts as correct; mirrors scorePunterUserAnswers in punterCard.ts.
+  if (co.includes(",")) {
+    for (const k of co.split(",")) {
+      if (k.trim() === selectedOption) return true;
+    }
+    return false;
+  }
+  return co === selectedOption;
 }
 
 function getResolvedLabel(prediction: Prediction, correctOption: string): string {

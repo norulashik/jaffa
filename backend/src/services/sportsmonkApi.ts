@@ -1,7 +1,7 @@
 import { Op } from "sequelize";
-import { Match, Prediction, MatchParticipant, UserPrediction } from "../models";
+import { Match, Prediction, MatchParticipant } from "../models";
 import { generatePerOverPredictions, generateHotTake, generatePlayerHotTake, generateRivalryCalls, getCurrentRound, generatePlayerPreMatchQuestions, generatePreMatchPredictions } from "./predictionEngine";
-import { ensurePunterCard, punterOpensAt, resolvePunterCard, resolvePunterCardEarly } from "./punterCard";
+import { ensurePunterCard, punterOpensAt, resolvePunterCard, resolvePunterCardEarly, computeCorrectFromBalls } from "./punterCard";
 import {
   ALL_CORRECT_OPTION,
   resolvePrediction,
@@ -667,7 +667,7 @@ export async function fetchUpcomingFixtures(): Promise<any[]> {
 }
 
 // Compute over stats from ball-by-ball data
-function computeOverStats(balls: BallData[], overNumber: number, innings: string): OverStats {
+export function computeOverStats(balls: BallData[], overNumber: number, innings: string): OverStats {
   // Sportsmonk uses 0-indexed overs: over 1 = balls 0.1-0.6, over 2 = balls 1.1-1.6
   const overPrefix = (overNumber - 1).toString();
   const overBalls = balls.filter(
@@ -989,81 +989,184 @@ export function isSix(b: any): boolean {
 // fixture + balls — then recomputes participant totals so leaderboards
 // reflect the new outcomes. Call after shipping resolver fixes to repair
 // matches that were resolved with the old buggy logic.
+// Equality check that's tolerant of comma-joined multi-winner correctOptions
+// (so "donovan,parag" matches "parag,donovan" and counts as unchanged).
+function correctOptionEquivalent(a: string | null, b: string | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const norm = (s: string) =>
+    Array.from(new Set(s.split(",").map((x) => x.trim()).filter(Boolean))).sort().join(",");
+  return norm(a) === norm(b);
+}
+
+// Pure dispatcher that returns the would-be correctOption for a prediction
+// without mutating any row. Returns null when the resolver can't determine
+// (insufficient data / unsupported category) — caller should treat null as
+// "skip, leave existing alone" so a wiped Sportsmonk fixture can't destroy
+// previously-stamped answers.
+function computeCorrectOptionForPrediction(
+  prediction: Prediction,
+  match: Match,
+  fixture: any,
+  runs: any[],
+  allBalls: BallData[]
+): string | null {
+  switch (prediction.category) {
+    case "punter_card": {
+      const tk = (prediction as any).templateKey;
+      if (!tk) return null;
+      return computeCorrectFromBalls(tk, fixture, allBalls);
+    }
+    case "pre_match":
+      return resolvePreMatchPrediction(prediction, fixture, match, allBalls);
+    case "hot_take":
+    case "rivalry_call":
+      return resolveEndOfMatchPrediction(prediction, fixture, match, runs, allBalls);
+    case "per_over": {
+      if (!prediction.overNumber) return null;
+      const innings = getPredictionInnings(prediction);
+      const inningsStr = innings === 1 ? "S1" : "S2";
+      const stats = computeOverStats(allBalls, prediction.overNumber, inningsStr);
+      return resolveOverPredictionFromStats(prediction, stats);
+    }
+    case "bold_call":
+      // Resolvers for bold_call live in resolveEndOfMatchPrediction's fall-through
+      // for hot_take-shaped questions. If a dedicated resolver is added later,
+      // route it here. For now, attempt the end-of-match path.
+      return resolveEndOfMatchPrediction(prediction, fixture, match, runs, allBalls);
+    default:
+      return null;
+  }
+}
+
+export interface ReResolveMatchSummary {
+  evaluated: number;
+  updated: number;
+  unchanged: number;
+  skipped_no_data: number;
+  participantsRecomputed: number;
+  details: Array<{
+    predictionId: string;
+    category: string;
+    question: string;
+    before: string | null;
+    after: string | null;
+    action: "updated" | "unchanged" | "skipped";
+  }>;
+}
+
+// Delta-only re-resolution: walks every prediction we own, asks the
+// resolver what the answer SHOULD be from fresh fixture + balls, and only
+// mutates a row when the new answer is non-null AND differs from what's
+// already stamped. Crucially: when the resolver can't determine (Sportsmonk
+// has aged out the fixture, returns no balls, etc.) the row is left untouched
+// — so this endpoint is a safe no-op rather than a wipe in that case.
+//
+// After all delta updates, recomputeParticipantScores rebuilds UserPrediction
+// isCorrect/pointsEarned + MatchParticipant totals from scratch using the
+// updated correctOptions, so leaderboards stay consistent.
+//
+// Idempotent: re-running converges (second run reports updated=0).
 export async function reResolveMatch(
   matchId: string,
-  io: SocketIOServer
-): Promise<{
-  predictionsReset: number;
-  userPredictionsReset: number;
-  punterResolved: number;
-  participantsRecomputed: number;
-}> {
+  _io: SocketIOServer
+): Promise<ReResolveMatchSummary> {
   const match = await Match.findByPk(matchId);
   if (!match) throw new Error("Match not found");
   if (!match.externalId) throw new Error("Match has no externalId — can't fetch fixture");
   const fixtureId = parseInt(match.externalId);
   if (Number.isNaN(fixtureId)) throw new Error("externalId is not numeric");
 
-  // Lazy-import the recompute helper to avoid circular import at module load.
   const { recomputeParticipantScores } = await import("./pointsEngine");
 
-  // 1. Pick every prediction the resolvers can re-stamp.
-  const targetPreds = await Prediction.findAll({
+  // Pull every prediction in this match across categories we own — both
+  // already-resolved (so we can fix wrong answers) and still-pending (so we
+  // can stamp them now if Sportsmonk has the data).
+  const candidates = await Prediction.findAll({
     where: {
       matchId,
       category: ["punter_card", "hot_take", "pre_match", "per_over", "rivalry_call", "bold_call"],
-      status: "resolved",
     },
   });
-  const predIds = targetPreds.map((p) => p.id);
 
-  if (predIds.length === 0) {
-    return { predictionsReset: 0, userPredictionsReset: 0, punterResolved: 0, participantsRecomputed: 0 };
-  }
-
-  // 2. Reset linked UserPrediction rows so the resolver's idempotency guard
-  //    (skip when isCorrect != null) doesn't short-circuit re-scoring.
-  const upReset = await UserPrediction.update(
-    { isCorrect: null as any, pointsEarned: 0, feedbackText: null },
-    { where: { predictionId: { [Op.in]: predIds } } }
-  );
-
-  // 3. Reset Predictions to status='locked' + clear correctOption so the
-  //    resolvers can write fresh values (resolvePrediction throws if the
-  //    row is already 'resolved').
-  await Prediction.update(
-    { status: "locked", correctOption: null as any },
-    { where: { id: { [Op.in]: predIds } } }
-  );
-
-  // 4. Pull fresh fixture + balls.
-  const fixture = await fetchLiveFixtureDetail(fixtureId, true);
-  const allBalls: BallData[] = fixture?.balls?.data || [];
-  const runs = fixture?.runs?.data || (Array.isArray(fixture?.runs) ? fixture.runs : []);
-
-  // 5. Re-run each resolver path with the fixed logic.
-  let punterResolvedCount = 0;
-  try {
-    await resolveRemainingPredictionsAtMatchEnd(match, fixture, runs, allBalls, io);
-  } catch (err) {
-    console.error("[reResolveMatch] resolveRemaining error:", err);
-  }
-  try {
-    const r = await resolvePunterCard(matchId, fixture, allBalls);
-    punterResolvedCount = r.resolved;
-  } catch (err) {
-    console.error("[reResolveMatch] resolvePunterCard error:", err);
-  }
-
-  // 6. Rebuild leaderboard totals from the freshly-stamped UserPredictions.
-  const recompute = await recomputeParticipantScores({ matchId });
-
-  return {
-    predictionsReset: predIds.length,
-    userPredictionsReset: upReset[0] || 0,
-    punterResolved: punterResolvedCount,
-    participantsRecomputed: recompute.participantsRecomputed,
+  const summary: ReResolveMatchSummary = {
+    evaluated: 0,
+    updated: 0,
+    unchanged: 0,
+    skipped_no_data: 0,
+    participantsRecomputed: 0,
+    details: [],
   };
+
+  if (candidates.length === 0) return summary;
+
+  const fixture = await fetchLiveFixtureDetail(fixtureId, true);
+  const allBalls: BallData[] = fixture?.balls?.data || (Array.isArray(fixture?.balls) ? fixture.balls : []);
+  const runs: any[] = fixture?.runs?.data || (Array.isArray(fixture?.runs) ? fixture.runs : []);
+
+  for (const pred of candidates) {
+    summary.evaluated += 1;
+    let newCorrect: string | null = null;
+    try {
+      newCorrect = computeCorrectOptionForPrediction(pred, match, fixture, runs, allBalls);
+    } catch (err) {
+      console.error(`[reResolveMatch] resolver error for prediction ${pred.id}:`, err);
+      newCorrect = null;
+    }
+
+    const before = pred.correctOption || null;
+
+    if (newCorrect == null) {
+      summary.skipped_no_data += 1;
+      summary.details.push({
+        predictionId: pred.id,
+        category: pred.category,
+        question: pred.question,
+        before,
+        after: null,
+        action: "skipped",
+      });
+      continue;
+    }
+
+    if (correctOptionEquivalent(before, newCorrect)) {
+      summary.unchanged += 1;
+      // Make sure status is "resolved" so recomputeParticipantScores will
+      // honor the correctOption. Cheap no-op if already resolved.
+      if (pred.status !== "resolved") {
+        await pred.update({ status: "resolved" });
+      }
+      summary.details.push({
+        predictionId: pred.id,
+        category: pred.category,
+        question: pred.question,
+        before,
+        after: newCorrect,
+        action: "unchanged",
+      });
+      continue;
+    }
+
+    // Genuine flip: stamp the new correctOption + mark resolved.
+    await pred.update({ correctOption: newCorrect, status: "resolved" });
+    summary.updated += 1;
+    summary.details.push({
+      predictionId: pred.id,
+      category: pred.category,
+      question: pred.question,
+      before,
+      after: newCorrect,
+      action: "updated",
+    });
+  }
+
+  // Single rebuild of UserPrediction.isCorrect/pointsEarned + MatchParticipant
+  // totals from the (possibly updated) correctOptions. This is the only place
+  // that touches UserPrediction rows in the new flow.
+  const recompute = await recomputeParticipantScores({ matchId });
+  summary.participantsRecomputed = recompute.participantsRecomputed;
+
+  return summary;
 }
 
 async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {

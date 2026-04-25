@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, forwardRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronUp, Share2, ArrowLeft, Link as LinkIcon } from "lucide-react";
 import { toast } from "sonner";
-import { toPng } from "html-to-image";
+import { toJpeg } from "html-to-image";
 import { api } from "@/lib/api";
 
 type Question = {
@@ -123,15 +123,20 @@ export default function PunterCardPage() {
     if (!shareRef.current || sharing) return;
     setSharing(true);
     try {
-      // Render the hidden share-card DOM to a PNG data URL.
-      // pixelRatio=2 makes the image crisp on high-DPI phones.
-      const dataUrl = await toPng(shareRef.current, {
-        pixelRatio: 2,
-        cacheBust: true,
-        backgroundColor: "#0b1220",
+      // JPEG (not PNG) at pixelRatio 1.5 — keeps the image under ~700KB,
+      // which is the practical ceiling for iOS WhatsApp's "Send to" share
+      // sheet. Bigger PNGs trigger "This item cannot be shared." Quality
+      // 0.92 is visually indistinguishable from PNG for the gradient card.
+      // cacheBust intentionally OFF: it appends ?t=… to the embedded
+      // /jaffa-logo-mark.png src and races the rasterizer, which sometimes
+      // produced a logo-less card.
+      const dataUrl = await toJpeg(shareRef.current, {
+        pixelRatio: 1.5,
+        quality: 0.92,
+        backgroundColor: "#1a0033",
       });
       const blob = await (await fetch(dataUrl)).blob();
-      const file = new File([blob], "punter-card.png", { type: "image/png" });
+      const file = new File([blob], "punter-card.jpg", { type: "image/jpeg" });
       const title = `My Punter Card — ${match?.team1Short || "T1"} vs ${match?.team2Short || "T2"}`;
 
       const navAny = navigator as any;
@@ -148,10 +153,10 @@ export default function PunterCardPage() {
         }
       }
 
-      // Fallback: download the PNG so the user can manually attach it.
+      // Fallback: download the JPEG so the user can manually attach it.
       const a = document.createElement("a");
       a.href = dataUrl;
-      a.download = "punter-card.png";
+      a.download = "punter-card.jpg";
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -385,15 +390,21 @@ const ShareCard = forwardRef<HTMLDivElement, {
         overflow: "hidden",
       }}
     >
-      {/* Header — logo image on the left, date pill on the right */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 36, position: "relative", zIndex: 2 }}>
+      {/* Header — JAFFA brand mark centered at the top, with the date
+          pill floated to the top-right so the logo stays visually anchored
+          as the focal point of the card. */}
+      <div style={{ position: "relative", marginBottom: 36, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 140 }}>
         <img
           src="/jaffa-logo-mark.png"
-          alt=""
-          style={{ height: 96, width: "auto", objectFit: "contain", filter: "drop-shadow(0 0 18px rgba(255,255,255,0.35))" }}
+          alt="JAFFA"
+          crossOrigin="anonymous"
+          style={{ height: 140, width: "auto", objectFit: "contain", filter: "drop-shadow(0 0 22px rgba(255,255,255,0.45))" }}
         />
         <div
           style={{
+            position: "absolute",
+            top: 0,
+            right: 0,
             fontSize: 22,
             padding: "10px 20px",
             borderRadius: 999,

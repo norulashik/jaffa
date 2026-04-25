@@ -497,7 +497,7 @@ export async function resolvePunterCard(
   return { resolved };
 }
 
-function computeCorrectFromBalls(
+export function computeCorrectFromBalls(
   tk: PunterTemplate,
   fixture: any,
   allBalls: any[]
