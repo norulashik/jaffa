@@ -87,7 +87,7 @@ export default function PunterCardPage() {
 
   const handleLockIn = async () => {
     if (!venueId) {
-      toast.error("Join a venue first");
+      toast.error("Pick a match first");
       return;
     }
     if (pendingSelections.length === 0) {
@@ -140,7 +140,7 @@ export default function PunterCardPage() {
           await navAny.share({
             files: [file],
             title,
-            text: "Watch along on JAFFA at your local cafe 🏏",
+            text: "Predict from anywhere · playjaffa.com 🏏",
           });
           return;
         } catch {
@@ -368,77 +368,158 @@ const ShareCard = forwardRef<HTMLDivElement, {
       style={{
         width: 1080,
         minHeight: 1350,
-        padding: 64,
-        background: "linear-gradient(135deg, #0b1220 0%, #1a1033 100%)",
+        padding: 56,
+        // Neon purple → fuchsia gradient with two soft "lightning" radials
+        // baked into the background so the result has the energetic, glassy
+        // look of the reference card without needing extra SVG art.
+        background:
+          "radial-gradient(ellipse at 12% 18%, rgba(255,45,200,0.55) 0%, transparent 42%), " +
+          "radial-gradient(ellipse at 88% 82%, rgba(120,40,255,0.55) 0%, transparent 42%), " +
+          "linear-gradient(135deg, #1a0033 0%, #3d0a5e 50%, #5b1278 100%)",
         color: "white",
-        fontFamily: "system-ui, -apple-system, sans-serif",
+        fontFamily: "'Bungee', 'Impact', cursive",
         display: "flex",
         flexDirection: "column",
         boxSizing: "border-box",
+        position: "relative",
+        overflow: "hidden",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 32 }}>
-        <div style={{ fontSize: 36, fontWeight: 800, letterSpacing: -1, color: "#ff6341" }}>JAFFA</div>
-        <div style={{ fontSize: 22, opacity: 0.7 }}>{startLabel}</div>
+      {/* Header — logo image on the left, date pill on the right */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 36, position: "relative", zIndex: 2 }}>
+        <img
+          src="/jaffa-logo-mark.png"
+          alt=""
+          style={{ height: 96, width: "auto", objectFit: "contain", filter: "drop-shadow(0 0 18px rgba(255,255,255,0.35))" }}
+        />
+        <div
+          style={{
+            fontSize: 22,
+            padding: "10px 20px",
+            borderRadius: 999,
+            background: "rgba(255,255,255,0.12)",
+            border: "1px solid rgba(255,255,255,0.25)",
+            backdropFilter: "blur(8px)",
+            letterSpacing: 1,
+          }}
+        >
+          {startLabel}
+        </div>
       </div>
 
-      <div style={{ fontSize: 28, opacity: 0.7, textTransform: "uppercase", letterSpacing: 2 }}>Punter Card</div>
-      <div style={{ fontSize: 72, fontWeight: 900, marginTop: 8, marginBottom: 48, letterSpacing: -2 }}>
-        {t1} <span style={{ opacity: 0.4 }}>vs</span> {t2}
-      </div>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 14, flex: 1 }}>
-        {picks.map((p, i) => (
-          <div
-            key={i}
-            style={{
-              background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.1)",
-              borderRadius: 14,
-              padding: "18px 24px",
-              display: "flex",
-              alignItems: "center",
-              gap: 20,
-            }}
-          >
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 18, opacity: 0.55, marginBottom: 4 }}>{p.question}</div>
-              <div style={{ fontSize: 26, fontWeight: 700 }}>{p.pick}</div>
-            </div>
-            <div
-              style={{
-                fontSize: 22,
-                fontWeight: 800,
-                color: "#60a5fa",
-                background: "rgba(96,165,250,0.12)",
-                padding: "8px 14px",
-                borderRadius: 10,
-                whiteSpace: "nowrap",
-              }}
-            >
-              {p.points} pts
-            </div>
-          </div>
-        ))}
-      </div>
-
+      {/* Glassmorphism inner card */}
       <div
         style={{
-          marginTop: 40,
-          padding: "24px 0",
-          borderTop: "1px solid rgba(255,255,255,0.12)",
+          flex: 1,
+          padding: "44px 40px",
+          borderRadius: 28,
+          background: "rgba(255,255,255,0.07)",
+          border: "2px solid rgba(255,255,255,0.18)",
+          backdropFilter: "blur(20px)",
+          boxShadow: "0 0 80px rgba(180,40,220,0.45), inset 0 0 40px rgba(255,255,255,0.04)",
           display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
+          flexDirection: "column",
+          gap: 28,
+          position: "relative",
+          zIndex: 1,
         }}
       >
+        {/* Title block */}
         <div>
-          <div style={{ fontSize: 20, opacity: 0.6, textTransform: "uppercase", letterSpacing: 2 }}>Max Potential</div>
-          <div style={{ fontSize: 56, fontWeight: 900, color: "#ff6341", marginTop: 6 }}>{totalPts} pts</div>
+          <div style={{ fontSize: 24, opacity: 0.7, letterSpacing: 4, fontFamily: "'Bungee', 'Impact', cursive" }}>
+            PUNTER CARD
+          </div>
+          <div
+            style={{
+              fontSize: 88,
+              marginTop: 6,
+              letterSpacing: 1,
+              lineHeight: 1,
+              fontFamily: "'Bungee', 'Impact', cursive",
+              textShadow: "0 0 30px rgba(255,180,255,0.45)",
+            }}
+          >
+            {t1} <span style={{ opacity: 0.4, fontSize: 64 }}>VS</span> {t2}
+          </div>
         </div>
-        <div style={{ textAlign: "right", fontSize: 22, opacity: 0.65 }}>
-          Play along at your local cafe <br />
-          <span style={{ color: "#ff6341", fontWeight: 700 }}>jaffa.in</span>
+
+        {/* Picks list */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {picks.map((p, i) => (
+            <div
+              key={i}
+              style={{
+                background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                borderRadius: 14,
+                padding: "18px 22px",
+                display: "flex",
+                alignItems: "center",
+                gap: 18,
+              }}
+            >
+              <div style={{ flex: 1, fontFamily: "system-ui, -apple-system, sans-serif" }}>
+                <div style={{ fontSize: 16, opacity: 0.6, marginBottom: 4, fontWeight: 500 }}>{p.question}</div>
+                <div style={{ fontSize: 24, fontWeight: 700 }}>{p.pick}</div>
+              </div>
+              <div
+                style={{
+                  fontSize: 22,
+                  fontFamily: "'Bungee', 'Impact', cursive",
+                  color: "#7be4ff",
+                  background: "rgba(123,228,255,0.14)",
+                  padding: "8px 16px",
+                  borderRadius: 10,
+                  whiteSpace: "nowrap",
+                  textShadow: "0 0 12px rgba(123,228,255,0.6)",
+                }}
+              >
+                {p.points} PTS
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Max-potential footer */}
+        <div
+          style={{
+            marginTop: "auto",
+            paddingTop: 24,
+            borderTop: "1px solid rgba(255,255,255,0.18)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <div>
+            <div style={{ fontSize: 18, opacity: 0.6, letterSpacing: 3 }}>MAX POTENTIAL</div>
+            <div
+              style={{
+                fontSize: 64,
+                marginTop: 4,
+                color: "#ff79f0",
+                fontFamily: "'Bungee', 'Impact', cursive",
+                textShadow: "0 0 22px rgba(255,121,240,0.65)",
+              }}
+            >
+              {totalPts} PTS
+            </div>
+          </div>
+          <div style={{ textAlign: "right", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+            <div style={{ fontSize: 18, opacity: 0.75, fontWeight: 600 }}>Predict from anywhere</div>
+            <div style={{ fontSize: 16, opacity: 0.6, marginTop: 2 }}>Enjoy your rewards</div>
+            <div
+              style={{
+                fontSize: 18,
+                marginTop: 8,
+                color: "#7be4ff",
+                fontFamily: "'Bungee', 'Impact', cursive",
+                letterSpacing: 1,
+              }}
+            >
+              playjaffa.com
+            </div>
+          </div>
         </div>
       </div>
     </div>

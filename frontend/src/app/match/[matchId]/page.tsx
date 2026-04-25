@@ -819,6 +819,23 @@ export default function MatchDashboard() {
           const sd = matchData?.scoreData || {};
           const currentOver = sd.currentOver || matchData?.currentOver || 0;
           const nextOver = currentOver + 1;
+          // Completed match → "BATTLE OVER" banner instead of the live header.
+          // Used for the past-battles flow: same /match URL, read-only mode.
+          if (matchData?.status === "completed") {
+            return (
+              <>
+                <div className="text-center py-2">
+                  <span
+                    className="inline-block px-4 py-1.5 text-sm font-black uppercase tracking-widest text-black bg-[#22c55e] border-2 border-black"
+                    style={{ fontFamily: "'Bungee', 'Impact', cursive", boxShadow: "3px 3px 0 0 #000" }}
+                  >
+                    Battle Over
+                  </span>
+                </div>
+                <OverBallsPanel matchId={matchId} scoreVersion={scoreVersion} />
+              </>
+            );
+          }
           if (currentOver > 0 && nextOver <= (matchData?.totalOvers || 20)) {
             return (
               <>
@@ -1096,7 +1113,8 @@ export default function MatchDashboard() {
                     );
                   })}
 
-                  {/* All caught up */}
+                  {/* All caught up — slightly different copy when the match
+                      is over (read-only past-battles flow) vs mid-match. */}
                   {openPreds.length === 0 && (
                     <div className="game-card flex flex-col items-center justify-center py-16 text-center p-6">
                       <span className="text-5xl mb-4">🏏</span>
@@ -1104,10 +1122,12 @@ export default function MatchDashboard() {
                         className="text-xl text-white mb-2"
                         style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
                       >
-                        ALL CAUGHT UP!
+                        {matchData?.status === "completed" ? "MATCH COMPLETE" : "ALL CAUGHT UP!"}
                       </h3>
-                      <p className="text-sm text-white/50 max-w-[240px]">
-                        New predictions drop at the end of this over. Keep watching!
+                      <p className="text-sm text-white/50 max-w-[260px]">
+                        {matchData?.status === "completed"
+                          ? "Open My Picks below to see how you did."
+                          : "New predictions drop at the end of this over. Keep watching!"}
                       </p>
                     </div>
                   )}
@@ -1132,7 +1152,8 @@ export default function MatchDashboard() {
                         others.push(p);
                       }
                     }
-                    const overKeys = Array.from(overBuckets.keys()).sort((a, b) => a - b);
+                    // Latest over first — matches the "newest at top" theme.
+                    const overKeys = Array.from(overBuckets.keys()).sort((a, b) => b - a);
 
                     const toggleGroup = (key: string) => {
                       setExpandedPickGroups((prev) => {

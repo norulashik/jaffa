@@ -901,6 +901,59 @@ async function autoImportTodayFixtures(): Promise<void> {
   }
 }
 
+// Match-end flow extracted so it can be triggered both from Sportsmonk's
+// "Finished" status and from our own end-of-match detection (target chased
+// etc.). Idempotent: bails out if status is already "completed".
+async function finalizeMatch(
+  match: Match,
+  fixture: any,
+  fixtureId: number,
+  runs: any[],
+  io: SocketIOServer
+): Promise<void> {
+  if (match.status === "completed") return;
+  await match.update({ status: "completed", currentPhase: "completed" as any });
+
+  // Resolve pre-match + per-over + hot-take + rivalry predictions.
+  try {
+    const fullFixture = await fetchLiveFixtureDetail(fixtureId, true);
+    const allBalls: BallData[] = fullFixture?.balls?.data || [];
+    await resolveRemainingPredictionsAtMatchEnd(match, fixture, runs, allBalls, io);
+  } catch (resolveErr) {
+    console.error("[Sportsmonk] Error resolving predictions at match-end:", resolveErr);
+  }
+
+  // Resolve Punter Card questions.
+  try {
+    const r = await resolvePunterCard(match.id);
+    if (r.resolved > 0) console.log(`[PunterCard] Resolved ${r.resolved} questions for ${match.id}`);
+  } catch (err) {
+    console.error("[PunterCard] resolve error:", err);
+  }
+
+  // Generate final-round + grand-prize rewards per venue.
+  const venues = await MatchParticipant.findAll({
+    where: { matchId: match.id },
+    attributes: ["venueId"],
+    group: ["venueId"],
+  });
+  for (const v of venues) {
+    await generateRoundRewards(match.id, v.venueId, 6, io);
+    await generateRoundRewards(match.id, v.venueId, 0, io);
+  }
+
+  // Close any active rooms for this match.
+  try {
+    const { Room } = await import("../models");
+    await Room.update({ status: "closed" }, { where: { matchId: match.id, status: "active" } });
+  } catch (err) {
+    console.error("[Sportsmonk] Room close error:", err);
+  }
+
+  io.to(`match:${match.id}`).emit("matchEnd", { matchId: match.id, winner: fixture.winner_team_id });
+  console.log(`[Sportsmonk] Match ${match.id} ended — all predictions resolved`);
+}
+
 async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
   // Pull today's Sportsmonk fixtures into the DB so Punter Card + pre-match
   // predictions exist before users tap JOIN. Throttled internally.
@@ -1471,52 +1524,29 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
     lastKnownScore.set(match.id, { innings: currentInnings, score: nowScore, wickets: nowWickets, overs: nowOvers });
 
     // Check if match ended
-    if (fixture.status === "Finished") {
-      if (match.status !== "completed") {
-        await match.update({ status: "completed", currentPhase: "completed" as any });
+    // ---- Match-end finalization ----
+    // Two triggers fire the same flow (idempotent, gated on status !== completed):
+    //   (a) Sportsmonk has flipped status to "Finished" — authoritative.
+    //   (b) We can compute end-of-match from the score data ourselves
+    //       (target chased / inn-2 all out / inn-2 overs done). This catches
+    //       the gap where Sportsmonk takes minutes to flip status, leaving
+    //       early-generated predictions (e.g. Over 20 created mid-Over 18)
+    //       stuck open after the actual finish.
+    const inn1RunsForEnd = runs.find((r: any) => r.inning === 1);
+    const inn2RunsForEnd = runs.find((r: any) => r.inning === 2);
+    const totalOversForEnd = match.totalOvers || 20;
+    const targetChased = !!(inn1RunsForEnd && inn2RunsForEnd && Number(inn2RunsForEnd.score) > Number(inn1RunsForEnd.score));
+    const inn2AllOut = !!(inn2RunsForEnd && Number(inn2RunsForEnd.wickets) >= 10);
+    const inn2OversDone = !!(inn2RunsForEnd && Number(inn2RunsForEnd.overs) >= totalOversForEnd - 0.001);
+    const computedEnd = targetChased || inn2AllOut || inn2OversDone;
 
-        // === Resolve pre-match predictions using Sportmonks data ===
-        try {
-          // Fetch full fixture data for resolution (balls needed for sixes/wicket type)
-          const fullFixture = await fetchLiveFixtureDetail(fixtureId, true);
-          const allBalls: BallData[] = fullFixture?.balls?.data || [];
-          await resolveRemainingPredictionsAtMatchEnd(match, fixture, runs, allBalls, io);
-        } catch (resolveErr) {
-          console.error("[Sportsmonk] Error resolving pre-match predictions:", resolveErr);
-        }
-
-        // === Resolve Punter Card questions ===
-        try {
-          const r = await resolvePunterCard(match.id);
-          if (r.resolved > 0) console.log(`[PunterCard] Resolved ${r.resolved} questions for ${match.id}`);
-        } catch (err) {
-          console.error("[PunterCard] resolve error:", err);
-        }
-
-        // Generate final rewards
-        const venues = await MatchParticipant.findAll({
-          where: { matchId: match.id },
-          attributes: ["venueId"],
-          group: ["venueId"],
-        });
-        for (const v of venues) {
-          await generateRoundRewards(match.id, v.venueId, 6, io); // Final round rewards
-          await generateRoundRewards(match.id, v.venueId, 0, io); // Grand prize
-        }
-
-        // Close rooms for this match
-        try {
-          const { Room } = await import("../models");
-          await Room.update({ status: "closed" }, { where: { matchId: match.id, status: "active" } });
-        } catch (err) {
-          console.error("[Sportsmonk] Room close error:", err);
-        }
-
-        io.to(`match:${match.id}`).emit("matchEnd", { matchId: match.id, winner: fixture.winner_team_id });
-        console.log(`[Sportsmonk] Match ${match.id} ended — all predictions resolved`);
-      }
+    if ((fixture.status === "Finished" || computedEnd) && match.status !== "completed") {
+      await finalizeMatch(match, fixture, fixtureId, runs, io);
       continue;
     }
+
+    // Skip the rest of the poll body once the match is completed.
+    if (match.status === "completed") continue;
 
     // Check for innings break.
     // Two triggers, whichever fires first:

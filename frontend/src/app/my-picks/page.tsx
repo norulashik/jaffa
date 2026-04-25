@@ -62,10 +62,10 @@ function PercentileBadge({ aggregates }: { aggregates: { global?: ScopeAgg; venu
   const gPct = g?.correctPct ?? Infinity;
   const vPct = v?.correctPct ?? Infinity;
   const leadIsVenue = vLabel && (!gLabel || vPct <= gPct);
-  const primary = leadIsVenue ? `${vLabel} at this venue` : `${gLabel} globally`;
+  const primary = leadIsVenue ? `${vLabel} in your group` : `${gLabel} globally`;
   const secondary = leadIsVenue
     ? gLabel && `${gLabel} globally`
-    : vLabel && `${vLabel} at this venue`;
+    : vLabel && `${vLabel} in your group`;
 
   return (
     <div className="mt-2 text-[11px] font-bold flex items-center gap-1 flex-wrap">
@@ -119,7 +119,9 @@ export default function MyPicksPage() {
   const answeredPreds = predictions.filter(
     (p: any) => p.userAnswer?.selectedOption
   );
-  const allPicks = [...answeredPreds].reverse();
+  // Backend now returns predictions newest-first via createdAt DESC, so we
+  // don't need to reverse here. Latest pick lands at the top of the list.
+  const allPicks = [...answeredPreds];
 
   // Derive the current over from resolved per-over predictions: the highest
   // resolved overNumber is the most recently completed over, so the live over
@@ -249,7 +251,8 @@ export default function MyPicksPage() {
                   others.push(p);
                 }
               }
-              const overKeys = Array.from(overBuckets.keys()).sort((a, b) => a - b);
+              // Latest over first — matches the "newest at top" theme.
+              const overKeys = Array.from(overBuckets.keys()).sort((a, b) => b - a);
 
               const toggleGroup = (key: string) => {
                 setExpandedGroups((prev) => {

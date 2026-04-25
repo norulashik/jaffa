@@ -9,7 +9,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "JAFFA - Predict. Play. Win.",
   description:
-    "IPL match prediction game. Predict ball-by-ball, climb the leaderboard, win rewards at your venue.",
+    "IPL prediction game. Predict from anywhere, climb the leaderboard, enjoy your rewards.",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,

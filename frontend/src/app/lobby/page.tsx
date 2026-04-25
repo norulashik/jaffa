@@ -149,7 +149,7 @@ export default function HomeLiveMatches() {
       const venueId = localStorage.getItem("jaffa_venue_id") || "";
 
       if (!venueId) {
-        setCodeModal({ ...codeModal, validating: false, error: "Please scan your cafe's QR code first." });
+        setCodeModal({ ...codeModal, validating: false, error: "Scan your invite QR code first." });
         return;
       }
 
@@ -526,19 +526,34 @@ export default function HomeLiveMatches() {
                 )
               ) : (
                 (() => {
-                  // Punter Card opens at midnight on match day; before that,
-                  // keep the "notify me" placeholder. Card is only available
-                  // for imported matches (real UUIDs, not sportsmonk_ stubs).
+                  // Punter Card opens at midnight on match day. Once it's
+                  // match day we ALWAYS enable the button; if the match is
+                  // still a sportsmonk_<id> stub (auto-import didn't run),
+                  // we import on tap so the user never has to wait for the
+                  // backend's periodic scan.
                   const storedVenueId = typeof window !== "undefined" ? (localStorage.getItem("jaffa_venue_id") || "") : "";
-                  const isImported = !match.id.startsWith("sportsmonk_");
                   const startDateObj = match.startTime ? new Date(match.startTime) : null;
                   const cardOpensAt = startDateObj ? new Date(startDateObj.getFullYear(), startDateObj.getMonth(), startDateObj.getDate()) : null;
-                  const cardOpen = isImported && !!cardOpensAt && now >= cardOpensAt.getTime();
-                  if (cardOpen) {
+                  const isMatchDay = !!cardOpensAt && now >= cardOpensAt.getTime();
+                  const isImported = !match.id.startsWith("sportsmonk_");
+
+                  if (isMatchDay) {
                     return (
                       <div className="space-y-2">
                         <button
-                          onClick={() => router.push(`/punter-card/${match.id}${storedVenueId ? `?venueId=${storedVenueId}` : ""}`)}
+                          onClick={async () => {
+                            try {
+                              let realId = match.id;
+                              if (!isImported) {
+                                const fixtureId = match.id.replace("sportsmonk_", "");
+                                const result = await api.importMatch(fixtureId);
+                                realId = result.match.id;
+                              }
+                              router.push(`/punter-card/${realId}${storedVenueId ? `?venueId=${storedVenueId}` : ""}`);
+                            } catch (err: any) {
+                              toast.error(err?.message || "Couldn't open Punter Card");
+                            }
+                          }}
                           className="w-full btn-sticker uppercase tracking-tight"
                           style={{ background: "#1a1a1a", color: "#fff", border: "2px solid #3b9eff" }}
                         >
@@ -571,8 +586,9 @@ export default function HomeLiveMatches() {
         })}
 
         {/* Past Battles — collapsible. Completed matches the user participated
-            in. Clicking a row opens /history/<matchId> which shows final
-            leaderboard + rewards so the user can screenshot for support. */}
+            in. Tapping a row opens the regular /match/<id> page in its
+            "BATTLE OVER" mode so MyPicks + Ranks tabs all reflect that
+            specific match (consistent with the live UX). */}
         {(pastMatches.length > 0 || pastLoading) && (
           <>
             <button
@@ -605,7 +621,15 @@ export default function HomeLiveMatches() {
                 return (
                   <button
                     key={pm.matchId + ":" + pm.venueId}
-                    onClick={() => router.push(`/history/${pm.matchId}?venueId=${pm.venueId}`)}
+                    onClick={() => {
+                      // Stash match + venue so any subsequent tab nav (MY PICKS,
+                      // RANKS) inside /match scopes to this completed match.
+                      try {
+                        localStorage.setItem("jaffa_match_id", pm.matchId);
+                        localStorage.setItem("jaffa_venue_id", pm.venueId);
+                      } catch {}
+                      router.push(`/match/${pm.matchId}?venueId=${pm.venueId}`);
+                    }}
                     className="w-full game-card text-left hover:border-[#ff6341] transition-colors"
                   >
                     <div className="flex justify-between items-start mb-2">
@@ -672,7 +696,7 @@ export default function HomeLiveMatches() {
               ENTER MATCH CODE
             </h3>
             <p className="text-[#6b7280] text-xs text-center mb-6">
-              Get the 4-digit code from your cafe to join
+              Got a 4-digit invite code? Enter it to join.
             </p>
 
             <div className="flex items-center gap-2 mb-4">

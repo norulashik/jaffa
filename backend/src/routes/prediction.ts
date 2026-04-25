@@ -60,7 +60,9 @@ router.get("/:matchId", authenticateUser, async (req: AuthRequest, res: Response
 
     const predictions = await Prediction.findAll({
       where,
-      order: [["createdAt", "ASC"]],
+      // Newest-first everywhere — the most recent question is the one users
+      // care about; older ones drop off into per-over drawers below.
+      order: [["createdAt", "DESC"]],
     });
 
     // Hide predictions that haven't opened yet

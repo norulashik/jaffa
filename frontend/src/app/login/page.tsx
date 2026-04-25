@@ -21,14 +21,20 @@ export default function LoginOTP() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [venueName, setVenueName] = useState("");
+  // Hold the form back until we've checked localStorage for an existing
+  // session. Without this the login form briefly flashes for already-logged-in
+  // users before the redirect fires, making them think they need to log in
+  // again. Initial true → render a quiet loader; flips to false only when we
+  // confirm there's no token to redirect with.
+  const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
-    // If already logged in, go to lobby
     const token = localStorage.getItem("jaffa_token");
     if (token) {
       router.replace(isCafeRoute() ? cafeUrl("/lobby") : "/lobby");
       return;
     }
+    setCheckingAuth(false);
     if (isCafeRoute()) {
       const venueId = localStorage.getItem("jaffa_venue_id");
       if (venueId) {
@@ -60,6 +66,20 @@ export default function LoginOTP() {
       setLoading(false);
     }
   };
+
+  // While we're checking for an existing session, render a quiet centred
+  // spinner instead of the login form. Already-logged-in users see this
+  // for one tick before the redirect to /lobby fires.
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen bg-[#0d0d0d] flex items-center justify-center">
+        <div
+          className="w-8 h-8 animate-spin"
+          style={{ border: "3px solid #ff6341", borderTopColor: "transparent", borderRadius: "2px" }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#0d0d0d] flex flex-col items-center justify-center px-4 py-8">

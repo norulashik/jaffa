@@ -542,7 +542,8 @@ router.get("/:matchId/state", authenticateUser, async (req: AuthRequest, res: Re
 
     const openPredictions = await Prediction.findAll({
       where: { matchId, status: "open" },
-      order: [["createdAt", "ASC"]],
+      // Newest-first to match the rest of the app's "latest at top" theme.
+      order: [["createdAt", "DESC"]],
     });
 
     const playerCount = await MatchParticipant.count({

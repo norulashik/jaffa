@@ -85,9 +85,9 @@ export default function CafePage() {
           >
             <span className="text-3xl text-black" style={BUNGEE}>?</span>
           </div>
-          <h1 className="text-xl mb-2" style={BUNGEE}>Venue Not Found</h1>
+          <h1 className="text-xl mb-2" style={BUNGEE}>Link Not Found</h1>
           <p className="text-white/50 text-sm">
-            This cafe link is invalid or no longer active.
+            This invite link is invalid or no longer active.
           </p>
         </div>
       </div>
