@@ -37,12 +37,11 @@ export default function OverBallsPanel({ matchId, scoreVersion }: OverBallsPanel
   const [overs, setOvers] = useState<OverGroup[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const hasInitializedScrollRef = useRef(false);
-  const shouldFollowLiveEdgeRef = useRef(true);
-
-  const isNearRightEdge = useCallback((element: HTMLDivElement) => {
-    const threshold = 48;
-    return element.scrollLeft + element.clientWidth >= element.scrollWidth - threshold;
-  }, []);
+  // Once the user has touched / scrolled the strip even once, stop ever
+  // forcing it back to the live edge. Previous "follow if near right edge"
+  // heuristic kept misclassifying mid-swipe positions and yanking the user
+  // back to the latest ball every poll tick.
+  const userTouchedRef = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -55,22 +54,31 @@ export default function OverBallsPanel({ matchId, scoreVersion }: OverBallsPanel
 
   useEffect(() => { load(); }, [load, scoreVersion]);
 
+  // Listen for the first user-driven scroll/touch on the strip and lock
+  // out any further auto-scrolling.
   useEffect(() => {
     const element = scrollRef.current;
     if (!element) return;
 
-    const handleScroll = () => {
-      shouldFollowLiveEdgeRef.current = isNearRightEdge(element);
-    };
+    const markTouched = () => { userTouchedRef.current = true; };
 
-    handleScroll();
-    element.addEventListener("scroll", handleScroll, { passive: true });
-    return () => element.removeEventListener("scroll", handleScroll);
-  }, [isNearRightEdge]);
+    // Both pointer + touch + wheel cover the realistic input modes; we
+    // intentionally do NOT listen to "scroll" because programmatic scrolls
+    // we trigger ourselves would falsely flip the flag on first load.
+    element.addEventListener("pointerdown", markTouched, { passive: true });
+    element.addEventListener("touchstart", markTouched, { passive: true });
+    element.addEventListener("wheel", markTouched, { passive: true });
+    return () => {
+      element.removeEventListener("pointerdown", markTouched);
+      element.removeEventListener("touchstart", markTouched);
+      element.removeEventListener("wheel", markTouched);
+    };
+  }, []);
 
   // Overs render oldest-to-newest left-to-right.
-  // Open on the latest over, then only keep following that live edge
-  // while the user stays near it.
+  // Auto-jump to the latest ball ONLY on the very first paint. After that
+  // we never override the user's scroll position — they're free to inspect
+  // older overs without being snapped back every 5s.
   useEffect(() => {
     const element = scrollRef.current;
     if (!element || overs.length === 0) return;
@@ -78,12 +86,6 @@ export default function OverBallsPanel({ matchId, scoreVersion }: OverBallsPanel
     if (!hasInitializedScrollRef.current) {
       element.scrollLeft = element.scrollWidth;
       hasInitializedScrollRef.current = true;
-      shouldFollowLiveEdgeRef.current = true;
-      return;
-    }
-
-    if (shouldFollowLiveEdgeRef.current) {
-      element.scrollLeft = element.scrollWidth;
     }
   }, [overs]);
 

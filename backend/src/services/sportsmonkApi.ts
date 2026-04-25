@@ -797,7 +797,7 @@ function getCurrentOver(balls: BallData[], innings: string): number {
 }
 
 // Track last processed over per match to avoid duplicate processing
-const lastProcessedOver: Map<string, { innings: number; over: number; resolved: number }> = new Map();
+const lastProcessedOver: Map<string, { innings: number; over: number; resolved: number; inn1Resolved?: boolean }> = new Map();
 
 // Track last known score per match to detect ball-by-ball changes (for locking predictions)
 const lastKnownScore: Map<string, { innings: number; score: number; wickets: number; overs: number }> = new Map();
@@ -1503,11 +1503,28 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
       continue;
     }
 
-    // Check for innings break
+    // Check for innings break.
+    // Two triggers, whichever fires first:
+    //   (a) Sportsmonk has flipped to innings 2 (first ball of chase bowled)
+    //   (b) Innings 1 has clearly ended (10 wickets OR all overs bowled),
+    //       but Sportsmonk still reports innings 1 because the chase hasn't
+    //       started — typical 15-min innings break.
+    // Without (b), per-over predictions for over 20 sit unresolved and the
+    // innings-2 over-1 / rivalry calls never get generated until the chase
+    // begins, leaving users staring at a stale screen for 10-15 minutes.
     let inningsJustChanged = false;
-    if (currentInnings === 2 && lastProcessed.innings === 1) {
+    const innings1RunsEarly = runs.find((r: any) => r.inning === 1);
+    const totalOversBound = (match.totalOvers || 20) - 0.001;
+    const innings1Done = !!innings1RunsEarly && (
+      Number(innings1RunsEarly.wickets) >= 10 ||
+      Number(innings1RunsEarly.overs) >= totalOversBound
+    );
+    const trigByInnings2Started = currentInnings === 2 && lastProcessed.innings === 1;
+    const trigByInn1End = innings1Done && lastProcessed.innings === 1 && !lastProcessed.inn1Resolved;
+
+    if (trigByInnings2Started || trigByInn1End) {
       inningsJustChanged = true;
-      const innings1Runs = runs.find((r: any) => r.inning === 1);
+      const innings1Runs = innings1RunsEarly;
       if (innings1Runs) {
         const target = innings1Runs.score + 1;
         await match.update({ currentPhase: "innings_break" as any, currentInnings: 2 });
@@ -1542,22 +1559,89 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           await generateRoundRewards(match.id, v.venueId, 3, io);
         }
 
-        // Resolve hot take predictions that depend on first innings data
-        // Round 2 = "Total first innings score" (after R2/R3 swap)
+        // Resolve hot take predictions that depend on first innings data.
+        // Round 2 = "Total first innings score". Round 3 includes player
+        // comparisons (e.g. "who smashes more sixes in the death — A vs B")
+        // and a per-over death-runs question. Both bucket on inn1 data.
         const hotTakePreds = await Prediction.findAll({
-          where: { matchId: match.id, category: "hot_take", status: ["open", "locked"], round: 2 },
+          where: { matchId: match.id, category: "hot_take", status: ["open", "locked"], round: [2, 3] },
         });
+        // Pull inn1 balls once; we need them for the death-overs sixes counts.
+        let inn1Balls: BallData[] = [];
+        try {
+          const fullFx = await fetchFixtureWithBalls(fixtureId);
+          const allBalls: BallData[] = fullFx?.balls?.data || (Array.isArray(fullFx?.balls) ? fullFx.balls : []);
+          inn1Balls = allBalls.filter((b) => b.scoreboard === "S1");
+        } catch { /* best effort */ }
+
+        const totalOvers = match.totalOvers || 20;
+        const midEnd = Math.ceil(totalOvers * 0.75);
+        const isDeathBall = (b: BallData) => {
+          const ovStr = String((b as any).ball || "0");
+          const ovIdx = parseInt(ovStr.split(".")[0], 10);
+          return Number.isFinite(ovIdx) && (ovIdx + 1) > midEnd;
+        };
+
         for (const pred of hotTakePreds) {
-          const score = innings1Runs.score;
-          let correctOption: string;
-          if (score < 150) correctOption = "low";
-          else if (score <= 175) correctOption = "par";
-          else if (score <= 200) correctOption = "high";
-          else correctOption = "massive";
-          await resolvePrediction(pred, correctOption, io);
-          console.log(`[Sportsmonk] Innings break hot take resolved: "${pred.question}" → ${correctOption}`);
+          let correctOption: string | null = null;
+          const q = pred.question.toLowerCase();
+
+          if (pred.round === 2) {
+            // "Total first innings score" — same banding as before.
+            const score = innings1Runs.score;
+            if (score < 150) correctOption = "low";
+            else if (score <= 175) correctOption = "par";
+            else if (score <= 200) correctOption = "high";
+            else correctOption = "massive";
+          } else if (pred.round === 3 && q.includes("smashes more sixes in the death")) {
+            // Player vs player six count in the death overs of innings 1.
+            const opts = pred.options.filter((o) => o.key !== "neither");
+            const sixesByName = new Map<string, number>();
+            for (const o of opts) sixesByName.set(o.label, 0);
+            for (const b of inn1Balls) {
+              if (!isDeathBall(b)) continue;
+              const name = b.batsman?.fullname;
+              if (!name || !sixesByName.has(name)) continue;
+              if (b.score?.six) sixesByName.set(name, (sixesByName.get(name) || 0) + 1);
+            }
+            const [a, c] = opts;
+            const aSixes = sixesByName.get(a.label) || 0;
+            const bSixes = sixesByName.get(c.label) || 0;
+            if (aSixes === 0 && bSixes === 0) correctOption = "neither";
+            else if (aSixes > bSixes) correctOption = a.key;
+            else if (bSixes > aSixes) correctOption = c.key;
+            else correctOption = "neither"; // exact tie counts as neither dominating
+          } else if (pred.round === 3 && q.includes("biggest over in the death")) {
+            // Find the highest single-over total in death overs of inn1.
+            const overTotals = new Map<number, number>();
+            for (const b of inn1Balls) {
+              if (!isDeathBall(b)) continue;
+              const ovStr = String((b as any).ball || "0");
+              const ovIdx = parseInt(ovStr.split(".")[0], 10);
+              const overNum = ovIdx + 1;
+              const r = Number(b.score?.runs || 0);
+              overTotals.set(overNum, (overTotals.get(overNum) || 0) + r);
+            }
+            let biggest = 0;
+            for (const v of overTotals.values()) if (v > biggest) biggest = v;
+            if (biggest <= 9) correctOption = "0_9";
+            else if (biggest <= 14) correctOption = "10_14";
+            else if (biggest <= 19) correctOption = "15_19";
+            else correctOption = "20_plus";
+            // If the saved option keys don't match these, fall back to "neither"-ish first option
+            if (!pred.options.find((o) => o.key === correctOption)) {
+              correctOption = pred.options[0]?.key || null;
+            }
+          }
+
+          if (correctOption) {
+            await resolvePrediction(pred, correctOption, io);
+            console.log(`[Sportsmonk] Innings break hot take resolved: "${pred.question}" → ${correctOption}`);
+          } else {
+            console.warn(`[Sportsmonk] Innings break: no resolver for hot take "${pred.question}" (round ${pred.round})`);
+          }
         }
-        // Round 3 = "Total boundaries in second innings" — resolved at match end (needs S2 data)
+        // Round 3 boundaries-in-second-innings still resolves at match end (needs S2 data).
 
         // Generate Over 1 (2nd innings) per-over predictions — locked when 1st ball of innings 2 is bowled
         const inn2Round = getCurrentRound(2, 1, match.totalOvers); // = 4
@@ -1634,14 +1718,17 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           console.error("[Sportsmonk] Error resolving innings 1 predictions at innings break:", err);
         }
 
-        // Update tracking so over-completion block doesn't re-run
+        // Update tracking so over-completion block doesn't re-run, AND mark
+        // inn1Resolved so the early "innings-1 ended but innings-2 hasn't
+        // started" trigger above won't fire on every subsequent poll tick.
         lastProcessedOver.set(match.id, {
           innings: currentInnings,
           over: currentOver,
           resolved: Math.max(lastProcessed.resolved || 0, lastProcessed.over),
+          inn1Resolved: true,
         });
 
-        console.log(`[Sportsmonk] Innings break — target: ${target}`);
+        console.log(`[Sportsmonk] Innings break — target: ${target} (trigger: ${trigByInnings2Started ? "innings2-started" : "innings1-ended"})`);
       }
     }
 

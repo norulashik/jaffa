@@ -261,6 +261,9 @@ export async function resolvePrediction(
         category: prediction.category,
         overNumber: prediction.overNumber || null,
       });
+      // One-line trace so we can confirm emits in journalctl when a user
+      // reports "no popup" — diagnose backend-side miss vs socket transport.
+      console.log(`[WinEmit] user=${up.userId} pred=${prediction.id} pts=${result.totalPoints}`);
     }
 
     // Accumulate weekly points

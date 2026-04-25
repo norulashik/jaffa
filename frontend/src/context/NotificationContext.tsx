@@ -163,29 +163,92 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     }
   }, [currentPopup, queue]);
 
+  // Reusable backfill: fetches the user's resolved-correct picks and reconciles
+  // them with what the bell already knows. Runs on mount, on a 15 s interval,
+  // and on every socket reconnect, so a missed live event still reaches the
+  // user within ~15 s. Idempotent — dedup via seenIdsRef + poppedIdsRef +
+  // clearedAt prevents duplicates / cleared resurrects / popup spam.
+  const runBackfill = useCallback(async () => {
+    if (typeof window === "undefined") return;
+    const matchId = localStorage.getItem("jaffa_match_id");
+    const venueId = localStorage.getItem("jaffa_venue_id");
+    if (!matchId || !venueId) return;
+    const clearedAt = readClearedAt();
+
+    let rows: any[] = [];
+    try {
+      rows = (await api.getMyPredictions(matchId, venueId)) || [];
+    } catch {
+      return; // silent — periodic poller will try again
+    }
+
+    let popsBudget = BACKFILL_POPUP_CAP;
+    const wins: WinNotification[] = [];
+    for (const r of rows) {
+      if (r.isCorrect !== true) continue;
+      if (Number(r.pointsEarned) <= 0) continue;
+      if (!r.prediction?.id) continue;
+      if (seenIdsRef.current.has(r.prediction.id)) continue;
+      if (clearedAt && r.answeredAt) {
+        const answeredMs = new Date(r.answeredAt).getTime();
+        if (answeredMs <= clearedAt) continue;
+      }
+
+      seenIdsRef.current.add(r.prediction.id);
+      const opt = r.prediction.options?.find(
+        (o: any) => (o.key || o.label) === r.selectedOption
+      );
+      const tsRaw = r.answeredAt ? new Date(r.answeredAt).getTime() : Date.now();
+      const alreadyPopped = poppedIdsRef.current.has(r.prediction.id);
+      const note: WinNotification = {
+        id: `${r.prediction.id}-bf-${tsRaw}`,
+        predictionId: r.prediction.id,
+        matchId: r.matchId || matchId,
+        question: r.prediction.question || "Prediction",
+        pointsEarned: Number(r.pointsEarned) || 0,
+        selectedLabel: opt?.label || r.selectedOption || "",
+        streak: 0,
+        category: r.prediction.category || "",
+        overNumber: r.prediction.overNumber ?? null,
+        receivedAt: tsRaw,
+        seenInBell: alreadyPopped,
+      };
+      if (!alreadyPopped && popsBudget > 0) {
+        popsBudget -= 1;
+        if (currentRef.current === null) {
+          setCurrentPopup(note);
+          currentRef.current = note;
+        } else {
+          setQueue((prev) => [...prev, note]);
+        }
+      }
+      wins.push(note);
+    }
+
+    if (wins.length === 0) return;
+    setHistory((prev) =>
+      sortByReceivedDesc([...prev, ...wins]).slice(0, HISTORY_LIMIT)
+    );
+  }, []);
+
   // Mount-time setup, in this order:
   //   1. Hydrate from localStorage (instant — bell never visibly empties).
-  //   2. Backfill from /predictions/<matchId>/my-predictions so wins missed
-  //      while the user was offline / on a non-socket page still show up.
-  //      Backfilled items are pre-marked seen → no popup spam, no badge bump.
+  //   2. Initial backfill via runBackfill().
   //   3. Subscribe to the per-user socket for live wins.
+  //   4. Re-run backfill every 15 s as a safety net for missed socket events.
+  //   5. Re-run backfill on every socket reconnect so a network blip doesn't
+  //      lose the wins that resolved during the disconnect window.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const token = localStorage.getItem("jaffa_token");
     if (!token) return; // not signed in — nothing to do
 
     const matchId = localStorage.getItem("jaffa_match_id");
-    const venueId = localStorage.getItem("jaffa_venue_id");
 
-    // Hydrate the popped-id set from localStorage so we know which wins the
-    // user has already acknowledged across reloads.
     poppedIdsRef.current = readPoppedIds();
-    // Anything answered at-or-before this is treated as cleared and dropped
-    // by the backfill. Live events with newer timestamps still come through.
     const clearedAt = readClearedAt();
 
-    // (1) hydrate from localStorage — drops items if matchId differs OR if
-    // they're older than the cleared-at marker (user tapped Clear earlier).
+    // (1) hydrate from localStorage
     const stored = readStoredHistory(matchId).filter(
       (n) => !clearedAt || n.receivedAt > clearedAt
     );
@@ -194,79 +257,15 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       setHistory(sortByReceivedDesc(stored));
     }
 
-    // (2) backfill from API. Best-effort; failures are silent so the bell
-    // still works on hydrated state. Wins the user has NOT yet popped
-    // (i.e. not in poppedIdsRef) are queued as popups, capped per burst so
-    // a long absence doesn't blast 15 modals at once.
-    let cancelled = false;
-    if (matchId && venueId) {
-      api
-        .getMyPredictions(matchId, venueId)
-        .then((rows) => {
-          if (cancelled) return;
-          let popsBudget = BACKFILL_POPUP_CAP;
-          const wins: WinNotification[] = (rows || [])
-            .filter((r: any) => {
-              if (r.isCorrect !== true) return false;
-              if (Number(r.pointsEarned) <= 0) return false;
-              if (!r.prediction?.id) return false;
-              if (seenIdsRef.current.has(r.prediction.id)) return false;
-              // Drop anything answered before the user tapped Clear.
-              if (clearedAt && r.answeredAt) {
-                const answeredMs = new Date(r.answeredAt).getTime();
-                if (answeredMs <= clearedAt) return false;
-              }
-              return true;
-            })
-            .map((r: any) => {
-              seenIdsRef.current.add(r.prediction.id);
-              const opt = r.prediction.options?.find(
-                (o: any) => (o.key || o.label) === r.selectedOption
-              );
-              const tsRaw = r.answeredAt ? new Date(r.answeredAt).getTime() : Date.now();
-              const alreadyPopped = poppedIdsRef.current.has(r.prediction.id);
-              const note: WinNotification = {
-                id: `${r.prediction.id}-bf-${tsRaw}`,
-                predictionId: r.prediction.id,
-                matchId: r.matchId || matchId,
-                question: r.prediction.question || "Prediction",
-                pointsEarned: Number(r.pointsEarned) || 0,
-                selectedLabel: opt?.label || r.selectedOption || "",
-                streak: 0,
-                category: r.prediction.category || "",
-                overNumber: r.prediction.overNumber ?? null,
-                receivedAt: tsRaw,
-                seenInBell: alreadyPopped,
-              };
-              // Queue a popup if the user has never seen this win before AND
-              // we still have headroom in this backfill burst.
-              if (!alreadyPopped && popsBudget > 0) {
-                popsBudget -= 1;
-                if (currentRef.current === null) {
-                  setCurrentPopup(note);
-                  currentRef.current = note;
-                } else {
-                  setQueue((prev) => [...prev, note]);
-                }
-              }
-              return note;
-            });
-          if (wins.length === 0) return;
-          setHistory((prev) =>
-            sortByReceivedDesc([...prev, ...wins]).slice(0, HISTORY_LIMIT)
-          );
-        })
-        .catch(() => { /* silent */ });
-    }
+    // (2) initial backfill
+    runBackfill();
 
-    // (3) subscribe to live wins.
+    // (3) subscribe to live wins
     const socket = connectSocket();
-    if (!socket) return () => { cancelled = true; };
+    if (!socket) return;
 
     const handleWin = (data: any) => {
       if (!data || !data.predictionId) return;
-
-      // Drop duplicates (server retries, multiple resolver passes, backfill).
       if (seenIdsRef.current.has(data.predictionId)) return;
       seenIdsRef.current.add(data.predictionId);
 
@@ -288,8 +287,6 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         sortByReceivedDesc([note, ...prev]).slice(0, HISTORY_LIMIT)
       );
 
-      // If nothing showing, surface immediately. Otherwise queue behind the
-      // current popup; the effect above promotes it once the user dismisses.
       if (currentRef.current === null) {
         setCurrentPopup(note);
       } else {
@@ -297,12 +294,21 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       }
     };
 
+    // (5) reconnect handler — backfills missed wins from the disconnect window
+    const handleReconnect = () => { runBackfill(); };
+
     socket.on("myPredictionWin", handleWin);
+    socket.on("connect", handleReconnect);
+
+    // (4) periodic safety net — every 15 s
+    const interval = setInterval(() => { runBackfill(); }, 15_000);
+
     return () => {
-      cancelled = true;
       socket.off("myPredictionWin", handleWin);
+      socket.off("connect", handleReconnect);
+      clearInterval(interval);
     };
-  }, []);
+  }, [runBackfill]);
 
   // Persist history to localStorage on every change so reloads / cross-page
   // navs keep the bell populated.

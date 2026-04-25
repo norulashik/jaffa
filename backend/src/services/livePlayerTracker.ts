@@ -73,6 +73,63 @@ const BATSMAN_BANDS: BatsmanBand[] = [
   { key: "60_plus", label: "60+", max: Infinity },
 ];
 
+// Tighter bands for batsmen who walk in late and can't realistically reach the
+// FULL bands (e.g. Jofra Archer arrives at 19.3 with at most ~9 balls left).
+// Picked at creation time based on remaining-overs ceiling. The band-set is
+// fingerprinted by its key list so the resolver can pick the right one back.
+const BATSMAN_BANDS_MID: BatsmanBand[] = [
+  { key: "0_10", label: "0-10", max: 10 },
+  { key: "11_25", label: "11-25", max: 25 },
+  { key: "26_45", label: "26-45", max: 45 },
+  { key: "45_plus", label: "45+", max: Infinity },
+];
+const BATSMAN_BANDS_LATE: BatsmanBand[] = [
+  { key: "0_5", label: "0-5", max: 5 },
+  { key: "6_15", label: "6-15", max: 15 },
+  { key: "16_25", label: "16-25", max: 25 },
+  { key: "25_plus", label: "25+", max: Infinity },
+];
+
+// Maps the prediction's saved option keys back to the original BatsmanBand[]
+// so the resolver buckets against the right set, regardless of which variant
+// was used at creation time.
+function batsmanBandsForPred(pred: { options: { key: string }[] }): BatsmanBand[] {
+  const keys = new Set(pred.options.map((o) => o.key));
+  for (const set of [BATSMAN_BANDS, BATSMAN_BANDS_MID, BATSMAN_BANDS_LATE]) {
+    if (set.every((b) => keys.has(b.key))) return set;
+  }
+  return BATSMAN_BANDS;
+}
+
+// Pick a band-set based on the maximum runs a player could realistically score
+// from this point onward. Caps and breakpoints chosen so the question always
+// feels achievable — never offering "60+" for someone with only 10 balls left.
+function pickBatsmanBands(remainingMaxRuns: number): BatsmanBand[] {
+  if (remainingMaxRuns >= 60) return BATSMAN_BANDS;
+  if (remainingMaxRuns >= 30) return BATSMAN_BANDS_MID;
+  return BATSMAN_BANDS_LATE;
+}
+
+// Compute remaining legal balls in this innings from the in-progress over.
+// The current-over decimal counts balls bowled; full overs left contribute 6.
+function remainingBallsInInnings(
+  ballsThisInnings: Ball[],
+  totalOvers: number
+): number {
+  if (ballsThisInnings.length === 0) return totalOvers * 6;
+  // Highest "ball" string we've seen — Sportsmonk uses "<over-1>.<ball>".
+  let maxBall = 0;
+  for (const b of ballsThisInnings) {
+    const n = parseFloat(String((b as any).ball || "0"));
+    if (Number.isFinite(n) && n > maxBall) maxBall = n;
+  }
+  const overIdx = Math.floor(maxBall);                     // 0-indexed
+  const ballsBowledInCurrentOver = Math.round((maxBall - overIdx) * 10);
+  const ballsLeftInCurrentOver = Math.max(0, 6 - ballsBowledInCurrentOver);
+  const fullOversLeft = Math.max(0, totalOvers - (overIdx + 1));
+  return ballsLeftInCurrentOver + fullOversLeft * 6;
+}
+
 const BOWLER_BANDS: BowlerBand[] = [
   { key: "0_24", label: "0-24", max: 24 },
   { key: "25_35", label: "25-35", max: 35 },
@@ -138,6 +195,27 @@ const BATSMAN_SIXES_BANDS = [
   { key: "2_4", label: "2-4", max: 4 },
   { key: "4_plus", label: "4+", max: Infinity },
 ];
+
+// Tighter sixes bands for a batsman who arrived late — "4+" is unrealistic
+// when only a handful of balls remain.
+const BATSMAN_SIXES_BANDS_LATE = [
+  { key: "1", label: "1", max: 1 },
+  { key: "2", label: "2", max: 2 },
+  { key: "3_plus", label: "3+", max: Infinity },
+];
+
+function pickBatsmanSixesBands(remainingBalls: number): typeof BATSMAN_SIXES_BANDS {
+  if (remainingBalls >= 30) return BATSMAN_SIXES_BANDS;
+  return BATSMAN_SIXES_BANDS_LATE;
+}
+
+function batsmanSixesBandsForPred(pred: { options: { key: string }[] }): typeof BATSMAN_SIXES_BANDS {
+  const keys = new Set(pred.options.map((o) => o.key));
+  for (const set of [BATSMAN_SIXES_BANDS, BATSMAN_SIXES_BANDS_LATE]) {
+    if (set.every((b) => keys.has(b.key))) return set;
+  }
+  return BATSMAN_SIXES_BANDS;
+}
 
 const BATSMAN_SIXES_PHRASINGS: Array<(name: string) => string> = [
   (n) => `${n} just went big. How many sixes tonight?`,
@@ -305,6 +383,14 @@ export async function processLivePlayers(
     }
 
     // --- Generation pass ---
+    // Cap on how many runs anyone could plausibly score from here (assume
+    // they face every remaining ball — overstates reality but avoids
+    // accidentally being too tight). Used to pick which bands the question
+    // ships with, so a late-arriving batsman never sees "60+" as an option.
+    const remBalls = remainingBallsInInnings(ballsThisInnings, match.totalOvers || 20);
+    const remainingMaxRuns = remBalls * 6;
+    const bandsForNewBatsman = pickBatsmanBands(remainingMaxRuns);
+
     for (const batsmanId of seenBatsmen) {
       const key = `batsman_innings:${batsmanId}:${innings}`;
       if (existingMap.has(key)) continue;
@@ -326,7 +412,7 @@ export async function processLivePlayers(
             category: "per_over",
             round: innings === 1 ? 1 : 4,
             question: pickRandom(BATSMAN_PHRASINGS)(fullname),
-            options: BATSMAN_BANDS.map((band) => ({
+            options: bandsForNewBatsman.map((band) => ({
               key: band.key,
               label: band.label,
               points: 50,
@@ -380,7 +466,7 @@ export async function processLivePlayers(
             category: "per_over",
             round: innings === 1 ? 1 : 4,
             question: pickRandom(BATSMAN_SIXES_PHRASINGS)(fullname),
-            options: BATSMAN_SIXES_BANDS.map((band) => ({
+            options: pickBatsmanSixesBands(remBalls).map((band) => ({
               key: band.key,
               label: band.label,
               points: 50,
@@ -500,7 +586,9 @@ export async function processLivePlayers(
       if (!shouldResolve) continue;
 
       const runs = ballsForBatsman.reduce((sum, b) => sum + batsmanRunsOnBall(b), 0);
-      const correctOption = bucket(runs, BATSMAN_BANDS);
+      // Use whichever band-set this prediction was actually shipped with,
+      // not the global default — late-arriving batsmen get tighter bands.
+      const correctOption = bucket(runs, batsmanBandsForPred(pred));
 
       // If the question is still "open" because we somehow skipped the lock
       // (e.g. run out without facing a legal ball), flip to locked first so
@@ -541,7 +629,9 @@ export async function processLivePlayers(
       const sixes = ballsForBatsman.filter(
         (b) => b.score?.six === true && b.batsman_id === batsmanId
       ).length;
-      const correctOption = bucket(sixes, BATSMAN_SIXES_BANDS);
+      // Match the band-set the question was created with — late-arrivals
+      // ship the tighter LATE bands, openers ship the FULL bands.
+      const correctOption = bucket(sixes, batsmanSixesBandsForPred(pred));
 
       if (pred.status === "open") {
         await pred.update({ status: "locked" });
