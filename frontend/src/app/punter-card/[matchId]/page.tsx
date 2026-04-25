@@ -391,31 +391,39 @@ const ShareCard = forwardRef<HTMLDivElement, {
         overflow: "hidden",
       }}
     >
-      {/* Header — JAFFA brand mark centered at the top, with the date
-          pill floated to the top-right so the logo stays visually anchored
-          as the focal point of the card. */}
-      <div style={{ position: "relative", marginBottom: 36, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 140 }}>
+      {/* Date pill — anchored to the OUTER card edge (top: 56 / right: 56
+          matches the card padding) so it can never clip into the header,
+          regardless of how tall the logo is. nowrap forces single-line so
+          "30 SEPT" can't break across rows. */}
+      <div
+        style={{
+          position: "absolute",
+          top: 56,
+          right: 56,
+          fontSize: 28,
+          padding: "8px 22px",
+          borderRadius: 999,
+          background: "rgba(255,255,255,0.14)",
+          border: "1px solid rgba(255,255,255,0.28)",
+          backdropFilter: "blur(8px)",
+          letterSpacing: 1,
+          whiteSpace: "nowrap",
+          zIndex: 3,
+        }}
+      >
+        {startLabel}
+      </div>
+
+      {/* Header — JAFFA brand mark dominates the top of the card. The PNG
+          carries thick whitespace around the actual wordmark, so we render
+          it large (height 280) and skip objectFit: contain (which was
+          shrinking the visible glyph proportionally to the empty pixels). */}
+      <div style={{ position: "relative", marginBottom: 36, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 300 }}>
         <img
           src={JAFFA_LOGO_DATA_URL}
           alt="JAFFA"
-          style={{ height: 140, width: "auto", objectFit: "contain", filter: "drop-shadow(0 0 22px rgba(255,255,255,0.45))" }}
+          style={{ height: 280, width: "auto", display: "block", filter: "drop-shadow(0 0 32px rgba(255,255,255,0.55))" }}
         />
-        <div
-          style={{
-            position: "absolute",
-            top: 0,
-            right: 0,
-            fontSize: 22,
-            padding: "10px 20px",
-            borderRadius: 999,
-            background: "rgba(255,255,255,0.12)",
-            border: "1px solid rgba(255,255,255,0.25)",
-            backdropFilter: "blur(8px)",
-            letterSpacing: 1,
-          }}
-        >
-          {startLabel}
-        </div>
       </div>
 
       {/* Glassmorphism inner card */}
