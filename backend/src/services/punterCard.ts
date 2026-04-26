@@ -200,8 +200,8 @@ export function buildPunterCardQuestions(
   const t2Players = pool?.team2Players || [];
 
   // 4. Star batter — who scores LESS (lower runs wins the pick).
-  const star1 = t1Players.length ? pickStarBatter(t1Players) : null;
-  const star2 = t2Players.length ? pickStarBatter(t2Players) : null;
+  const star1 = t1Players.length ? pickStarBatter(t1Players, match.team1Short) : null;
+  const star2 = t2Players.length ? pickStarBatter(t2Players, match.team2Short) : null;
   if (star1 && star2 && star1.name.toLowerCase() !== star2.name.toLowerCase()) {
     out.push({
       matchId, category: "punter_card", round: 0,
@@ -361,11 +361,38 @@ function uniqueByName(players: Player[]): Player[] {
 // returning null lets the question generator skip a card if the squad data
 // is too thin to identify the relevant player.
 
-function pickStarBatter(team: Player[]): Player | null {
-  // First true batter (not WK / not all-rounder / not bowler). Squad is
-  // ordered top-of-order first, so position 1 in the squad is the marquee
-  // batter. Falls back to the first non-bowl player if no pure batter
-  // exists.
+// Canonical "star batter" per IPL franchise — the player whose name draws
+// users to the head-to-head card. Sourced from current-season run charts
+// (user-curated; refresh per season). Used to override the role-based
+// fallback below, since several teams open with a `wk` (DC's KL Rahul) or
+// list a non-marquee opener first (KKR's Finn Allen ahead of Rinku in
+// the squad order).
+const STAR_BATTERS: Record<string, string> = {
+  RCB:  "Virat Kohli",
+  KKR:  "Rinku Singh",
+  DC:   "KL Rahul",
+  PBKS: "Shreyas Iyer",
+  MI:   "Suryakumar Yadav",
+  CSK:  "Ruturaj Gaikwad",
+  GT:   "Shubman Gill",
+  SRH:  "Abhishek Sharma",
+  LSG:  "Mitchell Marsh",
+  RR:   "Yashasvi Jaiswal",
+};
+
+function pickStarBatter(team: Player[], teamShort?: string | null): Player | null {
+  // Prefer the curated marquee name when we know the team. Lets us pin a
+  // wk-keyed batter (e.g. KL Rahul opens but is role="wk") or a mid-list
+  // batter (e.g. Rinku at KKR position 5) as the question subject.
+  if (teamShort) {
+    const target = STAR_BATTERS[teamShort.toUpperCase()];
+    if (target) {
+      const found = team.find((p) => p.name.toLowerCase() === target.toLowerCase());
+      if (found) return found;
+    }
+  }
+  // Fallback for non-IPL fixtures or matches whose squad doesn't include
+  // the curated star. Keep the original role-priority chain.
   return (
     team.find((p) => p.role === "bat") ||
     team.find((p) => p.role !== "bowl") ||

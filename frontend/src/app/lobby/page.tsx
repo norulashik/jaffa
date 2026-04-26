@@ -10,6 +10,7 @@ import { api } from "@/lib/api";
 import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 import { toast } from "sonner";
 import RoomCard from "@/components/RoomCard";
+import { useGame } from "@/context/GameContext";
 
 interface Match {
   id: string;
@@ -30,6 +31,7 @@ interface Match {
 
 export default function HomeLiveMatches() {
   const router = useRouter();
+  const { dispatch } = useGame();
   const [matches, setMatches] = useState<Match[]>([]);
   const [loading, setLoading] = useState(true);
   const [myRooms, setMyRooms] = useState<any[]>([]);
@@ -54,6 +56,17 @@ export default function HomeLiveMatches() {
       router.push(isCafeRoute() ? cafeUrl("/login") : "/login");
       return;
     }
+    // Reaching the lobby is the user's "exit" gesture from any single-match
+    // session — drop the sticky match context so a subsequent Ranks /
+    // My Picks visit doesn't carry stale state from the past battle they
+    // were just inside. Both layers cleared: localStorage (read by the
+    // tabs as a fallback) and GameContext state (read first).
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("jaffa_match_id");
+      localStorage.removeItem("jaffa_venue_id");
+    }
+    dispatch({ type: "CLEAR_MATCH" });
+
     loadMatches();
     loadMyRooms();
     loadPastMatches(1);

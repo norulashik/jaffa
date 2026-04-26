@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { GiCastle, GiPodiumWinner, GiCrownCoin } from "react-icons/gi";
 import { GiAlarmClock } from "react-icons/gi";
 import { cafeUrl, isCafeRoute } from "@/lib/navigation";
@@ -18,7 +18,6 @@ const navItems = [
 export default function BottomNav() {
   const { state } = useGame();
   const pathname = usePathname();
-  const router = useRouter();
   const [storedMatchId, setStoredMatchId] = useState<string | null>(null);
   const [storedVenueId, setStoredVenueId] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
@@ -40,14 +39,20 @@ export default function BottomNav() {
     >
       <div className="flex items-center justify-around px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         {navItems.map((item) => {
-          // HOME with an active match scopes back to that match's page so the
-          // user stays in the same "battle" context (same source for MyPicks
-          // and Ranks). Lands on /lobby only when there's no active match.
-          // venueId is appended so the match page can scope correctly.
-          const href =
-            item.key === "home" && activeMatchId
-              ? `/match/${activeMatchId}${activeVenueId ? `?venueId=${activeVenueId}` : ""}`
-              : item.href;
+          // HOME single-tap progression:
+          //   - on Ranks / My Picks / Week Pts with an active match  → /match/<id>
+          //   - on /match/<activeMatchId>                            → /lobby
+          //   - no active match                                      → /lobby
+          // Replaces the previous "Home always = /match/<id>, double-tap = /lobby"
+          // which left users tapping Home from the match page with no
+          // visible result. The progression matches the user's mental
+          // model: tap Home to "back out" one level at a time.
+          const isOnActiveMatch = !!activeMatchId &&
+            !!normalizedPathname?.startsWith(`/match/${activeMatchId}`);
+          const homeHref = activeMatchId && !isOnActiveMatch
+            ? `/match/${activeMatchId}${activeVenueId ? `?venueId=${activeVenueId}` : ""}`
+            : "/lobby";
+          const href = item.key === "home" ? homeHref : item.href;
           const resolvedHref = mounted && isCafeRoute() ? cafeUrl(href) : href;
           const isActive =
             item.key === "home"
@@ -59,19 +64,10 @@ export default function BottomNav() {
 
           const Icon = item.icon;
 
-          // Double-tap on HOME forces a jump to /lobby even if there's an
-          // active match — escape hatch for the user who explicitly wants
-          // the global home.
-          const lobbyHref = mounted && isCafeRoute() ? cafeUrl("/lobby") : "/lobby";
-          const handleDoubleClick = item.key === "home"
-            ? (e: React.MouseEvent) => { e.preventDefault(); router.push(lobbyHref); }
-            : undefined;
-
           return (
             <Link
               key={item.key}
               href={resolvedHref}
-              onDoubleClick={handleDoubleClick}
               className={`flex flex-col items-center justify-center gap-0.5 px-4 py-1.5 rounded-[3px] transition-all ${
                 isActive
                   ? "text-[#ff6341] border-b-[3px] border-[#ff6341]"
