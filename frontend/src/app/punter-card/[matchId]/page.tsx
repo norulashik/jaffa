@@ -10,6 +10,7 @@ import { JAFFA_LOGO_DATA_URL } from "./jaffaLogo";
 import { getTeamLogoDataUrl } from "./teamLogos";
 import TeamBadge from "@/components/TeamBadge";
 import { getTeamColor } from "@/lib/teamColors";
+import PunterCardShareModal from "@/components/PunterCardShareModal";
 
 type Question = {
   id: string;
@@ -40,6 +41,11 @@ export default function PunterCardPage() {
   const [allAnswered, setAllAnswered] = useState(false);
   const [sharing, setSharing] = useState(false);
   const shareRef = useRef<HTMLDivElement>(null);
+  // Spotify-style share modal — opens automatically the first time the
+  // card flips to "all answered", and from the manual Share button after.
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareDataUrl, setShareDataUrl] = useState<string | null>(null);
+  const [shareBlob, setShareBlob] = useState<Blob | null>(null);
 
   useEffect(() => {
     const token = typeof window !== "undefined" ? localStorage.getItem("jaffa_token") : null;
@@ -99,6 +105,9 @@ export default function PunterCardPage() {
       return;
     }
     setSubmitting(true);
+    // Captured BEFORE the refresh so we can detect the false→true edge
+    // and auto-open the share modal exactly on the completing Lock In.
+    const wasAllAnswered = allAnswered;
     try {
       const res = await api.submitPunterCard(matchId, venueId, pendingSelections);
       toast.success(`Locked in ${res.saved} pick${res.saved === 1 ? "" : "s"}`);
@@ -106,6 +115,14 @@ export default function PunterCardPage() {
       const refreshed = await api.getPunterCard(matchId, venueId);
       setQuestions(refreshed.questions);
       setAllAnswered(refreshed.allAnswered);
+      if (refreshed.allAnswered && !wasAllAnswered) {
+        // First time the card became complete — pop the share sheet so
+        // the user gets the brand asset moment without an extra tap.
+        // Yield one frame so React commits the new question states (status
+        // pills, etc.) into the off-screen ShareCard before rasterizing.
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        await openShareModal();
+      }
     } catch (err: any) {
       toast.error(err?.message || "Failed to lock in picks");
     } finally {
@@ -123,54 +140,33 @@ export default function PunterCardPage() {
     }
   };
 
-  const handleShare = async () => {
+  // Rasterize the off-screen ShareCard into a JPEG and pop the share modal.
+  // Single entry point for both the manual Share button (top-right) and the
+  // auto-open after the completing Lock In. Same JPEG settings as before:
+  // pixelRatio 1.5 + quality 0.92 keeps the file under ~700KB which is the
+  // ceiling iOS WhatsApp's "Send to" share sheet enforces. cacheBust stays
+  // OFF so the embedded logo isn't raced by the rasterizer.
+  const openShareModal = async () => {
     if (!shareRef.current || sharing) return;
     setSharing(true);
     try {
-      // JPEG (not PNG) at pixelRatio 1.5 — keeps the image under ~700KB,
-      // which is the practical ceiling for iOS WhatsApp's "Send to" share
-      // sheet. Bigger PNGs trigger "This item cannot be shared." Quality
-      // 0.92 is visually indistinguishable from PNG for the gradient card.
-      // cacheBust intentionally OFF: it appends ?t=… to the embedded
-      // /jaffa-logo-mark.png src and races the rasterizer, which sometimes
-      // produced a logo-less card.
       const dataUrl = await toJpeg(shareRef.current, {
         pixelRatio: 1.5,
         quality: 0.92,
         backgroundColor: "#1a0033",
       });
       const blob = await (await fetch(dataUrl)).blob();
-      const file = new File([blob], "punter-card.jpg", { type: "image/jpeg" });
-      const title = `My Punter Card — ${match?.team1Short || "T1"} vs ${match?.team2Short || "T2"}`;
-
-      const navAny = navigator as any;
-      if (navAny.canShare && navAny.canShare({ files: [file] })) {
-        try {
-          await navAny.share({
-            files: [file],
-            title,
-            text: "Predict from anywhere · playjaffa.com 🏏",
-          });
-          return;
-        } catch {
-          // user cancelled or permission denied — fall through
-        }
-      }
-
-      // Fallback: download the JPEG so the user can manually attach it.
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = "punter-card.jpg";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      toast.success("Card downloaded — attach to WhatsApp or Insta");
+      setShareDataUrl(dataUrl);
+      setShareBlob(blob);
+      setShowShareModal(true);
     } catch (err: any) {
       toast.error(err?.message || "Couldn't generate share image");
     } finally {
       setSharing(false);
     }
   };
+
+  const handleShare = openShareModal;
 
   // Per-match colour palette: each team's brand colour drives the page
   // gradient + corner glows, mimicking the saturated, gamefied look of the
@@ -479,6 +475,14 @@ export default function PunterCardPage() {
       <div style={{ position: "fixed", left: -10000, top: 0, pointerEvents: "none" }} aria-hidden>
         <ShareCard ref={shareRef} match={match} questions={questions} selections={selections} />
       </div>
+
+      <PunterCardShareModal
+        open={showShareModal}
+        onClose={() => setShowShareModal(false)}
+        imageDataUrl={shareDataUrl}
+        imageBlob={shareBlob}
+        shareText={`My ${t1} vs ${t2} Punter Card · playjaffa.com 🏏`}
+      />
     </main>
   );
 }
