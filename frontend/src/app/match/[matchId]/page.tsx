@@ -1152,24 +1152,45 @@ export default function MatchDashboard() {
                     );
                   })}
 
-                  {/* All caught up — slightly different copy when the match
-                      is over (read-only past-battles flow) vs mid-match. */}
-                  {openPreds.length === 0 && (
-                    <div className="game-card flex flex-col items-center justify-center py-16 text-center p-6">
-                      <span className="text-5xl mb-4">🏏</span>
-                      <h3
-                        className="text-xl text-white mb-2"
-                        style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
-                      >
-                        {matchData?.status === "completed" ? "MATCH COMPLETE" : "ALL CAUGHT UP!"}
-                      </h3>
-                      <p className="text-sm text-white/50 max-w-[260px]">
-                        {matchData?.status === "completed"
-                          ? "Open My Picks below to see how you did."
-                          : "New predictions drop at the end of this over. Keep watching!"}
-                      </p>
-                    </div>
-                  )}
+                  {/* Three flavours of empty state:
+                      - "MATCH COMPLETE" for ended matches.
+                      - "MATCH WARMING UP" for the awkward window after toss
+                        but before Sportsmonk ships the first runs aggregate
+                        (typically the first ~5 overs of a live match —
+                        score panel still shows 0/0 (1 ov) and there are no
+                        per-over questions yet because the poll hasn't
+                        received ball data). Without this, users see a
+                        generic "ALL CAUGHT UP" that wrongly implies they've
+                        completed everything.
+                      - "ALL CAUGHT UP" otherwise (between overs mid-match). */}
+                  {openPreds.length === 0 && (() => {
+                    const isCompleted = matchData?.status === "completed";
+                    const inn1 = matchData?.scoreData?.innings1;
+                    const inn2 = matchData?.scoreData?.innings2;
+                    const noLiveData =
+                      !isCompleted &&
+                      matchData?.status === "live" &&
+                      (!inn1 || (Number(inn1.overs ?? 0) === 0 && Number(inn1.score ?? 0) === 0)) &&
+                      (!inn2 || (Number(inn2.overs ?? 0) === 0 && Number(inn2.score ?? 0) === 0));
+                    return (
+                      <div className="game-card flex flex-col items-center justify-center py-16 text-center p-6">
+                        <span className="text-5xl mb-4">{noLiveData ? "⏳" : "🏏"}</span>
+                        <h3
+                          className="text-xl text-white mb-2"
+                          style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                        >
+                          {isCompleted ? "MATCH COMPLETE" : noLiveData ? "MATCH WARMING UP" : "ALL CAUGHT UP!"}
+                        </h3>
+                        <p className="text-sm text-white/50 max-w-[260px]">
+                          {isCompleted
+                            ? "Open My Picks below to see how you did."
+                            : noLiveData
+                              ? "First updates land seconds after the umpire calls play. Stay on this page."
+                              : "New predictions drop at the end of this over. Keep watching!"}
+                        </p>
+                      </div>
+                    );
+                  })()}
 
                   {/* My Picks — grouped into per-over drawers with an "Others"
                       drawer for non-per-over picks (hot takes, bold calls,

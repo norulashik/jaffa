@@ -1695,7 +1695,58 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
       }
     }
 
-    const runs = fixture.runs?.data || (Array.isArray(fixture.runs) ? fixture.runs : []);
+    let runs = fixture.runs?.data || (Array.isArray(fixture.runs) ? fixture.runs : []);
+
+    // Sportsmonk's per-fixture / livescores responses sometimes deliver
+    // ball-by-ball events for the first few overs of a live match while
+    // their `runs[]` aggregate is still empty (publishing lag). When that
+    // happens the score-sync block below leaves liveScore.innings1 at the
+    // seeded 0/0/0 and users see a stale "0/0 (1 ov)" until Sportsmonk
+    // catches up — sometimes 5+ overs later. Fix: synthesise per-innings
+    // totals from raw balls when runs is missing/zero, so the frontend
+    // always sees real numbers as long as ANY ball data is present.
+    const ballsForFallback: BallData[] = fixture.balls?.data || (Array.isArray(fixture.balls) ? fixture.balls : []);
+    if (ballsForFallback.length > 0) {
+      const synthByInnings = new Map<number, { score: number; wickets: number; overs: number; team_id: number | null }>();
+      for (const b of ballsForFallback) {
+        const inning = b.scoreboard === "S1" ? 1 : b.scoreboard === "S2" ? 2 : 0;
+        if (!inning) continue;
+        const slot = synthByInnings.get(inning) || { score: 0, wickets: 0, overs: 0, team_id: null };
+        slot.score += Number(b.score?.runs || 0);
+        if (b.score?.is_wicket || b.batsmanout_id) slot.wickets += 1;
+        const ballNum = parseFloat(String((b as any).ball || "0"));
+        if (Number.isFinite(ballNum) && ballNum > slot.overs) slot.overs = ballNum;
+        synthByInnings.set(inning, slot);
+      }
+      // Merge: prefer real runs[] entries when present (with non-zero
+      // score, since a 0-score "stub" entry from Sportsmonk should defer
+      // to our synthesised number once balls arrive). Synthesise only the
+      // gaps so we don't overwrite authoritative aggregates.
+      const merged: any[] = [];
+      for (const inning of [1, 2]) {
+        const real = runs.find((r: any) => r.inning === inning);
+        const synth = synthByInnings.get(inning);
+        if (real && (Number(real.score) > 0 || Number(real.overs) > 0)) {
+          merged.push(real);
+        } else if (synth && (synth.score > 0 || synth.overs > 0 || synth.wickets > 0)) {
+          // Reuse the seeded teamId so we don't have to reverse-derive it
+          // from balls (which would need squad data we don't carry here).
+          const seededTeamId = inning === 1
+            ? ((match.scoreData as any)?.innings1?.teamId ?? null)
+            : ((match.scoreData as any)?.innings2?.teamId ?? null);
+          merged.push({
+            inning,
+            score: synth.score,
+            wickets: synth.wickets,
+            overs: synth.overs,
+            team_id: seededTeamId,
+          });
+        } else if (real) {
+          merged.push(real);
+        }
+      }
+      if (merged.length > 0) runs = merged;
+    }
 
     // Best-effort rain detection: check if Sportsmonk indicates reduced overs
     // Sportsmonk may include DLS/reduced-over info in the note field or fixture resource
