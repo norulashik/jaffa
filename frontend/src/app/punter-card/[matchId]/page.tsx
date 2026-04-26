@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { toJpeg } from "html-to-image";
 import { api } from "@/lib/api";
 import { JAFFA_LOGO_DATA_URL } from "./jaffaLogo";
+import { getTeamLogoDataUrl } from "./teamLogos";
 import TeamBadge from "@/components/TeamBadge";
 import { getTeamColor } from "@/lib/teamColors";
 
@@ -493,6 +494,14 @@ const ShareCard = forwardRef<HTMLDivElement, {
   const t2 = match?.team2Short || match?.team2 || "T2";
   const startLabel = match?.startTime ? new Date(match.startTime).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "";
 
+  // Per-match palette: same teamColors map the in-app page uses, so the
+  // shared image and the in-app view stay visually consistent for any
+  // given fixture.
+  const shareC1 = getTeamColor(t1);
+  const shareC2 = getTeamColor(t2);
+  const t1Logo = getTeamLogoDataUrl(t1);
+  const t2Logo = getTeamLogoDataUrl(t2);
+
   const picks = questions
     .map((q) => {
       const key = q.userAnswer?.selectedOption || selections[q.id];
@@ -512,13 +521,16 @@ const ShareCard = forwardRef<HTMLDivElement, {
         width: 1080,
         minHeight: 1350,
         padding: 56,
-        // Neon purple → fuchsia gradient with two soft "lightning" radials
-        // baked into the background so the result has the energetic, glassy
-        // look of the reference card without needing extra SVG art.
-        background:
-          "radial-gradient(ellipse at 12% 18%, rgba(255,45,200,0.55) 0%, transparent 42%), " +
-          "radial-gradient(ellipse at 88% 82%, rgba(120,40,255,0.55) 0%, transparent 42%), " +
-          "linear-gradient(135deg, #1a0033 0%, #3d0a5e 50%, #5b1278 100%)",
+        // Per-match gradient driven by the playing teams' brand colours
+        // (CSK vs KKR → mustard → deep purple, LSG vs KKR → steel-blue →
+        // purple, etc.). Two soft "lightning" radials at opposite corners
+        // in each team's primary keep the energetic, glassy look the
+        // reference image had without needing extra SVG art.
+        background: `
+          radial-gradient(ellipse at 12% 18%, ${shareC1.primary}88 0%, transparent 42%),
+          radial-gradient(ellipse at 88% 82%, ${shareC2.primary}88 0%, transparent 42%),
+          linear-gradient(135deg, ${shareC1.dark} 0%, #050505 50%, ${shareC2.dark} 100%)
+        `,
         color: "white",
         fontFamily: "'Bungee', 'Impact', cursive",
         display: "flex",
@@ -580,22 +592,79 @@ const ShareCard = forwardRef<HTMLDivElement, {
           zIndex: 1,
         }}
       >
-        {/* Title block */}
+        {/* Title block — team logos flanking the short codes for the
+            chunky, NFT-style banner the user asked for. Each logo sits in
+            a glass-morphism circle so it reads cleanly over the gradient
+            regardless of the team's brand colour. */}
         <div>
           <div style={{ fontSize: 24, opacity: 0.7, letterSpacing: 4, fontFamily: "'Bungee', 'Impact', cursive" }}>
             PUNTER CARD
           </div>
           <div
             style={{
-              fontSize: 88,
-              marginTop: 6,
-              letterSpacing: 1,
-              lineHeight: 1,
+              marginTop: 14,
+              display: "flex",
+              alignItems: "center",
+              gap: 24,
               fontFamily: "'Bungee', 'Impact', cursive",
-              textShadow: "0 0 30px rgba(255,180,255,0.45)",
             }}
           >
-            {t1} <span style={{ opacity: 0.4, fontSize: 64 }}>VS</span> {t2}
+            {t1Logo && (
+              <div
+                style={{
+                  width: 120,
+                  height: 120,
+                  borderRadius: "50%",
+                  background: "rgba(255,255,255,0.08)",
+                  border: "2px solid rgba(255,255,255,0.22)",
+                  boxShadow: `0 0 30px ${shareC1.primary}66`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <img
+                  src={t1Logo}
+                  alt={t1}
+                  style={{ width: 92, height: 92, objectFit: "contain" }}
+                />
+              </div>
+            )}
+            <div
+              style={{
+                fontSize: 80,
+                lineHeight: 1,
+                letterSpacing: 1,
+                textShadow: "0 0 30px rgba(255,255,255,0.35)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {t1} <span style={{ opacity: 0.4, fontSize: 56 }}>VS</span> {t2}
+            </div>
+            {t2Logo && (
+              <div
+                style={{
+                  width: 120,
+                  height: 120,
+                  borderRadius: "50%",
+                  background: "rgba(255,255,255,0.08)",
+                  border: "2px solid rgba(255,255,255,0.22)",
+                  boxShadow: `0 0 30px ${shareC2.primary}66`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  marginLeft: "auto",
+                }}
+              >
+                <img
+                  src={t2Logo}
+                  alt={t2}
+                  style={{ width: 92, height: 92, objectFit: "contain" }}
+                />
+              </div>
+            )}
           </div>
         </div>
 
