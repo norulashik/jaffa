@@ -241,6 +241,28 @@ function maybeLogNoData(fixtureId: number): void {
   console.log(`[Sportsmonk] No fixture data for ${fixtureId} (will retry; further misses suppressed for 60s)`);
 }
 
+// Cached unfiltered /livescores response. Used as a final fallback when the
+// per-fixture and filter-based endpoints both come up empty — Sportsmonk's
+// cricket plan often refuses filter[fixture]=… queries but still returns the
+// fixture in the unfiltered livescores list. 5s cache is enough to avoid
+// hammering /livescores when multiple matches are being polled in the same
+// tick, while staying fresh enough to capture mid-over score changes.
+const UNFILTERED_LIVESCORES_CACHE_MS = 5_000;
+let unfilteredLivescoresCache: { at: number; promise: Promise<any[]> } | null = null;
+
+async function getCachedUnfilteredLivescores(): Promise<any[]> {
+  const now = Date.now();
+  if (unfilteredLivescoresCache && now - unfilteredLivescoresCache.at < UNFILTERED_LIVESCORES_CACHE_MS) {
+    return unfilteredLivescoresCache.promise;
+  }
+  const promise = fetchSportsmonkLiveScores().catch((err) => {
+    console.error("[Sportsmonk] unfiltered livescores fetch failed:", err);
+    return [] as any[];
+  });
+  unfilteredLivescoresCache = { at: now, promise };
+  return promise;
+}
+
 async function fetchLiveFixtureDetail(
   fixtureId: number,
   includeBalls = false
@@ -277,6 +299,30 @@ async function fetchLiveFixtureDetail(
   if (lastResort) {
     // Don't cache a totally-empty payload, but return it so callers fall through
     return lastResort;
+  }
+
+  // Final fallback: scan the unfiltered /livescores response. This is the
+  // path that actually works on the cricket plan when /fixtures/{id} and
+  // /livescores?filter[fixture]={id} both come up empty for currently-live
+  // matches. fetchSportsmonkLiveScores already includes balls + runs, so the
+  // payload shape matches what callers expect.
+  try {
+    const allLive = await getCachedUnfilteredLivescores();
+    const found = allLive.find((f: any) => Number(f.id) === fixtureId);
+    if (found) {
+      const ballCount = found?.balls?.data?.length || (Array.isArray(found?.balls) ? found.balls.length : 0);
+      const runCount = found?.runs?.data?.length || (Array.isArray(found?.runs) ? found.runs.length : 0);
+      // Only cache if the payload actually carries the data this caller
+      // asked for; an empty-balls payload from livescores would otherwise
+      // poison the cache for the next 30s of "balls" requests.
+      const useful = includeBalls ? ballCount > 0 : (runCount > 0 || ballCount > 0);
+      if (useful) {
+        lastGoodFixture.set(cacheKey, { at: Date.now(), data: found });
+      }
+      return found;
+    }
+  } catch (err) {
+    console.error("[Sportsmonk] livescores scan failed:", err);
   }
 
   // Sportsmonk gave us nothing on every path. Serve last-good if recent.
