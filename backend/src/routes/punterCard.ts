@@ -63,7 +63,14 @@ router.get("/:matchId", authenticateUser, async (req: AuthRequest, res: Response
         status: match.status,
       },
       questions,
-      allAnswered: questions.length > 0 && questions.every((q) => q.userAnswer),
+      // A late joiner who arrived after toss can't answer the toss question
+      // (status === "resolved" with their userAnswer null). Treating those —
+      // and any other already-locked / already-resolved Qs — as "skipped"
+      // lets them share once they've done everything that's still
+      // answerable. Without this the Share button would never appear.
+      allAnswered: questions.length > 0 && questions.every(
+        (q) => q.userAnswer || q.status === "resolved" || q.status === "locked"
+      ),
     });
   } catch (error) {
     console.error("Get punter card error:", error);

@@ -1273,16 +1273,68 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           : Math.min(Math.floor(transitionRawOvers) + 1, match.totalOvers || 20);
         const actualRound = getCurrentRound(1, actualCurrentOver, match.totalOvers);
 
+        // Seed innings1 / innings2 team identity from toss data so the UI
+        // doesn't fall back to "team1 batted first" until the next runs
+        // poll fills in actual scores. Without this users see the wrong
+        // team labelled BAT for ~30s after toss.
+        const tossWinId = fixture.toss_won_team_id;
+        const localId = fixture.localteam_id;
+        const visitorId = fixture.visitorteam_id;
+        const elected = String(fixture.elected || "").toLowerCase();
+        let battedFirstTeamId: number | null = null;
+        if (tossWinId != null && (elected === "batting" || elected === "bowling" || elected === "bat" || elected === "field" || elected === "bowl")) {
+          if (elected === "batting" || elected === "bat") {
+            battedFirstTeamId = tossWinId;
+          } else {
+            // Toss winner chose to field/bowl → other team bats first.
+            battedFirstTeamId = tossWinId === localId ? visitorId : localId;
+          }
+        }
+        const battedFirstShort = battedFirstTeamId == null
+          ? null
+          : (battedFirstTeamId === localId ? match.team1Short : match.team2Short);
+        const battedSecondTeamId = battedFirstTeamId == null
+          ? null
+          : (battedFirstTeamId === localId ? visitorId : localId);
+        const battedSecondShort = battedSecondTeamId == null
+          ? null
+          : (battedSecondTeamId === localId ? match.team1Short : match.team2Short);
+
+        const seededScoreData: Record<string, unknown> = {
+          ...(match.scoreData || {}),
+          tossWonTeamId: tossWinId,
+          elected: fixture.elected,
+        };
+        if (battedFirstTeamId != null && battedFirstShort) {
+          // Seed only team identity. Live score numbers come from the
+          // regular runs-mapping pass later in this poll cycle and overwrite
+          // these zeros without losing the teamId/teamShort.
+          seededScoreData.innings1 = {
+            ...((match.scoreData as any)?.innings1 || {}),
+            score: ((match.scoreData as any)?.innings1?.score) ?? 0,
+            wickets: ((match.scoreData as any)?.innings1?.wickets) ?? 0,
+            overs: ((match.scoreData as any)?.innings1?.overs) ?? 0,
+            teamId: battedFirstTeamId,
+            teamShort: battedFirstShort,
+          };
+        }
+        if (battedSecondTeamId != null && battedSecondShort) {
+          seededScoreData.innings2 = {
+            ...((match.scoreData as any)?.innings2 || {}),
+            score: ((match.scoreData as any)?.innings2?.score) ?? 0,
+            wickets: ((match.scoreData as any)?.innings2?.wickets) ?? 0,
+            overs: ((match.scoreData as any)?.innings2?.overs) ?? 0,
+            teamId: battedSecondTeamId,
+            teamShort: battedSecondShort,
+          };
+        }
+
         await match.update({
           status: "live",
           currentInnings: 1,
           currentOver: actualCurrentOver,
           currentPhase: getPhase(1, actualCurrentOver, match.totalOvers) as any,
-          scoreData: {
-            ...match.scoreData,
-            tossWonTeamId: fixture.toss_won_team_id,
-            elected: fixture.elected,
-          },
+          scoreData: seededScoreData,
         });
 
         // Fetch lineup (Playing XI) at toss and auto-populate team players
