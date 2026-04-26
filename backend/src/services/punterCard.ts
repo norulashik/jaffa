@@ -316,7 +316,11 @@ function topBowlerOptions(pool: SquadSource): Option[] {
   };
   const t1 = partition(pool.team1Players).slice(0, 8);
   const t2 = partition(pool.team2Players).slice(0, 8);
-  const merged = uniqueByName(interleave(t1, t2)).slice(0, 14);
+  // Cap at 16 to mirror topBatterOptions — keeps the option pool size
+  // symmetric across the two pick categories and ensures all-rounders that
+  // sit at the back of the bowlable partition (e.g. KKR's Anukul Roy) make
+  // it into the option list rather than being silently cut.
+  const merged = uniqueByName(interleave(t1, t2)).slice(0, 16);
   return merged.map((p, i) => ({
     key: playerKey(p.name),
     label: p.name,
