@@ -964,9 +964,17 @@ export default function MatchDashboard() {
             if (p.category === "rivalry_call") return 5;
             return 9;
           };
-          const openPreds = unanswered
-            .filter((p: any) => !p.expiresAt || new Date(p.expiresAt).getTime() > now)
-            .sort((a: any, b: any) => predictionRank(a) - predictionRank(b));
+          // Drop every still-open prediction once the match is completed —
+          // the user can't answer them anymore and the backend's auto-void
+          // pass may not have fired yet on this poll cycle. Frontend gate
+          // keeps the UI honest immediately on match end without waiting
+          // for the next refresh.
+          const isMatchCompleted = matchData?.status === "completed";
+          const openPreds = isMatchCompleted
+            ? []
+            : unanswered
+                .filter((p: any) => !p.expiresAt || new Date(p.expiresAt).getTime() > now)
+                .sort((a: any, b: any) => predictionRank(a) - predictionRank(b));
           const missedPreds = unanswered.filter((p: any) => p.expiresAt && new Date(p.expiresAt).getTime() <= now);
           const answeredPreds = predictions.filter((p: any) => selectedAnswers[p.id] || p.userAnswer?.selectedOption);
           // Product rule: 1 boost per phase (= round). Backend enforces the same cap.

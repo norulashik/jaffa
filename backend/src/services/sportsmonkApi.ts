@@ -1051,6 +1051,108 @@ async function finalizeMatch(
 
   io.to(`match:${match.id}`).emit("matchEnd", { matchId: match.id, winner: fixture.winner_team_id });
   console.log(`[Sportsmonk] Match ${match.id} ended — all predictions resolved`);
+
+  // Schedule retry passes for predictions that finalize couldn't resolve
+  // on the first try. When match-end fires via our "computedEnd" detection
+  // (target chased / inn-2 all out) Sportsmonk often hasn't yet populated
+  // winner_team_id, man_of_match_id, or the full balls payload — those
+  // resolvers return null and the punter cards / live-player questions
+  // sit "PENDING" forever. Retry at 30s / 60s / 2m / 5m so each one gets
+  // another chance as Sportsmonk catches up. After the final retry, void
+  // anything still unresolved so the UI doesn't leave dangling pending
+  // cards in My Picks. Idempotent on already-resolved rows.
+  scheduleFinalizeRetries(match.id, fixtureId, io);
+}
+
+// Retry windows (ms) after finalize. Tuned for Sportsmonk's typical
+// catch-up behaviour: winner_team_id / man_of_match_id usually populated
+// within ~60s of an actual result, full balls payload a bit longer for
+// matches the per-fixture endpoint isn't returning data for.
+const FINALIZE_RETRY_DELAYS_MS = [30_000, 60_000, 120_000, 300_000];
+
+// Track scheduled retries so we don't double-stack them if finalizeMatch
+// somehow fires twice for the same match (it's already idempotent on the
+// completed-status guard, but be defensive).
+const finalizeRetryScheduled = new Set<string>();
+
+function scheduleFinalizeRetries(matchId: string, fixtureId: number, io: SocketIOServer): void {
+  if (finalizeRetryScheduled.has(matchId)) return;
+  finalizeRetryScheduled.add(matchId);
+
+  for (let i = 0; i < FINALIZE_RETRY_DELAYS_MS.length; i++) {
+    const delay = FINALIZE_RETRY_DELAYS_MS[i];
+    const isLast = i === FINALIZE_RETRY_DELAYS_MS.length - 1;
+    setTimeout(async () => {
+      try {
+        await runFinalizeRetry(matchId, fixtureId, io, isLast);
+      } catch (err) {
+        console.error(`[Sportsmonk] finalize retry ${i + 1} failed for ${matchId}:`, err);
+      }
+      if (isLast) finalizeRetryScheduled.delete(matchId);
+    }, delay);
+  }
+}
+
+async function runFinalizeRetry(
+  matchId: string,
+  fixtureId: number,
+  io: SocketIOServer,
+  isLast: boolean,
+): Promise<void> {
+  const match = await Match.findByPk(matchId);
+  if (!match) return;
+
+  // Re-fetch fixture (with balls). Force-bypass the in-process fresh cache
+  // by waiting past FRESH_DEDUP_MS before scheduling the next retry; the
+  // first retry at 30s is well clear of the 4s window.
+  const fixture = await fetchLiveFixtureDetail(fixtureId, true);
+  const allBalls: BallData[] = fixture?.balls?.data || (Array.isArray(fixture?.balls) ? fixture.balls : []);
+  const runs: any[] = fixture?.runs?.data || (Array.isArray(fixture?.runs) ? fixture.runs : []);
+
+  if (fixture) {
+    try {
+      await resolveRemainingPredictionsAtMatchEnd(match, fixture, runs, allBalls, io);
+    } catch (err) {
+      console.error(`[Sportsmonk] finalize retry resolveRemaining error:`, err);
+    }
+    try {
+      const r = await resolvePunterCard(match.id, fixture, allBalls, io);
+      if (r.resolved > 0) {
+        console.log(`[PunterCard] Retry resolved ${r.resolved} more questions for ${match.id}`);
+      }
+    } catch (err) {
+      console.error(`[Sportsmonk] finalize retry resolvePunterCard error:`, err);
+    }
+  }
+
+  if (!isLast) return;
+
+  // Final pass — anything still open/locked after the full retry window
+  // can't be resolved (Sportsmonk never gave us the data). Void it so the
+  // UI shows a clean "voided / no result" rather than a permanent PENDING
+  // chip, and refunds any boost the user spent on the question.
+  const stuck = await Prediction.findAll({
+    where: {
+      matchId: match.id,
+      category: ["punter_card", "per_over", "pre_match", "hot_take", "rivalry_call", "bold_call"],
+      status: ["open", "locked"],
+    },
+  });
+  if (stuck.length === 0) return;
+
+  const { voidPrediction } = await import("./pointsEngine");
+  let voided = 0;
+  for (const pred of stuck) {
+    try {
+      await voidPrediction(pred, "match_ended_no_data", io);
+      voided += 1;
+    } catch (err) {
+      console.error(`[Sportsmonk] void error for prediction ${pred.id}:`, err);
+    }
+  }
+  if (voided > 0) {
+    console.log(`[Sportsmonk] Voided ${voided} unresolvable predictions for match ${match.id}`);
+  }
 }
 
 // Sportsmonk's `score.four` / `score.six` boolean flags are inconsistent
