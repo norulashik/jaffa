@@ -1,18 +1,26 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import { Download, MessageCircle, Camera, Ghost, Share2, X } from "lucide-react";
+import { Download, Share2, X } from "lucide-react";
 import { toast } from "sonner";
 
-// Spotify-style share sheet for the punter card.
+// Punter card share sheet.
 //
-// Shows the rendered card image as a preview, then a row of platform
-// shortcuts: Save (download), WhatsApp, Instagram, Snapchat, More.
+// Two actions only:
+//   - Save     → triggers an <a download> click; image lands in the user's
+//                downloads / camera roll.
+//   - Share to → calls navigator.share with the JPEG attached. iOS / Android
+//                pop the system share sheet which already includes WhatsApp,
+//                Insta, Snap, Messages, etc. with the IMAGE attached, not
+//                just the text.
 //
-// Reality: only "More" can attach the actual image cross-platform via
-// navigator.share. The platform-specific buttons trigger a download FIRST
-// then deep-link into the app, with a toast that tells the user to paste
-// the saved image. It's two steps but it's honest about what the OS allows.
+// We previously had per-app buttons (WhatsApp / Insta / Snap) that triggered
+// a download then opened the deep link. That was misleading: the deep link
+// opens the app but the URL can't carry a file payload, so the image stayed
+// in the user's camera roll and the app received only the share text. Users
+// reported the punter card "wasn't being shared" — exactly because of this.
+// Honest fix: delegate to the OS share sheet which is the only path that
+// actually attaches the image cross-platform.
 
 interface Props {
   open: boolean;
@@ -39,9 +47,9 @@ export default function PunterCardShareModal({
     };
   }, [open]);
 
-  // navigator.canShare is gated on having a File AND the browser supporting
-  // it (most desktop and older Android lack files-share). Hide the More
-  // button when unsupported so we don't ship a button that nukes silently.
+  // navigator.canShare is gated on the browser supporting files-share.
+  // Most desktop and older Android lack it. When unsupported, fall back
+  // to a Save-only mode and tell the user how to share.
   const canNativeShare = useMemo(() => {
     if (typeof navigator === "undefined") return false;
     if (!imageBlob) return false;
@@ -57,7 +65,7 @@ export default function PunterCardShareModal({
 
   if (!open) return null;
 
-  const triggerDownload = () => {
+  const handleSave = () => {
     if (!imageDataUrl) return;
     const a = document.createElement("a");
     a.href = imageDataUrl;
@@ -65,46 +73,10 @@ export default function PunterCardShareModal({
     document.body.appendChild(a);
     a.click();
     a.remove();
-  };
-
-  const handleSave = () => {
-    triggerDownload();
     toast.success("Saved to your photos");
   };
 
-  const handleWhatsApp = () => {
-    triggerDownload();
-    // wa.me only carries text — image stays in the camera roll for the
-    // user to attach manually. Honest copy in the toast.
-    toast.success("Image saved — paste it into the chat");
-    window.open(`https://wa.me/?text=${encodeURIComponent(shareText)}`, "_blank");
-  };
-
-  const handleInstagram = () => {
-    triggerDownload();
-    toast.success("Image saved — open from your camera roll in Instagram");
-    // instagram-stories:// is the documented deep link but only works when
-    // the app is installed and the page lives at a verified origin. Fall
-    // back to the web profile if it doesn't open.
-    window.location.href = "instagram://library?LocalIdentifier=";
-    setTimeout(() => {
-      // If the deep link didn't intercept within 800ms the page is still
-      // here; open the web app as a fallback so the user has somewhere to
-      // go.
-      window.open("https://www.instagram.com/", "_blank");
-    }, 800);
-  };
-
-  const handleSnapchat = () => {
-    triggerDownload();
-    toast.success("Image saved — attach it in Snap");
-    window.location.href = "snapchat://";
-    setTimeout(() => {
-      window.open("https://www.snapchat.com/", "_blank");
-    }, 800);
-  };
-
-  const handleMore = async () => {
+  const handleShare = async () => {
     if (!imageBlob) return;
     try {
       const file = new File([imageBlob], "punter-card.jpg", { type: "image/jpeg" });
@@ -168,54 +140,45 @@ export default function PunterCardShareModal({
           </div>
         )}
 
-        <p className="text-xs uppercase tracking-widest opacity-60 mt-5 mb-3 font-bold">
-          Share to
-        </p>
-        <div className="flex justify-between gap-2">
-          <ShareButton icon={<Download className="w-5 h-5" />} label="Save"      onClick={handleSave} />
-          <ShareButton icon={<MessageCircle className="w-5 h-5" />} label="WhatsApp"  onClick={handleWhatsApp} accent="#25D366" />
-          <ShareButton icon={<Camera className="w-5 h-5" />} label="Instagram" onClick={handleInstagram} accent="#E1306C" />
-          <ShareButton icon={<Ghost className="w-5 h-5" />}  label="Snapchat"  onClick={handleSnapchat}  accent="#FFFC00" accentText="#000" />
+        {/* Two-button row. Share is the primary CTA when the OS supports
+            file-attached share sheets (every modern phone); otherwise we
+            hide it and Save is the only path. */}
+        <div className="flex gap-3 mt-5">
+          <button
+            onClick={handleSave}
+            className="flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-black uppercase tracking-wider transition active:scale-95"
+            style={{
+              background: "rgba(255,255,255,0.08)",
+              border: "1px solid rgba(255,255,255,0.18)",
+              color: "#fff",
+            }}
+          >
+            <Download className="w-4 h-4" />
+            Save
+          </button>
           {canNativeShare && (
-            <ShareButton icon={<Share2 className="w-5 h-5" />} label="More" onClick={handleMore} />
+            <button
+              onClick={handleShare}
+              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-black uppercase tracking-wider transition active:scale-95"
+              style={{
+                background: "#ff6341",
+                color: "#000",
+                border: "1px solid #ff6341",
+                boxShadow: "0 6px 20px rgba(255,99,65,0.45)",
+              }}
+            >
+              <Share2 className="w-4 h-4" />
+              Share to…
+            </button>
           )}
         </div>
+
+        {!canNativeShare && (
+          <p className="text-[11px] text-white/55 mt-3 text-center">
+            Tap Save, then attach the image from your camera roll in any app.
+          </p>
+        )}
       </div>
     </div>
-  );
-}
-
-function ShareButton({
-  icon,
-  label,
-  onClick,
-  accent,
-  accentText,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-  accent?: string;
-  accentText?: string;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className="flex flex-col items-center gap-1.5 flex-1 min-w-0 py-2"
-    >
-      <span
-        className="w-12 h-12 rounded-full flex items-center justify-center transition active:scale-95"
-        style={{
-          background: accent || "rgba(255,255,255,0.10)",
-          color: accentText || "#fff",
-          border: "1px solid rgba(255,255,255,0.15)",
-        }}
-      >
-        {icon}
-      </span>
-      <span className="text-[10px] uppercase tracking-wider font-bold opacity-80 truncate w-full text-center">
-        {label}
-      </span>
-    </button>
   );
 }

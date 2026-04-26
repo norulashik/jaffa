@@ -150,6 +150,24 @@ export default function PunterCardPage() {
     if (!shareRef.current || sharing) return;
     setSharing(true);
     try {
+      // Image-decode race fix: html-to-image snapshots the DOM whether or
+      // not embedded <img> tags have finished decoding. The JAFFA logo +
+      // team crests are inlined as base64 so fetching is instant — but
+      // the browser still decodes asynchronously, and a rasterize that
+      // lands before decode finishes ships the card without the logo.
+      // Walk every <img> in the share subtree and await img.decode()
+      // (or img.complete fast-path) before snapshotting.
+      const imgs = Array.from(shareRef.current.querySelectorAll("img"));
+      await Promise.allSettled(
+        imgs.map((img) => {
+          if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+          return img.decode().catch(() => undefined);
+        })
+      );
+      // One extra animation frame so any layout/paint triggered by the
+      // decode settles before we capture pixels.
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+
       const dataUrl = await toJpeg(shareRef.current, {
         pixelRatio: 1.5,
         quality: 0.92,
@@ -544,6 +562,45 @@ const ShareCard = forwardRef<HTMLDivElement, {
         overflow: "hidden",
       }}
     >
+      {/* Floating banana decorations — scattered around the card edges to
+          give it the playful NFT-card feel from the user's reference image.
+          aria-hidden + zIndex 0 keeps them strictly decorative and behind
+          all content. Each banana uses the system color-emoji font, which
+          html-to-image rasterizes correctly on both iOS Safari (Apple
+          Color Emoji) and Android Chrome (Noto Color Emoji). Rotations
+          are varied so no two read as paired. */}
+      <div aria-hidden style={{ position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none" }}>
+        {[
+          { top:  20, left:  -40, size: 180, rotate:  -28, opacity: 0.95 },
+          { top:  60, right:  20, size: 140, rotate:   55, opacity: 0.85 },
+          { top: 240, left:  -30, size: 120, rotate:  110, opacity: 0.85 },
+          { top: 720, right: -40, size: 160, rotate:  -75, opacity: 0.9  },
+          { top: 980, left:  -20, size: 140, rotate:  200, opacity: 0.85 },
+          { bottom: -30, right: -30, size: 200, rotate:   25, opacity: 0.95 },
+          { bottom: 280, left: 460, size:  90, rotate:   12, opacity: 0.55 },
+          { top: 480, right: 360, size:  80, rotate:  -50, opacity: 0.5  },
+        ].map((b, i) => (
+          <span
+            key={i}
+            style={{
+              position: "absolute",
+              top: b.top,
+              left: (b as any).left,
+              right: (b as any).right,
+              bottom: (b as any).bottom,
+              fontSize: b.size,
+              transform: `rotate(${b.rotate}deg)`,
+              opacity: b.opacity,
+              filter: "drop-shadow(0 6px 16px rgba(0,0,0,0.45))",
+              fontFamily: "'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif",
+              lineHeight: 1,
+            }}
+          >
+            🍌
+          </span>
+        ))}
+      </div>
+
       {/* Date pill — anchored to the OUTER card edge (top: 56 / right: 56
           matches the card padding) so it can never clip into the header,
           regardless of how tall the logo is. nowrap forces single-line so
@@ -567,15 +624,23 @@ const ShareCard = forwardRef<HTMLDivElement, {
         {startLabel}
       </div>
 
-      {/* Header — JAFFA brand mark dominates the top of the card. The PNG
-          carries thick whitespace around the actual wordmark, so we render
-          it large (height 280) and skip objectFit: contain (which was
-          shrinking the visible glyph proportionally to the empty pixels). */}
-      <div style={{ position: "relative", marginBottom: 36, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 300 }}>
+      {/* Header — JAFFA brand mark dominates the top of the card.
+          User's reference image has the wordmark filling roughly 80% of
+          the card width — bumped to height 520 to match. The PNG carries
+          thick transparent padding around the actual glyph so the visible
+          mark sits at ~250-300px tall, which is the size that reads
+          clearly on a phone preview. drop-shadow gives the floating-3D
+          feel the reference has. */}
+      <div style={{ position: "relative", marginBottom: 32, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 480 }}>
         <img
           src={JAFFA_LOGO_DATA_URL}
           alt="JAFFA"
-          style={{ height: 280, width: "auto", display: "block", filter: "drop-shadow(0 0 32px rgba(255,255,255,0.55))" }}
+          style={{
+            height: 520,
+            width: "auto",
+            display: "block",
+            filter: "drop-shadow(0 12px 40px rgba(0,0,0,0.55)) drop-shadow(0 0 60px rgba(255,255,255,0.25))",
+          }}
         />
       </div>
 
