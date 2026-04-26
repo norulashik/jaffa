@@ -22,85 +22,124 @@ function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number)
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
+// Server-side cache for the lobby payload. Lobby auto-polls every 15 s and
+// every active client previously fired its own pair of Sportsmonk fetches —
+// so 100 lobby users meant ~100× the upstream call rate. The cached payload
+// is identical for everyone (no per-user data), so a single global cache
+// with a 12 s TTL is enough; the 12 s sits comfortably below the 15 s lobby
+// refresh so newly-published Sportsmonk fixtures still appear within one
+// refresh cycle.
+//
+// `matchesInflight` collapses cache-cold concurrent requests into one
+// upstream fetch — a thundering-herd of N users on app launch all await
+// the same in-flight promise instead of firing N upstream pairs.
+let matchesCache: { at: number; data: unknown } | null = null;
+let matchesInflight: Promise<unknown> | null = null;
+const MATCHES_CACHE_MS = 12_000;
+
+async function buildMatchesPayload(): Promise<unknown> {
+  // 1. Local DB matches (already imported)
+  const dbMatches = await Match.findAll({
+    where: { status: ["upcoming", "live"] },
+    order: [["startTime", "ASC"]],
+  });
+
+  // 2. Fetch live + upcoming from Sportsmonk
+  const [liveFixtures, upcomingFixtures] = await Promise.all([
+    fetchSportsmonkLiveScores(),
+    fetchUpcomingFixtures(),
+  ]);
+  console.log(`[Matches] DB: ${dbMatches.length}, Live: ${liveFixtures.length}, Upcoming: ${upcomingFixtures.length}`);
+
+  // Collect external IDs already in DB to avoid duplicates
+  const importedIds = new Set(
+    dbMatches.filter((m) => m.externalId).map((m) => String(m.externalId))
+  );
+
+  // 3. Convert Sportsmonk fixtures to match-like objects for the frontend
+  const sportsmonkMatches = [...liveFixtures, ...upcomingFixtures]
+    .filter((f) => !importedIds.has(String(f.id)))
+    // Deduplicate by fixture id
+    .filter((f, i, arr) => arr.findIndex((x) => x.id === f.id) === i)
+    .map((f) => {
+      const localTeam = f.localteam?.data?.name || `Team ${f.localteam_id}`;
+      const visitorTeam = f.visitorteam?.data?.name || `Team ${f.visitorteam_id}`;
+      const localCode = f.localteam?.data?.code || localTeam.slice(0, 3).toUpperCase();
+      const visitorCode = f.visitorteam?.data?.code || visitorTeam.slice(0, 3).toUpperCase();
+
+      const runs = f.runs?.data || (Array.isArray(f.runs) ? f.runs : []);
+      const inn1 = runs.find((r: any) => r.inning === 1);
+      const inn2 = runs.find((r: any) => r.inning === 2);
+
+      let status = "upcoming";
+      if (f.status === "Finished" || f.status === "Aban.") status = "completed";
+      else if (f.status !== "NS") status = "live";
+
+      return {
+        id: `sportsmonk_${f.id}`,
+        externalId: String(f.id),
+        team1: localTeam,
+        team2: visitorTeam,
+        team1Short: localCode,
+        team2Short: visitorCode,
+        team1Img: f.localteam?.data?.image_path || null,
+        team2Img: f.visitorteam?.data?.image_path || null,
+        startTime: f.starting_at,
+        status,
+        note: f.note || null,
+        venue: f.venue_id || null,
+        score: inn1 ? `${inn1.score}/${inn1.wickets}` + (inn2 ? ` | ${inn2.score}/${inn2.wickets}` : "") : null,
+        overs: inn1 ? String(inn2 ? inn2.overs : inn1.overs) : null,
+        source: "sportsmonk",
+      };
+    })
+    .filter((m) => m.status !== "completed");
+
+  // 4. Merge and sort by startTime ascending (nearest first)
+  const allMatches = [
+    ...dbMatches.map((m) => {
+      const sd = (m.scoreData as any) || {};
+      return {
+        ...m.toJSON(),
+        team1Img: sd.team1Img || null,
+        team2Img: sd.team2Img || null,
+        source: "local",
+      };
+    }),
+    ...sportsmonkMatches,
+  ].sort((a, b) => {
+    const timeA = a.startTime ? new Date(a.startTime).getTime() : 0;
+    const timeB = b.startTime ? new Date(b.startTime).getTime() : 0;
+    return timeA - timeB;
+  });
+
+  return allMatches;
+}
+
+async function getMatchesPayload(): Promise<unknown> {
+  const now = Date.now();
+  if (matchesCache && now - matchesCache.at < MATCHES_CACHE_MS) {
+    return matchesCache.data;
+  }
+  // In-flight dedup: if a fetch is already running, every concurrent caller
+  // awaits the same promise instead of starting a parallel upstream call.
+  if (matchesInflight) return matchesInflight;
+  matchesInflight = (async () => {
+    try {
+      const data = await buildMatchesPayload();
+      matchesCache = { at: Date.now(), data };
+      return data;
+    } finally {
+      matchesInflight = null;
+    }
+  })();
+  return matchesInflight;
+}
+
 // Get current/upcoming matches — merges local DB + live Sportsmonk data
 router.get("/", async (_req: Request, res: Response): Promise<void> => {
   try {
-    // 1. Local DB matches (already imported)
-    const dbMatches = await Match.findAll({
-      where: { status: ["upcoming", "live"] },
-      order: [["startTime", "ASC"]],
-    });
-
-    // 2. Fetch live + upcoming from Sportsmonk
-    const [liveFixtures, upcomingFixtures] = await Promise.all([
-      fetchSportsmonkLiveScores(),
-      fetchUpcomingFixtures(),
-    ]);
-    console.log(`[Matches] DB: ${dbMatches.length}, Live: ${liveFixtures.length}, Upcoming: ${upcomingFixtures.length}`);
-
-    // Collect external IDs already in DB to avoid duplicates
-    const importedIds = new Set(
-      dbMatches.filter((m) => m.externalId).map((m) => String(m.externalId))
-    );
-
-    // 3. Convert Sportsmonk fixtures to match-like objects for the frontend
-    const sportsmonkMatches = [...liveFixtures, ...upcomingFixtures]
-      .filter((f) => !importedIds.has(String(f.id)))
-      // Deduplicate by fixture id
-      .filter((f, i, arr) => arr.findIndex((x) => x.id === f.id) === i)
-      .map((f) => {
-        const localTeam = f.localteam?.data?.name || `Team ${f.localteam_id}`;
-        const visitorTeam = f.visitorteam?.data?.name || `Team ${f.visitorteam_id}`;
-        const localCode = f.localteam?.data?.code || localTeam.slice(0, 3).toUpperCase();
-        const visitorCode = f.visitorteam?.data?.code || visitorTeam.slice(0, 3).toUpperCase();
-
-        const runs = f.runs?.data || (Array.isArray(f.runs) ? f.runs : []);
-        const inn1 = runs.find((r: any) => r.inning === 1);
-        const inn2 = runs.find((r: any) => r.inning === 2);
-
-        let status = "upcoming";
-        if (f.status === "Finished" || f.status === "Aban.") status = "completed";
-        else if (f.status !== "NS") status = "live";
-
-        return {
-          id: `sportsmonk_${f.id}`,
-          externalId: String(f.id),
-          team1: localTeam,
-          team2: visitorTeam,
-          team1Short: localCode,
-          team2Short: visitorCode,
-          team1Img: f.localteam?.data?.image_path || null,
-          team2Img: f.visitorteam?.data?.image_path || null,
-          startTime: f.starting_at,
-          status,
-          note: f.note || null,
-          venue: f.venue_id || null,
-          score: inn1 ? `${inn1.score}/${inn1.wickets}` + (inn2 ? ` | ${inn2.score}/${inn2.wickets}` : "") : null,
-          overs: inn1 ? String(inn2 ? inn2.overs : inn1.overs) : null,
-          source: "sportsmonk",
-        };
-      })
-      .filter((m) => m.status !== "completed");
-
-    // 4. Merge and sort by startTime ascending (nearest first)
-    const allMatches = [
-      ...dbMatches.map((m) => {
-        const sd = (m.scoreData as any) || {};
-        return {
-          ...m.toJSON(),
-          team1Img: sd.team1Img || null,
-          team2Img: sd.team2Img || null,
-          source: "local",
-        };
-      }),
-      ...sportsmonkMatches,
-    ].sort((a, b) => {
-      const timeA = a.startTime ? new Date(a.startTime).getTime() : 0;
-      const timeB = b.startTime ? new Date(b.startTime).getTime() : 0;
-      return timeA - timeB;
-    });
-
-    res.json(allMatches);
+    res.json(await getMatchesPayload());
   } catch (error) {
     console.error("Get matches error:", error);
     res.status(500).json({ error: "Failed to get matches" });

@@ -263,12 +263,30 @@ async function getCachedUnfilteredLivescores(): Promise<any[]> {
   return promise;
 }
 
+// Fresh-window dedup TTL. Held below the 5 s poll interval so each tick
+// still triggers a live fetch, but high enough that the two passes within
+// one tick (pollSportsmonkUpdates → pollLivePlayers, ~50–500 ms apart)
+// share the same upstream call. Without this, both passes were firing
+// independent fetches against Sportsmonk for the same fixture.
+const FRESH_DEDUP_MS = 4_000;
+
 async function fetchLiveFixtureDetail(
   fixtureId: number,
   includeBalls = false
 ): Promise<any | null> {
   const cacheKey = `${fixtureId}:${includeBalls ? "balls" : "runs"}`;
   const staleOkMs = includeBalls ? STALE_OK_MS_BALLS : STALE_OK_MS_RUNS;
+  const now = Date.now();
+
+  // Fresh-window dedup. A balls payload always satisfies a runs caller too
+  // (Sportsmonk's `?include=balls,runs` returns both). A runs-only payload
+  // only satisfies runs callers — never serve it to a balls caller.
+  const ballsHit = lastGoodFixture.get(`${fixtureId}:balls`);
+  if (ballsHit && now - ballsHit.at < FRESH_DEDUP_MS) return ballsHit.data;
+  if (!includeBalls) {
+    const runsHit = lastGoodFixture.get(`${fixtureId}:runs`);
+    if (runsHit && now - runsHit.at < FRESH_DEDUP_MS) return runsHit.data;
+  }
 
   if (includeBalls) {
     const fixture = await fetchFixtureWithBalls(fixtureId);
@@ -1295,11 +1313,17 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
       console.log(`[Sportsmonk] Initialized tracking for ${match.team1Short} vs ${match.team2Short}: innings=${match.currentInnings}, over=${match.currentOver}`);
     }
 
-    // Fast fetch: runs only (for score updates).
+    // Fetch with balls (the bigger payload). Sportsmonk's `?include=balls,
+    // runs` returns both, so this single fetch warms the FRESH_DEDUP_MS
+    // cache for pollLivePlayers's follow-up call ~50–500 ms later in the
+    // same tick — pollLivePlayers gets a cache hit and skips its own
+    // upstream fetch. Net: 1 Sportsmonk call per match per 5 s tick
+    // instead of 2. The runs-needing code paths below are unchanged
+    // since the balls payload contains runs too.
     // fetchLiveFixtureDetail already serves a recent cached payload during
     // upstream hiccups and rate-limits the "no fixture data" log itself,
     // so we just silently skip when nothing is available.
-    const fixture = await fetchLiveFixtureDetail(fixtureId, false);
+    const fixture = await fetchLiveFixtureDetail(fixtureId, true);
     if (!fixture) continue;
 
     // Auto-start: if match is "upcoming" in our DB but toss has happened on Sportsmonk
