@@ -90,21 +90,39 @@ const BATSMAN_BANDS_LATE: BatsmanBand[] = [
   { key: "25_plus", label: "25+", max: Infinity },
 ];
 
+// Death-overs binary. At over 16+ a fresh batsman realistically maxes out
+// around the high-teens — offering 0-15/16-35/36-60 as choices is dishonest
+// odds and the user complained about it. Two-option set with 50 pts each
+// matches the "depending on the overs" spec from product.
+const BATSMAN_BANDS_DEATH: BatsmanBand[] = [
+  { key: "death_under_15", label: "Under 15", max: 14 },
+  { key: "death_15_plus", label: "15+",      max: Infinity },
+];
+
 // Maps the prediction's saved option keys back to the original BatsmanBand[]
 // so the resolver buckets against the right set, regardless of which variant
 // was used at creation time.
 function batsmanBandsForPred(pred: { options: { key: string }[] }): BatsmanBand[] {
   const keys = new Set(pred.options.map((o) => o.key));
-  for (const set of [BATSMAN_BANDS, BATSMAN_BANDS_MID, BATSMAN_BANDS_LATE]) {
+  for (const set of [BATSMAN_BANDS, BATSMAN_BANDS_MID, BATSMAN_BANDS_LATE, BATSMAN_BANDS_DEATH]) {
     if (set.every((b) => keys.has(b.key))) return set;
   }
   return BATSMAN_BANDS;
 }
 
-// Pick a band-set based on the maximum runs a player could realistically score
-// from this point onward. Caps and breakpoints chosen so the question always
-// feels achievable — never offering "60+" for someone with only 10 balls left.
-function pickBatsmanBands(remainingMaxRuns: number): BatsmanBand[] {
+// Pick a band-set based on what the batsman could realistically achieve from
+// this point onward. Two signals:
+//   - currentOver: anyone arriving at over 16+ (death) gets the binary
+//     under-15/15+ set — even if they technically have 4-5 overs left, no
+//     one in IPL 2026 is shaping a 60+ inning from a death-overs arrival.
+//   - remainingMaxRuns: legacy ceiling-based fallback for non-death cases,
+//     so a Jadeja at over 14 with ~36 max runs gets MID (11-25-45) instead
+//     of standard.
+function pickBatsmanBands(currentOver: number, totalOvers: number, remainingMaxRuns: number): BatsmanBand[] {
+  // Death window = last 5 overs of the innings (16-20 for a T20). Adapts
+  // proportionally for shorter / DLS-trimmed games.
+  const deathStart = Math.max(2, (totalOvers || 20) - 4);
+  if (currentOver >= deathStart) return BATSMAN_BANDS_DEATH;
   if (remainingMaxRuns >= 60) return BATSMAN_BANDS;
   if (remainingMaxRuns >= 30) return BATSMAN_BANDS_MID;
   return BATSMAN_BANDS_LATE;
@@ -135,6 +153,15 @@ const BOWLER_BANDS: BowlerBand[] = [
   { key: "25_35", label: "25-35", max: 35 },
   { key: "36_45", label: "36-45", max: 45 },
   { key: "45_plus", label: "45+", max: Infinity },
+];
+
+// Death-overs binary for bowlers — runs variant. A bowler introduced at
+// over 16+ realistically bowls ~1-2 overs at most, so the standard 4-band
+// "0-24 / 25-35 / …" set has false ceiling values. 12 runs is the IPL par
+// for a single death over.
+const BOWLER_BANDS_DEATH: BowlerBand[] = [
+  { key: "death_runs_under_12", label: "Under 12 runs", max: 11 },
+  { key: "death_runs_12_plus",  label: "12+ runs",      max: Infinity },
 ];
 
 // Rotating phrasings — commentator-voice, in-the-moment. Picked at generation
@@ -181,6 +208,27 @@ const BOWLER_WICKETS_PHRASINGS: Array<(name: string) => string> = [
   (n) => `${n}'s bounce tonight — scalps?`,
 ];
 
+// Death-overs phrasings — short, binary-feel, match the binary band sets.
+// Used when a player walks in / is introduced at over 16+.
+const BATSMAN_PHRASINGS_DEATH: Array<(name: string) => string> = [
+  (n) => `${n} in at the death — does he get to 15+?`,
+  (n) => `Late entry for ${n}. Cracks 15 or falls short?`,
+  (n) => `${n}'s cameo — under 15 or beyond?`,
+  (n) => `${n} walks in deep — runs on the board?`,
+];
+const BOWLER_PHRASINGS_DEATH: Array<(name: string) => string> = [
+  (n) => `${n} in the death — does he leak 12+?`,
+  (n) => `Pressure on ${n} — under 12 or expensive?`,
+  (n) => `${n} into the attack at the death — runs?`,
+  (n) => `Death-over check on ${n} — how many off the spell?`,
+];
+const BOWLER_WICKETS_PHRASINGS_DEATH: Array<(name: string) => string> = [
+  (n) => `${n} at the death — wicketless, or does he strike?`,
+  (n) => `Will ${n} get a scalp at the death?`,
+  (n) => `${n} finds the breakthrough or stays empty-handed?`,
+  (n) => `${n}'s death over — wicket on the cards?`,
+];
+
 // Bowler-wickets bands — user-specified.
 const BOWLER_WICKETS_BANDS = [
   { key: "0", label: "0", max: 0 },
@@ -188,6 +236,45 @@ const BOWLER_WICKETS_BANDS = [
   { key: "2", label: "2", max: 2 },
   { key: "2_plus", label: "2+", max: Infinity },
 ];
+
+// Death-overs binary for bowler wickets. Same rationale as the runs
+// variant: a death-only spell rarely produces 2+ scalps, so binary
+// "wicketless or strike" reads honestly.
+const BOWLER_WICKETS_BANDS_DEATH = [
+  { key: "death_wkts_0",      label: "Wicketless", max: 0 },
+  { key: "death_wkts_1_plus", label: "1+ wicket",  max: Infinity },
+];
+
+// Resolver-side band lookup — mirrors batsmanBandsForPred. Without this,
+// a death-overs prediction would resolve against the standard BOWLER_BANDS
+// (or BOWLER_WICKETS_BANDS) and mis-bucket the answer entirely.
+function bowlerBandsForPred(pred: { options: { key: string }[] }): BowlerBand[] {
+  const keys = new Set(pred.options.map((o) => o.key));
+  for (const set of [BOWLER_BANDS, BOWLER_BANDS_DEATH]) {
+    if (set.every((b) => keys.has(b.key))) return set;
+  }
+  return BOWLER_BANDS;
+}
+
+function bowlerWicketsBandsForPred(pred: { options: { key: string }[] }) {
+  const keys = new Set(pred.options.map((o) => o.key));
+  for (const set of [BOWLER_WICKETS_BANDS, BOWLER_WICKETS_BANDS_DEATH]) {
+    if (set.every((b) => keys.has(b.key))) return set;
+  }
+  return BOWLER_WICKETS_BANDS;
+}
+
+// Pick the bowler band-set based on currentOver. A bowler whose first ball
+// is at over 16 or later gets the binary death set (either runs or wickets,
+// caller decides which variant). Bowlers introduced earlier get the
+// standard wide bands.
+function pickBowlerBands(currentOver: number, totalOvers: number, isWicketsVariant: boolean) {
+  const deathStart = Math.max(2, (totalOvers || 20) - 4);
+  if (currentOver >= deathStart) {
+    return isWicketsVariant ? BOWLER_WICKETS_BANDS_DEATH : BOWLER_BANDS_DEATH;
+  }
+  return isWicketsVariant ? BOWLER_WICKETS_BANDS : BOWLER_BANDS;
+}
 
 // Batsman-sixes bands — used for the first-six bonus question.
 const BATSMAN_SIXES_BANDS = [
@@ -318,7 +405,9 @@ export function computeLivePlayerCorrectOption(
     const ballsForBowler = inningsBalls.filter((b) => b.bowler_id === playerId);
     if (ballsForBowler.length === 0) return null;
     const runs = ballsForBowler.reduce((s, b) => s + bowlerRunsOnBall(b), 0);
-    return bucket(runs, BOWLER_BANDS);
+    // Use bowlerBandsForPred so DEATH-variant predictions resolve against
+    // their binary set instead of the standard 4-band one.
+    return bucket(runs, bowlerBandsForPred(pred));
   }
 
   if (subj === "bowler_innings_wkts") {
@@ -330,7 +419,7 @@ export function computeLivePlayerCorrectOption(
       if (name.includes("run out")) return false;
       return true;
     }).length;
-    return bucket(wickets, BOWLER_WICKETS_BANDS);
+    return bucket(wickets, bowlerWicketsBandsForPred(pred));
   }
 
   return null;
@@ -450,9 +539,20 @@ export async function processLivePlayers(
     // they face every remaining ball — overstates reality but avoids
     // accidentally being too tight). Used to pick which bands the question
     // ships with, so a late-arriving batsman never sees "60+" as an option.
-    const remBalls = remainingBallsInInnings(ballsThisInnings, match.totalOvers || 20);
+    const totalOversForInnings = match.totalOvers || 20;
+    const remBalls = remainingBallsInInnings(ballsThisInnings, totalOversForInnings);
     const remainingMaxRuns = remBalls * 6;
-    const bandsForNewBatsman = pickBatsmanBands(remainingMaxRuns);
+    // Current over = highest ball.<over> we've seen + 1 (Sportsmonk uses
+    // 0-indexed ball.over). For a fresh batsman walking in mid-over, the
+    // current-over signal is what tells us "you're in the death" so we use
+    // the binary band-set instead of the wide standard one.
+    let maxBallSeen = 0;
+    for (const b of ballsThisInnings) {
+      const n = parseFloat(String((b as any).ball || "0"));
+      if (Number.isFinite(n) && n > maxBallSeen) maxBallSeen = n;
+    }
+    const currentOver = Math.min(Math.floor(maxBallSeen) + 1, totalOversForInnings);
+    const bandsForNewBatsman = pickBatsmanBands(currentOver, totalOversForInnings, remainingMaxRuns);
 
     for (const batsmanId of seenBatsmen) {
       const key = `batsman_innings:${batsmanId}:${innings}`;
@@ -474,7 +574,13 @@ export async function processLivePlayers(
             matchId: match.id,
             category: "per_over",
             round: innings === 1 ? 1 : 4,
-            question: pickRandom(BATSMAN_PHRASINGS)(fullname),
+            // Phrasing follows the band variant — DEATH bands get the
+            // binary "under 15 / 15+" wording so the question reads
+            // honestly to the user (and matches the prompt the option set
+            // implies). Standard bands keep the wide-tone phrasings.
+            question: pickRandom(
+              bandsForNewBatsman === BATSMAN_BANDS_DEATH ? BATSMAN_PHRASINGS_DEATH : BATSMAN_PHRASINGS
+            )(fullname),
             options: bandsForNewBatsman.map((band) => ({
               key: band.key,
               label: band.label,
@@ -572,8 +678,15 @@ export async function processLivePlayers(
       // per bowler (so a restart doesn't swap the question mid-innings).
       const isWicketsVariant = (bowlerId + innings) % 2 === 0;
       const subject = isWicketsVariant ? "bowler_innings_wkts" : "bowler_innings";
-      const bands = isWicketsVariant ? BOWLER_WICKETS_BANDS : BOWLER_BANDS;
-      const phrasings = isWicketsVariant ? BOWLER_WICKETS_PHRASINGS : BOWLER_PHRASINGS;
+      // Bands + phrasings are death-aware: a bowler whose first ball lands
+      // at over 16+ ships with the binary "wicketless / 1+" or "<12 / 12+"
+      // set, paired with the matching DEATH phrasings so the question text
+      // matches the option semantics.
+      const bands = pickBowlerBands(currentOver, totalOversForInnings, isWicketsVariant);
+      const isDeathBands = bands === BOWLER_BANDS_DEATH || bands === BOWLER_WICKETS_BANDS_DEATH;
+      const phrasings = isDeathBands
+        ? (isWicketsVariant ? BOWLER_WICKETS_PHRASINGS_DEATH : BOWLER_PHRASINGS_DEATH)
+        : (isWicketsVariant ? BOWLER_WICKETS_PHRASINGS : BOWLER_PHRASINGS);
 
       try {
         const [pred, created] = await Prediction.findOrCreate({
@@ -744,14 +857,18 @@ export async function processLivePlayers(
             if (name.includes("run out")) return false;
             return true;
           }).length;
-          correctOption = bucket(wickets, BOWLER_WICKETS_BANDS);
+          // Bucket against the band-set this prediction was actually
+          // shipped with (DEATH variant if the bowler was introduced at
+          // over 16+) — was previously hardcoded to BOWLER_WICKETS_BANDS
+          // which mis-resolved every DEATH-band card.
+          correctOption = bucket(wickets, bowlerWicketsBandsForPred(pred));
           context = { actualBowlerWickets: wickets };
           console.log(
             `[livePlayerTracker] bowler ${bowlerId} (wkts) resolved innings ${innings}: ${wickets} wickets → ${correctOption}`
           );
         } else {
           const runs = ballsForBowler.reduce((sum, b) => sum + bowlerRunsOnBall(b), 0);
-          correctOption = bucket(runs, BOWLER_BANDS);
+          correctOption = bucket(runs, bowlerBandsForPred(pred));
           context = { actualBowlerRuns: runs };
           console.log(
             `[livePlayerTracker] bowler ${bowlerId} (runs) resolved innings ${innings}: ${runs} conceded → ${correctOption}`
