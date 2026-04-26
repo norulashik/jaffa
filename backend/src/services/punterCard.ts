@@ -2,6 +2,7 @@ import { Op } from "sequelize";
 import { Match, Prediction, UserPrediction, MatchParticipant } from "../models";
 import sequelize from "../config/database";
 import { playerKey } from "./predictionEngine";
+import { ALL_CORRECT_OPTION } from "./pointsEngine";
 import {
   squadWithRolesForTeam,
   getPlayerRole,
@@ -24,9 +25,12 @@ export function oddsToPoints(odds: number): number {
 }
 
 const PUNTER_TEMPLATES = [
+  // --- Player-pool templates (kept from v1) ---
   "punter_motm",
   "punter_top_batter",
   "punter_top_bowler",
+  // --- v1 templates retained ONLY so already-generated cards still resolve.
+  //     New cards no longer include these. ---
   "punter_inn1_50",
   "punter_inn1_100",
   "punter_inn2_50",
@@ -34,6 +38,15 @@ const PUNTER_TEMPLATES = [
   "punter_highest_at_1st_dismissal",
   "punter_match_winner",
   "punter_toss_winner",
+  // --- v2 head-to-head questions (replace v1 7-pack going forward) ---
+  "punter_star_batter_lower",        // who scores fewer runs: starBat(t1) vs starBat(t2)
+  "punter_wk_better_sr",             // who finishes with better SR: wk(t1) vs wk(t2)
+  "punter_openers_more_boundaries",  // which team's openers hit more (4s+6s)
+  "punter_allrounder_impact",        // bigger impact (runs+wkts+catches): allRounder(t1) vs allRounder(t2)
+  "punter_first_event",              // first six or first wicket of the match
+  "punter_top_vs_death",             // t1 top order runs (openers + #3) vs t2 death bowling runs (overs 16–20 of t1's innings)
+  "punter_overs_16_20_runs",         // which team scores more across overs 16–20
+  "punter_balls_per_boundary",       // which team has worse dots÷boundaries ratio (more wasteful)
 ] as const;
 export type PunterTemplate = (typeof PUNTER_TEMPLATES)[number];
 
@@ -174,69 +187,135 @@ export function buildPunterCardQuestions(
     });
   }
 
-  // 4-7. Innings 1 & 2 — Any player to score 50 / 100 (Yes/No).
-  // Odds reference: Yes-50 ≈ 1.25, No-50 ≈ 3.55, Yes-100 ≈ 7.00, No-100 ≈ 1.07
+  // ---- v2 head-to-head pack (replaces the old yes/no + winner/toss 7) ----
+  //
+  // Every question phrasing bakes in the actual player names so users see
+  // "Who scores less today: Ruturaj Gaikwad or Shubman Gill?" instead of a
+  // generic placeholder. Pickers fall back to null on thin squad data, in
+  // which case the corresponding card is silently skipped (the resolver
+  // would have nothing to bind it to anyway).
+
+  const t1Players = pool?.team1Players || [];
+  const t2Players = pool?.team2Players || [];
+
+  // 4. Star batter — who scores LESS (lower runs wins the pick).
+  const star1 = t1Players.length ? pickStarBatter(t1Players) : null;
+  const star2 = t2Players.length ? pickStarBatter(t2Players) : null;
+  if (star1 && star2 && star1.name.toLowerCase() !== star2.name.toLowerCase()) {
+    out.push({
+      matchId, category: "punter_card", round: 0,
+      templateKey: "punter_star_batter_lower",
+      question: `Who scores less today: ${star1.name} or ${star2.name}?`,
+      options: [
+        { key: playerKey(star1.name), label: star1.name, points: oddsToPoints(2.0) },
+        { key: playerKey(star2.name), label: star2.name, points: oddsToPoints(2.0) },
+        { key: ALL_CORRECT_OPTION,   label: "Tie",       points: oddsToPoints(15.0) },
+      ],
+    });
+  }
+
+  // 5. Wicket-keepers — who finishes with the BETTER strike rate.
+  const wk1 = t1Players.length ? pickWicketKeeper(t1Players) : null;
+  const wk2 = t2Players.length ? pickWicketKeeper(t2Players) : null;
+  if (wk1 && wk2 && wk1.name.toLowerCase() !== wk2.name.toLowerCase()) {
+    out.push({
+      matchId, category: "punter_card", round: 0,
+      templateKey: "punter_wk_better_sr",
+      question: `Who finishes with better strike rate: ${wk1.name} or ${wk2.name}?`,
+      options: [
+        { key: playerKey(wk1.name), label: wk1.name, points: oddsToPoints(2.0) },
+        { key: playerKey(wk2.name), label: wk2.name, points: oddsToPoints(2.0) },
+        { key: ALL_CORRECT_OPTION,  label: "Neither bats", points: oddsToPoints(15.0) },
+      ],
+    });
+  }
+
+  // 6. Openers — which side scores more boundaries (4s + 6s combined).
+  if (pickOpeners(t1Players) && pickOpeners(t2Players)) {
+    out.push({
+      matchId, category: "punter_card", round: 0,
+      templateKey: "punter_openers_more_boundaries",
+      question: `Who scores more boundaries: ${team1Full} openers or ${team2Full} openers?`,
+      options: [
+        { key: "team1", label: `${team1Full} openers`, points: oddsToPoints(2.0) },
+        { key: "team2", label: `${team2Full} openers`, points: oddsToPoints(2.0) },
+        { key: ALL_CORRECT_OPTION, label: "Tied",      points: oddsToPoints(15.0) },
+      ],
+    });
+  }
+
+  // 7. Top all-rounders — bigger impact (runs + wickets + catches, summed).
+  const ar1 = t1Players.length ? pickTopAllrounder(t1Players) : null;
+  const ar2 = t2Players.length ? pickTopAllrounder(t2Players) : null;
+  if (ar1 && ar2 && ar1.name.toLowerCase() !== ar2.name.toLowerCase()) {
+    out.push({
+      matchId, category: "punter_card", round: 0,
+      templateKey: "punter_allrounder_impact",
+      question: `Who has the bigger impact today: ${ar1.name} or ${ar2.name}?`,
+      options: [
+        { key: playerKey(ar1.name), label: `${ar1.name} (runs+wkts+catches)`, points: oddsToPoints(2.0) },
+        { key: playerKey(ar2.name), label: `${ar2.name} (runs+wkts+catches)`, points: oddsToPoints(2.0) },
+        { key: ALL_CORRECT_OPTION,  label: "Tied",                            points: oddsToPoints(15.0) },
+      ],
+    });
+  }
+
+  // 8. First six or first wicket — pure ball-by-ball question, no squad
+  //    dependency, always emitted.
   out.push({
-    matchId, category: "punter_card", round: 0, templateKey: "punter_inn1_50",
-    question: "1st Innings — Any Player to Score 50",
+    matchId, category: "punter_card", round: 0,
+    templateKey: "punter_first_event",
+    question: "What comes first today: first six or first wicket?",
     options: [
-      { key: "yes", label: "Yes", points: oddsToPoints(1.25) },
-      { key: "no",  label: "No",  points: oddsToPoints(3.55) },
-    ],
-  });
-  out.push({
-    matchId, category: "punter_card", round: 0, templateKey: "punter_inn1_100",
-    question: "1st Innings — Any Player to Score 100",
-    options: [
-      { key: "yes", label: "Yes", points: oddsToPoints(7.00) },
-      { key: "no",  label: "No",  points: oddsToPoints(1.07) },
-    ],
-  });
-  out.push({
-    matchId, category: "punter_card", round: 0, templateKey: "punter_inn2_50",
-    question: "2nd Innings — Any Player to Score 50",
-    options: [
-      { key: "yes", label: "Yes", points: oddsToPoints(1.40) },
-      { key: "no",  label: "No",  points: oddsToPoints(3.10) },
-    ],
-  });
-  out.push({
-    matchId, category: "punter_card", round: 0, templateKey: "punter_inn2_100",
-    question: "2nd Innings — Any Player to Score 100",
-    options: [
-      { key: "yes", label: "Yes", points: oddsToPoints(8.00) },
-      { key: "no",  label: "No",  points: oddsToPoints(1.05) },
+      // Sixes go first in T20 powerplay roughly 60% of the time per public
+      // ball-by-ball stats; tiny edge to "wicket" in the points either way.
+      { key: "six",    label: "First six",    points: oddsToPoints(1.7) },
+      { key: "wicket", label: "First wicket", points: oddsToPoints(2.0) },
     ],
   });
 
-  // 8. Team with highest score at 1st dismissal.
+  // 9. Top order vs death bowling — who disappoints fans faster.
+  //    Always team1's top order vs team2's death bowling for predictability.
+  //    Resolver: sum team1 openers+#3 batting runs vs team2 bowlers' runs
+  //    given in overs 16–20 of team1's batting innings. Higher number =
+  //    that side did "worse" in the comparison and is the answer.
+  const t1Openers = pickOpeners(t1Players);
+  const t1Three = t1Players.length ? pickThreeBatter(t1Players) : null;
+  if (t1Openers && t1Three) {
+    out.push({
+      matchId, category: "punter_card", round: 0,
+      templateKey: "punter_top_vs_death",
+      question: `Who'll disappoint fans faster today: ${team1Full} top order or ${team2Full} death bowling?`,
+      options: [
+        { key: "team1", label: `${team1Full} top order`,     points: oddsToPoints(2.0) },
+        { key: "team2", label: `${team2Full} death bowling`, points: oddsToPoints(2.0) },
+        { key: ALL_CORRECT_OPTION, label: "Tied",            points: oddsToPoints(20.0) },
+      ],
+    });
+  }
+
+  // 10. Death overs (16–20) — which team scores more.
   out.push({
-    matchId, category: "punter_card", round: 0, templateKey: "punter_highest_at_1st_dismissal",
-    question: "Team with Highest Score at 1st Dismissal",
+    matchId, category: "punter_card", round: 0,
+    templateKey: "punter_overs_16_20_runs",
+    question: `Which team gets more from overs 16–20: ${team1Full} or ${team2Full}?`,
     options: [
-      { key: "team1", label: team1Full, points: oddsToPoints(1.90) },
-      { key: "draw",  label: "Draw",   points: oddsToPoints(50.00) },
-      { key: "team2", label: team2Full, points: oddsToPoints(1.75) },
+      { key: "team1", label: team1Full,        points: oddsToPoints(2.0) },
+      { key: "team2", label: team2Full,        points: oddsToPoints(2.0) },
+      { key: ALL_CORRECT_OPTION, label: "Tied", points: oddsToPoints(15.0) },
     ],
   });
 
-  // 9. Winner (Incl. Super Over).
+  // 11. Balls per boundary (dots ÷ boundaries) — which team is MORE wasteful.
+  //     Higher ratio = the answer ("wastes more").
   out.push({
-    matchId, category: "punter_card", round: 0, templateKey: "punter_match_winner",
-    question: "Winner (Incl. Super Over)",
+    matchId, category: "punter_card", round: 0,
+    templateKey: "punter_balls_per_boundary",
+    question: `Which team wastes more balls per boundary: ${team1Full} or ${team2Full}?`,
     options: [
-      { key: "team1", label: team1Full, points: oddsToPoints(2.15) },
-      { key: "team2", label: team2Full, points: oddsToPoints(1.65) },
-    ],
-  });
-
-  // 10. Toss winner.
-  out.push({
-    matchId, category: "punter_card", round: 0, templateKey: "punter_toss_winner",
-    question: "Which Team Wins the Coin Toss",
-    options: [
-      { key: "team1", label: team1Full, points: oddsToPoints(1.90) },
-      { key: "team2", label: team2Full, points: oddsToPoints(1.90) },
+      { key: "team1", label: team1Full,        points: oddsToPoints(2.0) },
+      { key: "team2", label: team2Full,        points: oddsToPoints(2.0) },
+      { key: ALL_CORRECT_OPTION, label: "Tied", points: oddsToPoints(15.0) },
     ],
   });
 
@@ -273,6 +352,49 @@ function uniqueByName(players: Player[]): Player[] {
     out.push(p);
   }
   return out;
+}
+
+// ---- Role-based player pickers (head-to-head v2 questions) ----
+// All pickers respect the squad's current order (front of list = highest
+// priority for that role this season — see iplSquads.ts). They never throw;
+// returning null lets the question generator skip a card if the squad data
+// is too thin to identify the relevant player.
+
+function pickStarBatter(team: Player[]): Player | null {
+  // First true batter (not WK / not all-rounder / not bowler). Squad is
+  // ordered top-of-order first, so position 1 in the squad is the marquee
+  // batter. Falls back to the first non-bowl player if no pure batter
+  // exists.
+  return (
+    team.find((p) => p.role === "bat") ||
+    team.find((p) => p.role !== "bowl") ||
+    null
+  );
+}
+
+function pickWicketKeeper(team: Player[]): Player | null {
+  return team.find((p) => p.role === "wk") || null;
+}
+
+// First two non-bowler entries in the squad. By convention these are the
+// pair we'd expect to open (a batter or a wk-keeper), since iplSquads.ts
+// keeps the playing-XI in batting order at the front.
+function pickOpeners(team: Player[]): [Player, Player] | null {
+  const nonBowl = team.filter((p) => p.role !== "bowl");
+  if (nonBowl.length < 2) return null;
+  return [nonBowl[0], nonBowl[1]];
+}
+
+// The number-3 batter for the "top order" definition in
+// `punter_top_vs_death`. Defined as the third non-bowler in the squad,
+// which mirrors how openers are picked.
+function pickThreeBatter(team: Player[]): Player | null {
+  const nonBowl = team.filter((p) => p.role !== "bowl");
+  return nonBowl[2] || null;
+}
+
+function pickTopAllrounder(team: Player[]): Player | null {
+  return team.find((p) => p.role === "all") || null;
 }
 
 // Player of the Match — entire 22-man combined squad (XI from each side,
@@ -488,11 +610,23 @@ export async function resolvePunterCard(
   const balls: any[] = Array.isArray(allBalls) ? allBalls : [];
   const fix: any = fixture || {};
 
+  // Load the squad pool once for the whole batch — v2 head-to-head templates
+  // (openers, top-vs-death, overs 16–20, balls/boundary) need it to map
+  // batsman names to teams. Cheap (one DB read or hardcoded lookup) so we
+  // always pay the cost; v1 templates ignore the arg.
+  const pool = await resolveSquadPool(match);
+
   let resolved = 0;
   for (const pred of cards) {
     const tk = (pred as any).templateKey as PunterTemplate | null;
     if (!tk) continue;
-    const correct = computeCorrectFromBalls(tk, fix, balls);
+    const correct = computeCorrectFromBalls(
+      { templateKey: tk, options: pred.options as { key: string; label: string }[] },
+      fix,
+      balls,
+      match,
+      pool,
+    );
     if (!correct) continue;
     await pred.update({ correctOption: correct, status: "resolved" });
     await scorePunterUserAnswers(pred.id, correct, pred.options);
@@ -501,12 +635,21 @@ export async function resolvePunterCard(
   return { resolved };
 }
 
+// New signature accepts the full prediction (so v2 head-to-head templates can
+// extract the player names baked into option labels) plus optional match +
+// squad pool (so the team-vs-team templates can map scoreboard ↔ team without
+// guessing). All new args are optional so legacy v1 templates keep working
+// unchanged.
 export function computeCorrectFromBalls(
-  tk: PunterTemplate,
+  pred: { templateKey: string; options: { key: string; label: string }[] },
   fixture: any,
-  allBalls: any[]
+  allBalls: any[],
+  match?: Match | null,
+  pool?: SquadSource | null,
 ): string | null {
+  const tk = pred.templateKey as PunterTemplate;
   switch (tk) {
+    // -------- v1 templates retained for already-generated cards --------
     case "punter_match_winner": {
       const wid = fixture?.winner_team_id;
       if (wid == null) return null;
@@ -560,8 +703,342 @@ export function computeCorrectFromBalls(
       if (winners.length === 0) return null;
       return winners.map(playerKey).join(",");
     }
+
+    // -------- v2 head-to-head templates --------
+    case "punter_star_batter_lower": {
+      // Two player options + a "Tie" sentinel. Pull the player names from the
+      // option labels, sum each one's runs across both innings, return the
+      // option key for whoever scored FEWER. Equal totals → ALL_CORRECT.
+      // If neither faced a ball (rare — e.g. abandoned innings 1) we leave
+      // the row alone so reResolveMatch's delta path doesn't wipe a guess.
+      const players = pred.options.filter((o) => o.key !== ALL_CORRECT_OPTION);
+      if (players.length !== 2) return null;
+      const p1 = players[0], p2 = players[1];
+      const r1 = runsByBatterName(allBalls, p1.label);
+      const r2 = runsByBatterName(allBalls, p2.label);
+      if (r1 == null || r2 == null) return null;
+      if (r1 < r2) return p1.key;
+      if (r2 < r1) return p2.key;
+      return ALL_CORRECT_OPTION;
+    }
+    case "punter_wk_better_sr": {
+      // Higher strike rate wins. SR = runs / legal balls faced * 100.
+      // A WK who never batted (e.g. team won the chase before they came in)
+      // gets SR = 0. If BOTH never batted → "Neither bats" (ALL_CORRECT).
+      const players = pred.options.filter((o) => o.key !== ALL_CORRECT_OPTION);
+      if (players.length !== 2) return null;
+      const p1 = players[0], p2 = players[1];
+      const sr1 = strikeRateForBatter(allBalls, p1.label);
+      const sr2 = strikeRateForBatter(allBalls, p2.label);
+      if (sr1 == null && sr2 == null) return ALL_CORRECT_OPTION;
+      if (sr1 == null) return p2.key;
+      if (sr2 == null) return p1.key;
+      if (sr1 > sr2) return p1.key;
+      if (sr2 > sr1) return p2.key;
+      return ALL_CORRECT_OPTION;
+    }
+    case "punter_openers_more_boundaries": {
+      // Need pool to know which two players are each team's openers. If pool
+      // wasn't loaded, leave alone.
+      if (!pool) return null;
+      const t1Op = pickOpeners(pool.team1Players);
+      const t2Op = pickOpeners(pool.team2Players);
+      if (!t1Op || !t2Op) return null;
+      const t1Bnd = boundariesByBatterNames(allBalls, [t1Op[0].name, t1Op[1].name]);
+      const t2Bnd = boundariesByBatterNames(allBalls, [t2Op[0].name, t2Op[1].name]);
+      if (t1Bnd > t2Bnd) return "team1";
+      if (t2Bnd > t1Bnd) return "team2";
+      return ALL_CORRECT_OPTION;
+    }
+    case "punter_allrounder_impact": {
+      // Impact index = batting runs + wickets taken (excl run-outs) +
+      // catches taken. Single sum, higher wins.
+      const players = pred.options.filter((o) => o.key !== ALL_CORRECT_OPTION);
+      if (players.length !== 2) return null;
+      const p1 = players[0], p2 = players[1];
+      const i1 = impactIndexForPlayer(allBalls, p1.label);
+      const i2 = impactIndexForPlayer(allBalls, p2.label);
+      if (i1 == null && i2 == null) return null;
+      const v1 = i1 ?? 0;
+      const v2 = i2 ?? 0;
+      if (v1 > v2) return p1.key;
+      if (v2 > v1) return p2.key;
+      return ALL_CORRECT_OPTION;
+    }
+    case "punter_first_event": {
+      // Chronological scan from innings 1 ball 0.1 forwards. The FIRST ball
+      // that is either a six OR a wicket (run-outs included — they're part
+      // of the scoreboard story even if no bowler credit) decides the
+      // answer. If the match has neither in any innings → null.
+      const ev = firstSixOrWicketEvent(allBalls);
+      return ev; // "six" | "wicket" | null
+    }
+    case "punter_top_vs_death": {
+      // team1 top order = runs by team1 openers + #3 batter (across both
+      // innings — they only bat in their team's batting innings anyway).
+      // team2 death bowling = runs given by team2 bowlers in overs 16–20
+      // of team1's batting innings.
+      // Whichever side's number is HIGHER is the bigger letdown:
+      //   - If team2 bowlers leaked more than team1 top order scored → team2.
+      //   - If team1 top order scored less than team2 bowlers gave up → team1
+      //     (their batting let everyone down).
+      // (User's spec, paraphrased: "if bowling runs > batsmen runs, GT
+      //  (the bowling side) is the answer".)
+      if (!pool) return null;
+      const t1Op = pickOpeners(pool.team1Players);
+      const t1Three = pickThreeBatter(pool.team1Players);
+      if (!t1Op || !t1Three) return null;
+      const topOrderRuns = runsForBatterNames(allBalls, [t1Op[0].name, t1Op[1].name, t1Three.name]);
+      // Scoreboard team1 batted in:
+      const t1Sb = scoreboardForTeam(allBalls, pool.team1Players);
+      if (!t1Sb) return null;
+      const t2BowlerNames = new Set(pool.team2Players.map((p) => p.name.toLowerCase()));
+      const deathBowlingRuns = bowlerRunsConcededInRange(allBalls, t1Sb, 16, 20, t2BowlerNames);
+      if (topOrderRuns === 0 && deathBowlingRuns === 0) return null;
+      if (deathBowlingRuns > topOrderRuns) return "team2";
+      if (topOrderRuns > deathBowlingRuns) return "team1";
+      return ALL_CORRECT_OPTION;
+    }
+    case "punter_overs_16_20_runs": {
+      // Sum total ball runs (incl. extras) in overs 16–20 of EACH team's
+      // batting innings. Higher total = the answer.
+      const t1Sb = pool ? scoreboardForTeam(allBalls, pool.team1Players) : null;
+      const t2Sb = pool ? scoreboardForTeam(allBalls, pool.team2Players) : null;
+      // Fallback: assume team1 batted S1 if pool missing or detection failed.
+      const sb1: "S1" | "S2" = t1Sb ?? "S1";
+      const sb2: "S1" | "S2" = t2Sb ?? (sb1 === "S1" ? "S2" : "S1");
+      const r1 = totalRunsInOverRange(allBalls, sb1, 16, 20);
+      const r2 = totalRunsInOverRange(allBalls, sb2, 16, 20);
+      if (r1 === 0 && r2 === 0) return null;
+      if (r1 > r2) return "team1";
+      if (r2 > r1) return "team2";
+      return ALL_CORRECT_OPTION;
+    }
+    case "punter_balls_per_boundary": {
+      // dots ÷ boundaries per innings. Higher ratio = more wasteful = answer.
+      // Zero boundaries → ratio = +∞ (that team wins the "wasteful" title).
+      const t1Sb = pool ? scoreboardForTeam(allBalls, pool.team1Players) : null;
+      const t2Sb = pool ? scoreboardForTeam(allBalls, pool.team2Players) : null;
+      const sb1: "S1" | "S2" = t1Sb ?? "S1";
+      const sb2: "S1" | "S2" = t2Sb ?? (sb1 === "S1" ? "S2" : "S1");
+      const r1 = dotsPerBoundary(allBalls, sb1);
+      const r2 = dotsPerBoundary(allBalls, sb2);
+      if (r1 == null && r2 == null) return null;
+      if (r1 == null) return "team2";
+      if (r2 == null) return "team1";
+      if (r1 > r2) return "team1";
+      if (r2 > r1) return "team2";
+      return ALL_CORRECT_OPTION;
+    }
   }
   return null;
+}
+
+// ==== v2 helpers — single-player + per-team computations =====================
+
+// Total batting runs across BOTH innings for a named batter (case-insensitive
+// match on Sportsmonk's `batsman.fullname`). Returns null if the player never
+// faced a ball — distinguishes "we don't know" from "scored 0".
+function runsByBatterName(allBalls: any[], name: string): number | null {
+  const target = name.toLowerCase().trim();
+  let total = 0;
+  let appeared = false;
+  for (const b of allBalls) {
+    const bname = b.batsman?.fullname?.toLowerCase().trim();
+    if (bname !== target) continue;
+    appeared = true;
+    total += batRunsOnBall(b);
+  }
+  return appeared ? total : null;
+}
+
+// Same shape as runsByBatterName but sums across multiple players (used for
+// the openers + #3 collective in the top-vs-death template).
+function runsForBatterNames(allBalls: any[], names: string[]): number {
+  const set = new Set(names.map((n) => n.toLowerCase().trim()));
+  let total = 0;
+  for (const b of allBalls) {
+    const bname = b.batsman?.fullname?.toLowerCase().trim();
+    if (!bname || !set.has(bname)) continue;
+    total += batRunsOnBall(b);
+  }
+  return total;
+}
+
+// Strike rate for a single batter across both innings.
+// Returns null if they never faced a legal ball.
+function strikeRateForBatter(allBalls: any[], name: string): number | null {
+  const target = name.toLowerCase().trim();
+  let runs = 0;
+  let legalBalls = 0;
+  for (const b of allBalls) {
+    const bname = b.batsman?.fullname?.toLowerCase().trim();
+    if (bname !== target) continue;
+    if (b.score?.ball === false) continue;
+    legalBalls += 1;
+    runs += batRunsOnBall(b);
+  }
+  if (legalBalls === 0) return null;
+  return (runs / legalBalls) * 100;
+}
+
+// Counts boundaries (4s + 6s) across both innings for any batter in `names`.
+// Prefers Sportsmonk's `score.four`/`score.six` flags; falls back to the
+// runs-on-ball check (matches the same `isFour`/`isSix` semantics used
+// elsewhere in the resolver pipeline).
+function boundariesByBatterNames(allBalls: any[], names: string[]): number {
+  const set = new Set(names.map((n) => n.toLowerCase().trim()));
+  let count = 0;
+  for (const b of allBalls) {
+    const bname = b.batsman?.fullname?.toLowerCase().trim();
+    if (!bname || !set.has(bname)) continue;
+    if (b.score?.four || b.score?.six) {
+      count += 1;
+      continue;
+    }
+    const r = batRunsOnBall(b);
+    if (r === 4 || r === 6) count += 1;
+  }
+  return count;
+}
+
+// Impact index = total batting runs + wickets taken (excl. run-outs) +
+// catches taken. Returns null only if the player never appeared on any ball.
+function impactIndexForPlayer(allBalls: any[], name: string): number | null {
+  const target = name.toLowerCase().trim();
+  let runs = 0, wickets = 0, catches = 0;
+  let appeared = false;
+  for (const b of allBalls) {
+    const bat = b.batsman?.fullname?.toLowerCase().trim();
+    const bowl = b.bowler?.fullname?.toLowerCase().trim();
+    const fielder = b.catchstump?.fullname?.toLowerCase().trim();
+
+    if (bat === target) {
+      appeared = true;
+      runs += batRunsOnBall(b);
+    }
+    if (bowl === target) {
+      appeared = true;
+      if (b.score?.is_wicket || b.batsmanout_id) {
+        const dismissalName = (b.score?.name || "").toLowerCase();
+        if (!dismissalName.includes("run out")) wickets += 1;
+      }
+    }
+    if (fielder === target) {
+      const dismissalName = (b.score?.name || "").toLowerCase();
+      if (dismissalName.includes("caught") || dismissalName === "catch out" || dismissalName.includes("c & b")) {
+        appeared = true;
+        catches += 1;
+      }
+    }
+  }
+  if (!appeared) return null;
+  return runs + wickets + catches;
+}
+
+// Walk balls in chronological order (innings 1 first, then innings 2),
+// looking for the FIRST ball that's either a six or a wicket. Returns the
+// matching event keyword, or null if neither happened in either innings.
+function firstSixOrWicketEvent(allBalls: any[]): "six" | "wicket" | null {
+  for (const sb of ["S1", "S2"] as const) {
+    const innBalls = allBalls
+      .filter((b) => b.scoreboard === sb)
+      .sort((a, b) => parseFloat(String(a.ball || "0")) - parseFloat(String(b.ball || "0")));
+    for (const b of innBalls) {
+      const wicket = b.score?.is_wicket || b.batsmanout_id;
+      const six = b.score?.six || batRunsOnBall(b) === 6;
+      // If both happen on the same ball (extremely rare — e.g. six followed
+      // by run-out attempt off the same delivery — Sportsmonk usually splits
+      // these), prefer the wicket since it's the more decisive event.
+      if (wicket) return "wicket";
+      if (six) return "six";
+    }
+  }
+  return null;
+}
+
+// Detect which scoreboard (S1 / S2) a team batted in by counting how often
+// their squad members appear as batsmen on each scoreboard. Robust against
+// a stray substitute: the team's actual batting innings will dominate.
+function scoreboardForTeam(allBalls: any[], teamPlayers: Player[]): "S1" | "S2" | null {
+  if (!teamPlayers?.length) return null;
+  const names = new Set(teamPlayers.map((p) => p.name.toLowerCase().trim()));
+  let s1 = 0, s2 = 0;
+  for (const b of allBalls) {
+    const bn = b.batsman?.fullname?.toLowerCase().trim();
+    if (!bn || !names.has(bn)) continue;
+    if (b.scoreboard === "S1") s1 += 1;
+    else if (b.scoreboard === "S2") s2 += 1;
+  }
+  if (s1 === 0 && s2 === 0) return null;
+  return s1 >= s2 ? "S1" : "S2";
+}
+
+// Sum of total ball runs (Sportsmonk's `score.runs` is already the team
+// total for that ball, including extras) in a scoreboard's overs [from..to]
+// inclusive. T20 over numbering: over N corresponds to ball.ball values in
+// [N-1, N) — i.e. floor(b.ball) === N - 1.
+function totalRunsInOverRange(
+  allBalls: any[],
+  scoreboard: "S1" | "S2",
+  fromOver: number,
+  toOver: number,
+): number {
+  const fromIdx = fromOver - 1;
+  const toIdx = toOver - 1;
+  let total = 0;
+  for (const b of allBalls) {
+    if (b.scoreboard !== scoreboard) continue;
+    const ov = Math.floor(parseFloat(String(b.ball || "0")));
+    if (ov < fromIdx || ov > toIdx) continue;
+    total += Number(b.score?.runs || 0);
+  }
+  return total;
+}
+
+// Runs given by a SET of bowlers in a specific scoreboard's over range.
+// Used for "team B's death bowling damage in team A's innings 16–20".
+function bowlerRunsConcededInRange(
+  allBalls: any[],
+  scoreboard: "S1" | "S2",
+  fromOver: number,
+  toOver: number,
+  bowlerNamesLower: Set<string>,
+): number {
+  const fromIdx = fromOver - 1;
+  const toIdx = toOver - 1;
+  let total = 0;
+  for (const b of allBalls) {
+    if (b.scoreboard !== scoreboard) continue;
+    const ov = Math.floor(parseFloat(String(b.ball || "0")));
+    if (ov < fromIdx || ov > toIdx) continue;
+    const bowlName = b.bowler?.fullname?.toLowerCase().trim();
+    if (!bowlName || !bowlerNamesLower.has(bowlName)) continue;
+    total += Number(b.score?.runs || 0);
+  }
+  return total;
+}
+
+// Dots ÷ boundaries for a team's batting innings.
+// Dot ball = legal delivery that produced 0 runs total (incl. extras). Wides
+// and no-balls are not "faced" so they never count as dots either way.
+// Returns null if the innings has zero balls at all (no data).
+function dotsPerBoundary(allBalls: any[], scoreboard: "S1" | "S2"): number | null {
+  let dots = 0;
+  let boundaries = 0;
+  let any = false;
+  for (const b of allBalls) {
+    if (b.scoreboard !== scoreboard) continue;
+    any = true;
+    const isLegal = b.score?.ball !== false;
+    if (!isLegal) continue;
+    const isBoundary = b.score?.four || b.score?.six || batRunsOnBall(b) === 4 || batRunsOnBall(b) === 6;
+    if (isBoundary) boundaries += 1;
+    else if (Number(b.score?.runs || 0) === 0) dots += 1;
+  }
+  if (!any) return null;
+  if (boundaries === 0) return Number.POSITIVE_INFINITY;
+  return dots / boundaries;
 }
 
 // ---- Ball-level helpers ----

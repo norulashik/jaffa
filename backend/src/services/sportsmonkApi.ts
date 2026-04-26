@@ -1,7 +1,7 @@
 import { Op } from "sequelize";
 import { Match, Prediction, MatchParticipant } from "../models";
 import { generatePerOverPredictions, generateHotTake, generatePlayerHotTake, generateRivalryCalls, getCurrentRound, generatePlayerPreMatchQuestions, generatePreMatchPredictions } from "./predictionEngine";
-import { ensurePunterCard, punterOpensAt, resolvePunterCard, resolvePunterCardEarly, computeCorrectFromBalls } from "./punterCard";
+import { ensurePunterCard, punterOpensAt, resolvePunterCard, resolvePunterCardEarly, computeCorrectFromBalls, resolveSquadPool } from "./punterCard";
 import { computeLivePlayerCorrectOption } from "./livePlayerTracker";
 import {
   ALL_CORRECT_OPTION,
@@ -1031,13 +1031,20 @@ function computeCorrectOptionForPrediction(
   match: Match,
   fixture: any,
   runs: any[],
-  allBalls: BallData[]
+  allBalls: BallData[],
+  pool: Awaited<ReturnType<typeof resolveSquadPool>> = null,
 ): string | null {
   switch (prediction.category) {
     case "punter_card": {
       const tk = (prediction as any).templateKey;
       if (!tk) return null;
-      return computeCorrectFromBalls(tk, fixture, allBalls);
+      return computeCorrectFromBalls(
+        { templateKey: tk, options: prediction.options as { key: string; label: string }[] },
+        fixture,
+        allBalls,
+        match,
+        pool,
+      );
     }
     case "pre_match":
       return resolvePreMatchPrediction(prediction, fixture, match, allBalls);
@@ -1131,12 +1138,17 @@ export async function reResolveMatch(
   const fixture = await fetchLiveFixtureDetail(fixtureId, true);
   const allBalls: BallData[] = fixture?.balls?.data || (Array.isArray(fixture?.balls) ? fixture.balls : []);
   const runs: any[] = fixture?.runs?.data || (Array.isArray(fixture?.runs) ? fixture.runs : []);
+  // Squad pool needed for v2 punter-card head-to-head templates (openers,
+  // top-vs-death, overs 16–20, balls/boundary). Loaded once here so we don't
+  // re-hit the lookup per prediction inside the loop. null is acceptable —
+  // resolvers fall back gracefully.
+  const pool = await resolveSquadPool(match);
 
   for (const pred of candidates) {
     summary.evaluated += 1;
     let newCorrect: string | null = null;
     try {
-      newCorrect = computeCorrectOptionForPrediction(pred, match, fixture, runs, allBalls);
+      newCorrect = computeCorrectOptionForPrediction(pred, match, fixture, runs, allBalls, pool);
     } catch (err) {
       console.error(`[reResolveMatch] resolver error for prediction ${pred.id}:`, err);
       newCorrect = null;

@@ -40,6 +40,65 @@ router.post("/re-resolve-match", authenticateOwner, async (req: any, res: Respon
   }
 });
 
+// Wipe all punter-card predictions for a match and regenerate them from the
+// current question template + squad data. Use after the punter-card question
+// set itself changes (e.g. swapping the v1 yes/no pack for the v2
+// head-to-head pack), so existing not-yet-played matches pick up the new
+// questions. Refuses to run if anyone already has user-answers — protects
+// against accidentally wiping locked picks.
+router.post("/regenerate-punter-card", authenticateOwner, async (req: any, res: Response): Promise<void> => {
+  try {
+    const { matchId, force } = req.body as { matchId?: string; force?: boolean };
+    if (!matchId) {
+      res.status(400).json({ error: "matchId required" });
+      return;
+    }
+    const { Prediction, UserPrediction, Match } = await import("../models");
+    const { ensurePunterCard } = await import("../services/punterCard");
+
+    const match = await Match.findByPk(matchId);
+    if (!match) {
+      res.status(404).json({ error: "Match not found" });
+      return;
+    }
+
+    const existingCards = await Prediction.findAll({
+      where: { matchId, category: "punter_card" },
+      attributes: ["id"],
+    });
+    const existingIds = existingCards.map((p) => p.id);
+
+    const userAnswerCount = existingIds.length
+      ? await UserPrediction.count({ where: { predictionId: existingIds } })
+      : 0;
+
+    if (userAnswerCount > 0 && !force) {
+      res.status(409).json({
+        error: "Punter card has user answers — won't wipe without { force: true }",
+        userAnswerCount,
+      });
+      return;
+    }
+
+    // Hard-delete the old user answers + predictions, then regenerate.
+    if (existingIds.length) {
+      await UserPrediction.destroy({ where: { predictionId: existingIds } });
+      await Prediction.destroy({ where: { id: existingIds } });
+    }
+    const result = await ensurePunterCard(match);
+
+    res.json({
+      matchId,
+      deleted: existingIds.length,
+      deletedUserAnswers: userAnswerCount,
+      created: result.created,
+    });
+  } catch (err: any) {
+    console.error("Regenerate punter card error:", err);
+    res.status(500).json({ error: err?.message || "Failed to regenerate punter card" });
+  }
+});
+
 // Rebuild MatchParticipant.totalPoints + round{N}Points from the UserPrediction
 // history for a match (or match + venue). Use this to repair leaderboards
 // after fixing an accounting bug or after any drift between totalPoints and
