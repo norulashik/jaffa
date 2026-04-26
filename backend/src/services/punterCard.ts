@@ -1,4 +1,5 @@
 import { Op } from "sequelize";
+import { Server as SocketIOServer } from "socket.io";
 import { Match, Prediction, UserPrediction, MatchParticipant } from "../models";
 import sequelize from "../config/database";
 import { playerKey } from "./predictionEngine";
@@ -547,7 +548,8 @@ export async function resolvePunterCardEarly(
     tossWinnerShort?: string | null;
     inn1AnyHit50?: boolean | null;
     inn1AnyHit100?: boolean | null;
-  }
+  },
+  io?: SocketIOServer | null,
 ): Promise<{ resolved: number }> {
   const match = await Match.findByPk(matchId);
   if (!match) return { resolved: 0 };
@@ -585,7 +587,7 @@ export async function resolvePunterCardEarly(
     const correct = correctByTemplate.get(tk);
     if (!correct) continue;
     await pred.update({ correctOption: correct, status: "resolved" });
-    await scorePunterUserAnswers(pred.id, correct, pred.options);
+    await scorePunterUserAnswers(pred.id, correct, pred.options, io);
     resolved += 1;
   }
   return { resolved };
@@ -598,7 +600,8 @@ export async function resolvePunterCardEarly(
 export async function resolvePunterCard(
   matchId: string,
   fixture?: any,
-  allBalls?: any[]
+  allBalls?: any[],
+  io?: SocketIOServer | null,
 ): Promise<{ resolved: number }> {
   const match = await Match.findByPk(matchId);
   if (!match) return { resolved: 0 };
@@ -629,7 +632,7 @@ export async function resolvePunterCard(
     );
     if (!correct) continue;
     await pred.update({ correctOption: correct, status: "resolved" });
-    await scorePunterUserAnswers(pred.id, correct, pred.options);
+    await scorePunterUserAnswers(pred.id, correct, pred.options, io);
     resolved += 1;
   }
   return { resolved };
@@ -1197,13 +1200,30 @@ function nameForPlayerId(allBalls: any[], id: number): string | null {
 async function scorePunterUserAnswers(
   predictionId: string,
   correctOption: string,
-  options: { key: string; label: string; points: number }[]
+  options: { key: string; label: string; points: number }[],
+  io?: SocketIOServer | null,
 ): Promise<void> {
   // correctOption may be a comma-joined list of keys when multiple players
   // tied (e.g. two batters on the same runs+balls); award points to anyone
   // who picked any of them.
   const correctSet = new Set(correctOption.split(",").map((k) => k.trim()).filter(Boolean));
   const userAnswers = await UserPrediction.findAll({ where: { predictionId } });
+
+  // Track per-user outcomes so we can fire one socket event per affected
+  // user / venue+match AFTER the DB transactions commit. Without this the
+  // Match leaderboard appears frozen — totalPoints is updated in the DB,
+  // but no `leaderboardUpdate` is broadcast so connected clients never
+  // re-fetch (regular resolvePrediction in pointsEngine emits both
+  // `leaderboardUpdate` and `myPredictionWin`; punter card had neither).
+  const winners: Array<{
+    userId: string;
+    matchId: string;
+    venueId: string;
+    pointsEarned: number;
+    selectedOption: string;
+  }> = [];
+  const venueMatchPairs = new Set<string>();
+
   for (const ua of userAnswers) {
     const isCorrect = correctSet.has(ua.selectedOption);
     const opt = options.find(o => o.key === ua.selectedOption);
@@ -1233,6 +1253,37 @@ async function scorePunterUserAnswers(
         updateData.correctPredictions = participant.correctPredictions + 1;
       }
       await participant.update(updateData as any, { transaction: t });
+    });
+
+    if (isCorrect && pointsEarned > 0) {
+      winners.push({
+        userId: ua.userId,
+        matchId: ua.matchId,
+        venueId: ua.venueId,
+        pointsEarned,
+        selectedOption: ua.selectedOption,
+      });
+    }
+    venueMatchPairs.add(`${ua.venueId}:${ua.matchId}`);
+  }
+
+  // Push the live updates after the loop so all DB writes are durable
+  // before clients hear about them. Skip silently if no io was supplied
+  // (e.g. the admin re-resolve endpoint passes null — leaderboards there
+  // get rebuilt by recomputeParticipantScores afterwards).
+  if (!io) return;
+
+  for (const w of winners) {
+    io.to(`user:${w.userId}`).emit("myPredictionWin", {
+      predictionId,
+      pointsEarned: w.pointsEarned,
+      selectedOption: w.selectedOption,
+    });
+  }
+  for (const pair of venueMatchPairs) {
+    const [venueId, matchId] = pair.split(":");
+    io.to(`venue:${venueId}:${matchId}`).emit("leaderboardUpdate", {
+      matchId,
     });
   }
 }

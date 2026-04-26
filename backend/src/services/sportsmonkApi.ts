@@ -1006,7 +1006,7 @@ async function finalizeMatch(
   // Resolve Punter Card questions — feed the fixture (for winner/toss/MoM
   // ids) + balls (for batsman/bowler stats).
   try {
-    const r = await resolvePunterCard(match.id, fullFixture || fixture, allBalls);
+    const r = await resolvePunterCard(match.id, fullFixture || fixture, allBalls, io);
     if (r.resolved > 0) console.log(`[PunterCard] Resolved ${r.resolved} questions for ${match.id}`);
   } catch (err) {
     console.error("[PunterCard] resolve error:", err);
@@ -1501,7 +1501,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           if (fixture.toss_won_team_id === fixture.localteam_id) tossWinnerShort = match.team1Short;
           else if (fixture.toss_won_team_id === fixture.visitorteam_id) tossWinnerShort = match.team2Short;
           if (tossWinnerShort) {
-            const r = await resolvePunterCardEarly(match.id, { tossWinnerShort });
+            const r = await resolvePunterCardEarly(match.id, { tossWinnerShort }, io);
             if (r.resolved > 0) console.log(`[PunterCard] Early-resolved ${r.resolved} (toss)`);
           }
         } catch (err) {
@@ -2141,7 +2141,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           const r = await resolvePunterCardEarly(match.id, {
             inn1AnyHit50: anyHit50,
             inn1AnyHit100: anyHit100,
-          });
+          }, io);
           if (r.resolved > 0) console.log(`[PunterCard] Early-resolved ${r.resolved} (innings break)`);
         } catch (err) {
           console.error("[PunterCard] Innings-break early-resolve error:", err);
