@@ -7,6 +7,8 @@ import { toast } from "sonner";
 import { toJpeg } from "html-to-image";
 import { api } from "@/lib/api";
 import { JAFFA_LOGO_DATA_URL } from "./jaffaLogo";
+import TeamBadge from "@/components/TeamBadge";
+import { getTeamColor } from "@/lib/teamColors";
 
 type Question = {
   id: string;
@@ -169,9 +171,25 @@ export default function PunterCardPage() {
     }
   };
 
+  // Per-match colour palette: each team's brand colour drives the page
+  // gradient + corner glows, mimicking the saturated, gamefied look of the
+  // reference NFT card. Falls back to a neutral JAFFA-orange/purple combo
+  // for non-IPL fixtures.
+  const t1 = match?.team1Short || match?.team1 || "T1";
+  const t2 = match?.team2Short || match?.team2 || "T2";
+  const c1 = getTeamColor(t1);
+  const c2 = getTeamColor(t2);
+  const pageBg = {
+    background: `
+      radial-gradient(ellipse at 100% 0%, ${c1.primary}40 0%, transparent 45%),
+      radial-gradient(ellipse at 0% 100%, ${c2.primary}40 0%, transparent 45%),
+      linear-gradient(135deg, ${c1.dark} 0%, #050505 50%, ${c2.dark} 100%)
+    `,
+  };
+
   if (loading) {
     return (
-      <main className="min-h-screen bg-black text-white flex items-center justify-center">
+      <main className="min-h-screen text-white flex items-center justify-center" style={pageBg}>
         <p className="opacity-60">Loading punter card…</p>
       </main>
     );
@@ -179,14 +197,14 @@ export default function PunterCardPage() {
 
   if (questions.length === 0) {
     return (
-      <main className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6">
+      <main className="min-h-screen text-white flex flex-col items-center justify-center p-6" style={pageBg}>
         <p className="text-lg opacity-80 mb-2">Punter card not available yet</p>
         <p className="text-sm opacity-50 max-w-xs text-center">
-          This match's card opens at midnight on match day, or as soon as we have enough player data.
+          This match&apos;s card opens at midnight on match day, or as soon as we have enough player data.
         </p>
         <button
           onClick={() => router.back()}
-          className="mt-6 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-sm"
+          className="mt-6 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-sm border border-white/20"
         >
           Back
         </button>
@@ -194,50 +212,109 @@ export default function PunterCardPage() {
     );
   }
 
-  const t1 = match?.team1Short || match?.team1 || "T1";
-  const t2 = match?.team2Short || match?.team2 || "T2";
-  const startLabel = match?.startTime ? new Date(match.startTime).toLocaleString() : "";
+  const startLabel = match?.startTime
+    ? new Date(match.startTime).toLocaleDateString("en-IN", { day: "numeric", month: "short" }).toUpperCase()
+    : "";
+  const startTimeLabel = match?.startTime
+    ? new Date(match.startTime).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true }).toUpperCase()
+    : "";
 
   return (
-    <main className="min-h-screen bg-black text-white pb-32">
-      {/* Header */}
-      <div className="sticky top-0 z-10 bg-slate-950/95 backdrop-blur border-b border-slate-800">
+    <main className="min-h-screen text-white pb-32 relative overflow-hidden" style={pageBg}>
+      {/* Watermark — giant faded "JAFFA" wordmark behind everything for the
+          NFT-card depth. Pointer-events off so it never intercepts taps. */}
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-0 flex items-center justify-center select-none"
+        style={{ zIndex: 0 }}
+      >
+        <span
+          style={{
+            fontFamily: "'Bungee', 'Impact', cursive",
+            fontSize: "32vw",
+            color: "rgba(255,255,255,0.025)",
+            letterSpacing: "-0.05em",
+            transform: "rotate(-8deg)",
+          }}
+        >
+          JAFFA
+        </span>
+      </div>
+
+      {/* Sticky header — back arrow + title + share/copy buttons. */}
+      <div
+        className="sticky top-0 z-20 backdrop-blur-md"
+        style={{ background: "rgba(8,8,8,0.65)", borderBottom: "1px solid rgba(255,255,255,0.08)" }}
+      >
         <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
-          <button onClick={() => router.back()} className="p-1 rounded hover:bg-slate-800">
+          <button onClick={() => router.back()} className="p-2 rounded-xl hover:bg-white/10 transition">
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div className="flex-1 min-w-0">
-            <h1 className="text-lg font-bold truncate">
-              Punter Card — {t1} vs {t2}
-            </h1>
-            <p className="text-xs opacity-60 truncate">{startLabel}</p>
+            <p className="text-[10px] uppercase tracking-[0.3em] opacity-60">Punter Card</p>
+            <p
+              className="text-base font-black uppercase truncate leading-tight"
+              style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+            >
+              {t1} <span className="opacity-40 mx-1">VS</span> {t2}
+            </p>
           </div>
           {allAnswered && (
             <div className="flex items-center gap-2">
               <button
                 onClick={handleCopyLink}
-                className="px-3 py-1.5 rounded-lg border border-orange-500 text-orange-300 hover:bg-orange-500/10 text-sm font-semibold flex items-center gap-1.5"
+                className="p-2 sm:px-3 sm:py-2 rounded-xl border border-orange-500/60 text-orange-300 hover:bg-orange-500/15 text-xs font-bold flex items-center gap-1.5 transition"
                 title="Copy link to this card"
               >
                 <LinkIcon className="w-4 h-4" />
-                Copy Link
+                <span className="hidden sm:inline uppercase tracking-wider">Link</span>
               </button>
               <button
                 onClick={handleShare}
-                className="px-3 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-400 text-sm font-semibold flex items-center gap-1.5"
+                disabled={sharing}
+                className="p-2 sm:px-3 sm:py-2 rounded-xl bg-orange-500 hover:bg-orange-400 text-black text-xs font-bold flex items-center gap-1.5 transition disabled:opacity-60"
                 title="Share card image"
               >
                 <Share2 className="w-4 h-4" />
-                Share
+                <span className="hidden sm:inline uppercase tracking-wider">Share</span>
               </button>
             </div>
           )}
         </div>
       </div>
 
-      <div className="max-w-3xl mx-auto px-4 py-4 space-y-3">
+      {/* Hero — stacked-glass team badge pill (Chelsea/Everton reference vibe).
+          Date stacked at top, then both team crests with a "VS" between, then
+          start time. Sits inside the saturated page gradient so the brand
+          colours of both teams feel present even before scrolling. */}
+      <div className="max-w-3xl mx-auto px-4 pt-6 pb-4 relative z-10">
+        <div className="flex justify-center">
+          <div
+            className="flex flex-col items-center gap-3 px-7 py-5 rounded-3xl"
+            style={{
+              background: "rgba(255,255,255,0.06)",
+              backdropFilter: "blur(20px)",
+              WebkitBackdropFilter: "blur(20px)",
+              border: "1px solid rgba(255,255,255,0.18)",
+              boxShadow: `0 0 60px ${c1.primary}22, inset 0 1px 0 rgba(255,255,255,0.1)`,
+              minWidth: 200,
+            }}
+          >
+            <span className="text-[10px] uppercase tracking-[0.3em] opacity-70 font-bold">{startLabel}</span>
+            <TeamBadge short={t1} size={64} />
+            <span className="text-[10px] font-black opacity-50 tracking-[0.4em]">VS</span>
+            <TeamBadge short={t2} size={64} />
+            {startTimeLabel && (
+              <span className="text-[10px] uppercase tracking-[0.25em] opacity-60 font-bold">{startTimeLabel}</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Body — chunky question cards. */}
+      <div className="max-w-3xl mx-auto px-4 py-4 space-y-4 relative z-10">
         {!venueId && (
-          <div className="bg-amber-500/10 border border-amber-500/40 text-amber-200 text-sm rounded-lg p-3">
+          <div className="bg-amber-500/10 border border-amber-500/40 text-amber-200 text-sm rounded-2xl p-4">
             Pick a venue first to lock in your card. Open this from inside the match lobby.
           </div>
         )}
@@ -248,59 +325,108 @@ export default function PunterCardPage() {
           const answered = !!q.userAnswer;
           const locked = answered;
           const resolved = q.status === "resolved" && q.correctOption;
+
+          // Status pill computed once per card. Mirrors the four-state vibe
+          // from the reference: PENDING (orange) / LOCKED (blue) / +PTS
+          // (emerald) / MISSED (rose). Drives both the pill at the top of
+          // the card and indirectly the user's at-a-glance progress sense.
+          const pill = resolved
+            ? q.userAnswer?.isCorrect
+              ? { label: `+${q.userAnswer.pointsEarned} PTS`, bg: "rgba(16,185,129,0.18)", border: "rgba(16,185,129,0.55)", text: "#34d399" }
+              : { label: "MISSED",                           bg: "rgba(244,63,94,0.18)",  border: "rgba(244,63,94,0.55)",  text: "#fb7185" }
+            : answered
+              ? { label: "LOCKED",                            bg: "rgba(59,130,246,0.18)", border: "rgba(59,130,246,0.55)", text: "#60a5fa" }
+              : { label: "PENDING",                           bg: "rgba(251,146,60,0.18)", border: "rgba(251,146,60,0.55)", text: "#fb923c" };
+
           return (
-            <div key={q.id} className="border border-slate-800 rounded-lg overflow-hidden bg-slate-900/60">
+            <div
+              key={q.id}
+              className="rounded-3xl overflow-hidden transition-shadow"
+              style={{
+                background: "rgba(15,15,18,0.65)",
+                backdropFilter: "blur(14px)",
+                WebkitBackdropFilter: "blur(14px)",
+                border: "2px solid rgba(255,255,255,0.10)",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06), 0 4px 24px rgba(0,0,0,0.25)",
+              }}
+            >
               <button
                 onClick={() => toggleExpand(q.id)}
-                className="w-full flex items-center justify-between px-4 py-3 text-left"
+                className="w-full text-left px-5 py-4"
               >
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-sm truncate">{q.question}</p>
-                  {answered && (
-                    <p className="text-xs opacity-60 mt-0.5 truncate">
-                      Picked:{" "}
-                      <span className="text-orange-400 font-medium">
-                        {q.options.find((o) => o.key === q.userAnswer!.selectedOption)?.label || q.userAnswer!.selectedOption}
-                      </span>
-                      {resolved && (
-                        <>
-                          {" · "}
-                          {q.userAnswer!.isCorrect ? (
-                            <span className="text-emerald-400">+{q.userAnswer!.pointsEarned} pts</span>
-                          ) : (
-                            <span className="text-rose-400">missed</span>
-                          )}
-                        </>
-                      )}
-                    </p>
+                <div className="flex items-center justify-between mb-2">
+                  <span
+                    className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest"
+                    style={{ background: pill.bg, color: pill.text, border: `1px solid ${pill.border}` }}
+                  >
+                    {pill.label}
+                  </span>
+                  {isOpen ? (
+                    <ChevronUp className="w-5 h-5 opacity-60" />
+                  ) : (
+                    <ChevronDown className="w-5 h-5 opacity-60" />
                   )}
                 </div>
-                {isOpen ? <ChevronUp className="w-5 h-5 opacity-60" /> : <ChevronDown className="w-5 h-5 opacity-60" />}
+                <p
+                  className="text-base sm:text-lg font-black uppercase leading-tight"
+                  style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                >
+                  {q.question}
+                </p>
+                {answered && (
+                  <p className="text-xs opacity-70 mt-2 truncate">
+                    PICKED:{" "}
+                    <span className="text-orange-300 font-bold">
+                      {q.options.find((o) => o.key === q.userAnswer!.selectedOption)?.label || q.userAnswer!.selectedOption}
+                    </span>
+                  </p>
+                )}
               </button>
 
               {isOpen && (
-                <div className={`px-3 pb-3 ${isPool ? "grid grid-cols-2 sm:grid-cols-3 gap-2" : "space-y-2"}`}>
+                <div className={`px-3 pb-4 ${isPool ? "grid grid-cols-2 gap-2" : "space-y-2"}`}>
                   {q.options.map((opt) => {
                     const selected = selections[q.id] === opt.key;
                     const isCorrect = resolved && q.correctOption === opt.key;
-                    const isWrong = resolved && q.userAnswer?.selectedOption === opt.key && !q.userAnswer.isCorrect;
+                    const isWrong =
+                      resolved && q.userAnswer?.selectedOption === opt.key && !q.userAnswer.isCorrect;
+
+                    let bg: string, border: string, glow: string;
+                    if (isCorrect) {
+                      bg = "rgba(16,185,129,0.18)"; border = "#10b981"; glow = "0 0 20px rgba(16,185,129,0.5)";
+                    } else if (isWrong) {
+                      bg = "rgba(244,63,94,0.18)"; border = "#f43f5e"; glow = "0 0 20px rgba(244,63,94,0.5)";
+                    } else if (selected) {
+                      bg = "rgba(255,99,65,0.22)"; border = "#ff6341"; glow = "0 0 22px rgba(255,99,65,0.55)";
+                    } else {
+                      bg = "rgba(255,255,255,0.04)"; border = "rgba(255,255,255,0.12)"; glow = "none";
+                    }
+
                     return (
                       <button
                         key={opt.key}
                         disabled={locked}
                         onClick={() => handleSelect(q.id, opt.key)}
-                        className={`flex items-center justify-between px-3 py-2.5 rounded-md border text-left text-sm transition ${
-                          isCorrect
-                            ? "border-emerald-500 bg-emerald-500/20"
-                            : isWrong
-                            ? "border-rose-500 bg-rose-500/20"
-                            : selected
-                            ? "border-orange-500 bg-orange-500/15"
-                            : "border-slate-700 bg-slate-800/60 hover:bg-slate-800"
-                        } ${locked ? "cursor-default" : "cursor-pointer"}`}
+                        className={`flex items-center justify-between px-4 py-3 rounded-2xl text-left text-sm font-semibold transition ${
+                          locked ? "cursor-default" : "cursor-pointer hover:scale-[1.01]"
+                        }`}
+                        style={{
+                          background: bg,
+                          border: `2px solid ${border}`,
+                          boxShadow: glow,
+                        }}
                       >
                         <span className="truncate">{opt.label}</span>
-                        <span className="text-blue-300 font-semibold ml-2 whitespace-nowrap">{opt.points}</span>
+                        <span
+                          className="text-[11px] font-black ml-3 px-2 py-1 rounded-lg whitespace-nowrap"
+                          style={{
+                            background: "rgba(123,228,255,0.14)",
+                            color: "#7be4ff",
+                            textShadow: "0 0 8px rgba(123,228,255,0.55)",
+                          }}
+                        >
+                          {opt.points} PTS
+                        </span>
                       </button>
                     );
                   })}
@@ -311,22 +437,33 @@ export default function PunterCardPage() {
         })}
       </div>
 
-      {/* Lock-in bar */}
+      {/* Sticky bottom Lock-In bar — floating glass-morphism panel inset
+          from the screen edges, mirroring the separate stats panel from the
+          reference card. */}
       {!allAnswered && (
-        <div className="fixed bottom-0 left-0 right-0 bg-slate-950/95 backdrop-blur border-t border-slate-800 px-4 py-3">
-          <div className="max-w-3xl mx-auto flex items-center gap-3">
-            <p className="text-sm opacity-70 flex-1">
+        <div className="fixed bottom-4 left-4 right-4 z-30 pointer-events-none">
+          <div
+            className="max-w-3xl mx-auto flex items-center gap-3 px-5 py-3 rounded-2xl pointer-events-auto"
+            style={{
+              background: "rgba(8,8,10,0.85)",
+              backdropFilter: "blur(20px)",
+              WebkitBackdropFilter: "blur(20px)",
+              border: "1px solid rgba(255,255,255,0.14)",
+              boxShadow: "0 12px 40px rgba(0,0,0,0.55)",
+            }}
+          >
+            <p className="text-xs sm:text-sm font-bold flex-1 uppercase tracking-wider">
               {pendingSelections.length > 0
                 ? `${pendingSelections.length} pick${pendingSelections.length === 1 ? "" : "s"} ready`
-                : "Tap options above to fill your card"}
+                : "Tap options to fill your card"}
             </p>
             <button
               onClick={handleLockIn}
               disabled={!canLock || submitting}
-              className={`px-5 py-2.5 rounded-lg font-semibold text-sm ${
+              className={`px-5 py-2.5 rounded-xl font-black text-sm uppercase tracking-wider transition ${
                 canLock && !submitting
                   ? "bg-emerald-500 hover:bg-emerald-400 text-black"
-                  : "bg-slate-800 text-slate-500 cursor-not-allowed"
+                  : "bg-white/10 text-white/40 cursor-not-allowed"
               }`}
             >
               {submitting ? "Locking…" : "Lock In"}
