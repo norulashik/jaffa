@@ -141,11 +141,24 @@ export default function MatchDashboard() {
   useEffect(() => {
     if (!matchId || !venueId) return;
 
+    // Hydrate match context SYNCHRONOUSLY before any async work. Otherwise
+    // the api.getMatch call below introduces a ~500ms-2s window where the
+    // user is on /match/<id> but state.matchId is still whatever it was
+    // before (often null after a /lobby visit) — and tapping Ranks /
+    // My Picks during that window lands on a no-context empty state.
+    // Both layers updated: localStorage (read by Ranks/MyPicks as fallback)
+    // and GameContext state (read first).
+    localStorage.setItem("jaffa_match_id", matchId);
+    if (venueId) localStorage.setItem("jaffa_venue_id", venueId);
+    dispatch({ type: "SET_MATCH", matchId });
+
     const initMatch = async () => {
       try {
         // Load match data
         const match = await api.getMatch(matchId);
         setMatchData(match);
+        // (SET_MATCH already dispatched above — kept for backwards-compat
+        // with any code path that might re-enter this branch.)
         localStorage.setItem("jaffa_match_id", matchId);
         dispatch({ type: "SET_MATCH", matchId });
 

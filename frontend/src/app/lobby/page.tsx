@@ -645,6 +645,25 @@ export default function HomeLiveMatches() {
                         if (pm.venueId) localStorage.setItem("jaffa_venue_id", pm.venueId);
                         else localStorage.removeItem("jaffa_venue_id");
                       } catch {}
+                      // Hydrate GameContext SYNCHRONOUSLY before navigation
+                      // so the destination /match page (and any tab the user
+                      // taps from there before its own init effect fires)
+                      // sees the past-battle's matchId/venueId immediately.
+                      // Without this, the match page's api.getMatch await
+                      // introduces a 0.5–2s window where state.matchId is
+                      // still null (just cleared by the lobby's CLEAR_MATCH
+                      // on entry) and Ranks / My Picks fall back to an
+                      // empty-state.
+                      if (pm.venueId) {
+                        dispatch({
+                          type: "SET_VENUE",
+                          venueId: pm.venueId,
+                          venueName: pm.venueName || "",
+                        });
+                      }
+                      if (pm.matchId) {
+                        dispatch({ type: "SET_MATCH", matchId: pm.matchId });
+                      }
                       const qs = pm.venueId ? `?venueId=${pm.venueId}` : "";
                       router.push(`/match/${pm.matchId}${qs}`);
                     }}
