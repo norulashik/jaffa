@@ -23,6 +23,29 @@ const SPORTSMONK_HEADERS = {
   "user-agent": "JaffaBackend/1.0",
 };
 
+// IPL has league_id = 1 on the Sportsmonk Cricket API (stable across
+// seasons — season_id rotates yearly, league_id does not). Configurable
+// via JAFFA_LEAGUE_IDS=1,3 if we ever want to surface a different
+// tournament alongside IPL (e.g. Big Bash). Without this filter the
+// /livescores and /fixtures endpoints return every cricket fixture
+// worldwide and a BAN vs NZ international leaks into the lobby.
+const IPL_LEAGUE_IDS: readonly number[] = (process.env.JAFFA_LEAGUE_IDS || "1")
+  .split(",")
+  .map((s) => Number(s.trim()))
+  .filter((n) => Number.isFinite(n) && n > 0);
+const IPL_LEAGUE_FILTER = IPL_LEAGUE_IDS.length
+  ? `&filter[league]=${IPL_LEAGUE_IDS.join(",")}`
+  : "";
+
+// Defensive client-side filter for the case where Sportsmonk silently
+// ignores filter[league] on this plan tier — drop anything whose
+// league_id isn't in the allow-list. Cheap; runs after the network call.
+function keepOnlyIplFixtures<T extends { league_id?: number | null }>(fixtures: T[]): T[] {
+  if (IPL_LEAGUE_IDS.length === 0) return fixtures;
+  const allowed = new Set<number>(IPL_LEAGUE_IDS);
+  return fixtures.filter((f) => f.league_id != null && allowed.has(Number(f.league_id)));
+}
+
 // ── Team cache ─────────────────────────────────────────────────────
 interface CachedTeam {
   name: string;
@@ -688,10 +711,10 @@ export async function resolveRemainingPredictionsAtMatchEnd(
 // Fetch live scores
 export async function fetchSportsmonkLiveScores(): Promise<any[]> {
   try {
-    const url = `${getApiBase()}/livescores?api_token=${getApiToken()}&include=balls,runs,localteam,visitorteam`;
+    const url = `${getApiBase()}/livescores?api_token=${getApiToken()}&include=balls,runs,localteam,visitorteam${IPL_LEAGUE_FILTER}`;
     const res = await fetch(url, { headers: SPORTSMONK_HEADERS });
     const data: any = await res.json();
-    const fixtures = data.data || [];
+    const fixtures = keepOnlyIplFixtures(data.data || []);
     await enrichFixturesWithTeams(fixtures);
     return fixtures;
   } catch (error) {
@@ -725,8 +748,8 @@ async function fetchAllPages(baseUrl: string): Promise<any[]> {
 export async function fetchTodayFixtures(): Promise<any[]> {
   try {
     const today = new Date().toISOString().split("T")[0];
-    const baseUrl = `${getApiBase()}/fixtures?filter[starts_between]=${today},${today}&api_token=${getApiToken()}&include=runs,localteam,visitorteam`;
-    const fixtures = await fetchAllPages(baseUrl);
+    const baseUrl = `${getApiBase()}/fixtures?filter[starts_between]=${today},${today}&api_token=${getApiToken()}&include=runs,localteam,visitorteam${IPL_LEAGUE_FILTER}`;
+    const fixtures = keepOnlyIplFixtures(await fetchAllPages(baseUrl));
     await enrichFixturesWithTeams(fixtures);
     return fixtures;
   } catch (error) {
@@ -740,10 +763,10 @@ export async function fetchUpcomingFixtures(): Promise<any[]> {
   try {
     const today = new Date().toISOString().split("T")[0];
     const futureDate = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
-    const baseUrl = `${getApiBase()}/fixtures?filter[starts_between]=${today},${futureDate}&api_token=${getApiToken()}&include=localteam,visitorteam,runs`;
+    const baseUrl = `${getApiBase()}/fixtures?filter[starts_between]=${today},${futureDate}&api_token=${getApiToken()}&include=localteam,visitorteam,runs${IPL_LEAGUE_FILTER}`;
     console.log(`[Sportsmonk] Fetching upcoming: ${today} to ${futureDate}`);
-    const fixtures = await fetchAllPages(baseUrl);
-    console.log(`[Sportsmonk] Upcoming fixtures found: ${fixtures.length} (all pages)`);
+    const fixtures = keepOnlyIplFixtures(await fetchAllPages(baseUrl));
+    console.log(`[Sportsmonk] Upcoming fixtures found: ${fixtures.length} (IPL only)`);
     await enrichFixturesWithTeams(fixtures);
     return fixtures;
   } catch (error) {
