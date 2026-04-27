@@ -161,13 +161,9 @@ export default function PunterCardPage() {
     if (!shareRef.current || sharing) return;
     setSharing(true);
     try {
-      // Image-decode race fix: html-to-image snapshots the DOM whether or
-      // not embedded <img> tags have finished decoding. The JAFFA logo +
-      // team crests are inlined as base64 so fetching is instant — but
-      // the browser still decodes asynchronously, and a rasterize that
-      // lands before decode finishes ships the card without the logo.
-      // Walk every <img> in the share subtree and await img.decode()
-      // (or img.complete fast-path) before snapshotting.
+      // Wait for every embedded image (team crests etc.) to decode before
+      // snapshotting — html-to-image otherwise paints before async decode
+      // finishes and ships incomplete frames.
       const imgs = Array.from(shareRef.current.querySelectorAll("img"));
       await Promise.allSettled(
         imgs.map((img) => {
@@ -175,15 +171,72 @@ export default function PunterCardPage() {
           return img.decode().catch(() => undefined);
         })
       );
-      // One extra animation frame so any layout/paint triggered by the
-      // decode settles before we capture pixels.
+      // Pre-decode the JAFFA logo separately. We composite it onto the
+      // rasterized JPEG by hand (see canvas pass below) instead of relying
+      // on html-to-image's foreignObject pipeline, which silently dropped
+      // the ~180KB data-URL <img> on ~half of iOS Safari renders. By
+      // running drawImage ourselves on a native canvas, the logo always
+      // lands.
+      const jaffaImg = new Image();
+      jaffaImg.src = JAFFA_LOGO_DATA_URL;
+      await jaffaImg.decode().catch(() => undefined);
+
+      // One animation frame so layout settles after any decode-triggered
+      // reflow before we capture pixels.
       await new Promise((r) => requestAnimationFrame(() => r(null)));
 
-      const dataUrl = await toJpeg(shareRef.current, {
-        pixelRatio: 1.5,
+      const PIXEL_RATIO = 1.5;
+      const baseDataUrl = await toJpeg(shareRef.current, {
+        pixelRatio: PIXEL_RATIO,
         quality: 0.92,
         backgroundColor: "#1a0033",
       });
+
+      // Canvas composite: draw the rasterized card, then draw the JAFFA
+      // logo on top at the placeholder slot's position. Position is read
+      // from the live DOM (data-jaffa-logo-slot) so any layout change to
+      // the slot's size or position is automatically reflected.
+      let dataUrl = baseDataUrl;
+      try {
+        const baseImg = new Image();
+        baseImg.src = baseDataUrl;
+        await baseImg.decode();
+
+        const slot = shareRef.current.querySelector("[data-jaffa-logo-slot]") as HTMLElement | null;
+        const cardRect = shareRef.current.getBoundingClientRect();
+
+        const canvas = document.createElement("canvas");
+        canvas.width = baseImg.naturalWidth;
+        canvas.height = baseImg.naturalHeight;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) throw new Error("canvas 2d context unavailable");
+        ctx.drawImage(baseImg, 0, 0);
+
+        if (slot && jaffaImg.naturalWidth > 0) {
+          const slotRect = slot.getBoundingClientRect();
+          const x = (slotRect.left - cardRect.left) * PIXEL_RATIO;
+          const y = (slotRect.top - cardRect.top) * PIXEL_RATIO;
+          const w = slotRect.width * PIXEL_RATIO;
+          const h = slotRect.height * PIXEL_RATIO;
+
+          // Soft drop-shadow under the logo so the composited result
+          // matches the visual treatment we used to ship via CSS filter.
+          ctx.save();
+          ctx.shadowColor = "rgba(0,0,0,0.55)";
+          ctx.shadowBlur = 40 * PIXEL_RATIO;
+          ctx.shadowOffsetY = 12 * PIXEL_RATIO;
+          ctx.drawImage(jaffaImg, x, y, w, h);
+          ctx.restore();
+        }
+
+        dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+      } catch (compositeErr) {
+        // If the composite pass fails for any reason fall back to the
+        // (logo-less) base image so the user still gets SOMETHING. Logged
+        // so we notice if this branch ever fires in practice.
+        console.error("[ShareCard] logo composite failed, falling back to base:", compositeErr);
+      }
+
       const blob = await (await fetch(dataUrl)).blob();
       setShareDataUrl(dataUrl);
       setShareBlob(blob);
@@ -593,22 +646,28 @@ const ShareCard = forwardRef<HTMLDivElement, {
         {startLabel}
       </div>
 
-      {/* Header — JAFFA brand mark dominates the top of the card.
-          User's reference image has the wordmark filling roughly 80% of
-          the card width — bumped to height 520 to match. The PNG carries
-          thick transparent padding around the actual glyph so the visible
-          mark sits at ~250-300px tall, which is the size that reads
-          clearly on a phone preview. drop-shadow gives the floating-3D
-          feel the reference has. */}
+      {/* Header — JAFFA brand mark slot. The logo image is NOT rendered
+          here; it's composited onto the rasterized JPEG by openShareModal's
+          canvas pass. We were previously embedding <img src={data:...}>
+          and html-to-image's foreignObject path silently dropped the
+          ~180KB data URL on roughly half of iOS Safari rasterizations,
+          shipping logo-less share images. The placeholder div below
+          reserves the same layout footprint (height 520, no width since
+          the logo is centered horizontally), and a `data-jaffa-logo-slot`
+          attribute lets the composite pass find this exact box at runtime
+          to position the logo over the right pixels. */}
       <div style={{ position: "relative", marginBottom: 32, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 480 }}>
-        <img
-          src={JAFFA_LOGO_DATA_URL}
-          alt="JAFFA"
+        <div
+          data-jaffa-logo-slot
+          aria-label="JAFFA"
+          role="img"
           style={{
             height: 520,
-            width: "auto",
-            display: "block",
-            filter: "drop-shadow(0 12px 40px rgba(0,0,0,0.55)) drop-shadow(0 0 60px rgba(255,255,255,0.25))",
+            // Aspect ratio matches the source PNG (1280x720 ≈ 16:9).
+            // Pinning a width keeps the layout stable in the off-screen
+            // measurement pass — the composite step uses this box's
+            // bounding rect as the destination rectangle for drawImage.
+            width: 924,
           }}
         />
       </div>
