@@ -21,6 +21,14 @@ export default function LoginOTP() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [venueName, setVenueName] = useState("");
+  // Two-step gating: "phone" reveals only the phone field + Continue; the
+  // backend tells us on step 1 whether the user is new (Nickname required
+  // 400) or existing (success → log in immediately). For new users we
+  // flip to "nickname" step which reveals the nickname field. Existing
+  // users never see the nickname field at all — fixing the long-standing
+  // UX papercut where returning users were asked for a nickname every
+  // time and then collided with their own existing record.
+  const [step, setStep] = useState<"phone" | "nickname">("phone");
   // Hold the form back until we've checked localStorage for an existing
   // session. Without this the login form briefly flashes for already-logged-in
   // users before the redirect fires, making them think they need to log in
@@ -43,12 +51,15 @@ export default function LoginOTP() {
     }
   }, [router]);
 
-  const handleLogin = async () => {
+  // Single submit handler for both steps. On step 1 we send phone-only
+  // and let the backend tell us if a nickname is needed; on step 2 we
+  // include the nickname the user just typed.
+  const handleSubmit = async () => {
     if (!phone || phone.length < 10) {
       setError("Please enter a valid 10-digit number");
       return;
     }
-    if (!displayName.trim()) {
+    if (step === "nickname" && !displayName.trim()) {
       setError("Please enter a nickname");
       return;
     }
@@ -56,12 +67,23 @@ export default function LoginOTP() {
     setLoading(true);
     setError("");
     try {
-      const result = await api.loginWithPhone(phone, displayName.trim());
+      const name = step === "nickname" ? displayName.trim() : undefined;
+      const result = await api.loginWithPhone(phone, name);
       localStorage.setItem("jaffa_token", result.token);
       localStorage.setItem("jaffa_user", JSON.stringify(result.user));
       router.push(isCafeRoute() ? cafeUrl("/lobby") : "/lobby");
     } catch (err: any) {
-      setError(err.message || "Login failed");
+      const msg = String(err?.message || "");
+      // Backend signals "this phone has no account yet" via this 400
+      // payload. Reveal the nickname field instead of showing it as an
+      // error. The user just continues filling out the form on the same
+      // page — no second submit pass needed yet.
+      if (msg.toLowerCase().includes("nickname is required")) {
+        setStep("nickname");
+        setError("");
+      } else {
+        setError(msg || "Login failed");
+      }
     } finally {
       setLoading(false);
     }
@@ -114,7 +136,7 @@ export default function LoginOTP() {
           <div className="flex justify-center mb-6">
             <div className="info-pill text-white/60 flex items-center gap-2">
               <ShieldCheck size={14} className="text-[#ff6341]" />
-              <span>Enter Mobile Number and Nickname</span>
+              <span>{step === "phone" ? "Enter Your Mobile Number" : "Pick a Nickname"}</span>
             </div>
           </div>
 
@@ -145,47 +167,66 @@ export default function LoginOTP() {
                   onChange={(e) => {
                     setPhone(e.target.value.replace(/\D/g, "").slice(0, 10));
                     setError("");
+                    // Bumping the phone number invalidates a pending
+                    // "needs nickname" prompt — drop the user back to step 1
+                    // so we re-probe the new number cleanly.
+                    if (step === "nickname") setStep("phone");
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && step === "phone") handleSubmit();
                   }}
                   maxLength={10}
+                  // Lock the phone field once we've revealed the nickname
+                  // step so the user can't drift away from the number the
+                  // backend just told us is new.
+                  readOnly={step === "nickname"}
                 />
               </div>
             </div>
 
-            <div>
-              <label className="text-white/60 block text-xs tracking-widest">
-                NICKNAME
-              </label>
-              <div className="relative mt-2">
-                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-[#ff6341]">
-                  <User size={18} />
+            {step === "nickname" && (
+              <div>
+                <label className="text-white/60 block text-xs tracking-widest">
+                  NICKNAME
+                </label>
+                <p className="text-white/50 text-[11px] mt-1 mb-2">
+                  Looks like you're new here — pick a nickname to set up your account.
+                </p>
+                <div className="relative mt-2">
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-[#ff6341]">
+                    <User size={18} />
+                  </div>
+                  <input
+                    className="nb-input w-full pl-10 pr-4 py-4 text-lg"
+                    type="text"
+                    placeholder="Enter nickname"
+                    value={displayName}
+                    onChange={(e) => {
+                      setDisplayName(e.target.value);
+                      setError("");
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleSubmit();
+                    }}
+                    autoFocus
+                  />
                 </div>
-                <input
-                  className="nb-input w-full pl-10 pr-4 py-4 text-lg"
-                  type="text"
-                  placeholder="Enter nickname"
-                  value={displayName}
-                  onChange={(e) => {
-                    setDisplayName(e.target.value);
-                    setError("");
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleLogin();
-                  }}
-                />
               </div>
-            </div>
+            )}
 
             {error && (
               <p className="text-[#ff6341] text-xs font-bold uppercase">{error}</p>
             )}
 
             <button
-              onClick={handleLogin}
+              onClick={handleSubmit}
               disabled={loading}
               className="btn-sticker btn-orange w-full py-4 flex items-center justify-center gap-2"
               style={BUNGEE}
             >
-              {loading ? "JOINING..." : "START PLAYING"}
+              {loading
+                ? (step === "phone" ? "CHECKING..." : "JOINING...")
+                : (step === "phone" ? "CONTINUE" : "START PLAYING")}
               <ArrowRight size={18} />
             </button>
           </div>

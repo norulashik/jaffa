@@ -36,7 +36,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export const api = {
   // Auth
-  loginWithPhone: (phone: string, displayName: string) =>
+  // displayName is optional so the login page can probe with phone-only on
+  // step 1: existing users get logged in, new users hit the backend's
+  // "Nickname is required for new users" 400 which the UI catches and
+  // reveals the nickname field on step 2.
+  loginWithPhone: (phone: string, displayName?: string) =>
     request<{ token: string; user: { id: string; phone: string; displayName: string; avatarConfig?: any }; isNewUser: boolean }>(
       "/auth/phone-login",
       { method: "POST", body: JSON.stringify({ phone, displayName }) }
