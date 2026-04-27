@@ -603,7 +603,7 @@ const ShareCard = forwardRef<HTMLDivElement, {
       ref={ref}
       style={{
         width: 1080,
-        minHeight: 1920,
+        height: 1920,
         padding: 56,
         // Per-match gradient driven by the playing teams' brand colours
         // (CSK vs KKR → mustard → deep purple, LSG vs KKR → steel-blue →
@@ -657,18 +657,18 @@ const ShareCard = forwardRef<HTMLDivElement, {
           the logo is centered horizontally), and a `data-jaffa-logo-slot`
           attribute lets the composite pass find this exact box at runtime
           to position the logo over the right pixels. */}
-      <div style={{ position: "relative", marginBottom: 32, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 480 }}>
+      <div style={{ position: "relative", marginBottom: 20, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 340 }}>
         <div
           data-jaffa-logo-slot
           aria-label="JAFFA"
           role="img"
           style={{
-            height: 520,
+            height: 380,
             // Aspect ratio matches the source PNG (1280x720 ≈ 16:9).
             // Pinning a width keeps the layout stable in the off-screen
             // measurement pass — the composite step uses this box's
             // bounding rect as the destination rectangle for drawImage.
-            width: 924,
+            width: 676,
           }}
         />
       </div>
@@ -677,7 +677,7 @@ const ShareCard = forwardRef<HTMLDivElement, {
       <div
         style={{
           flex: 1,
-          padding: "44px 40px",
+          padding: "32px 36px",
           borderRadius: 28,
           background: "rgba(255,255,255,0.07)",
           border: "2px solid rgba(255,255,255,0.18)",
@@ -685,7 +685,7 @@ const ShareCard = forwardRef<HTMLDivElement, {
           boxShadow: "0 0 80px rgba(180,40,220,0.45), inset 0 0 40px rgba(255,255,255,0.04)",
           display: "flex",
           flexDirection: "column",
-          gap: 28,
+          gap: 20,
           position: "relative",
           zIndex: 1,
         }}
@@ -767,7 +767,7 @@ const ShareCard = forwardRef<HTMLDivElement, {
         </div>
 
         {/* Picks list */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {picks.map((p, i) => (
             <div
               key={i}
@@ -775,15 +775,15 @@ const ShareCard = forwardRef<HTMLDivElement, {
                 background: "rgba(255,255,255,0.05)",
                 border: "1px solid rgba(255,255,255,0.12)",
                 borderRadius: 14,
-                padding: "18px 22px",
+                padding: "12px 20px",
                 display: "flex",
                 alignItems: "center",
                 gap: 18,
               }}
             >
               <div style={{ flex: 1, fontFamily: "system-ui, -apple-system, sans-serif" }}>
-                <div style={{ fontSize: 16, opacity: 0.6, marginBottom: 4, fontWeight: 500 }}>{p.question}</div>
-                <div style={{ fontSize: 24, fontWeight: 700 }}>{p.pick}</div>
+                <div style={{ fontSize: 14, opacity: 0.6, marginBottom: 2, fontWeight: 500 }}>{p.question}</div>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>{p.pick}</div>
               </div>
               <div
                 style={{
