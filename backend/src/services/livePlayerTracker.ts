@@ -903,7 +903,14 @@ export async function pollLivePlayers(io: SocketIOServer): Promise<void> {
   if (livePollInFlight) return;
   livePollInFlight = true;
   try {
-    const matches = await Match.findAll({ where: { status: ["live", "upcoming"] } });
+    // Only iterate LIVE matches. processLivePlayers below filters balls
+    // by scoreboard S1/S2, and upcoming matches have no balls — the
+    // fetch + processing was a no-op anyway. Dropping upcoming saves
+    // an /fixtures/{id} call per upcoming match per tick, which matters
+    // for staying under Sportsmonk's 2,000-calls/hr-per-endpoint cap.
+    // The moment pollSportsmonkUpdates flips a match to status="live",
+    // the next pollLivePlayers tick (≤5s later) picks it up.
+    const matches = await Match.findAll({ where: { status: "live" } });
     if (!matches.length) return;
 
     // Dynamic import — sportsmonkApi re-exports the fetch path we need.

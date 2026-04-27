@@ -918,6 +918,34 @@ const cachedBallData: Map<string, Map<string, { runs: number; is_wicket: boolean
 // Concurrency guard — prevent overlapping polls
 let isPolling = false;
 
+// Slow-poll throttle for upcoming matches that are more than 30 min away
+// from their scheduled start. Polled every 60s instead of every 5s to keep
+// us under Sportsmonk's 2,000-calls/hr-per-endpoint cap. Live matches and
+// imminent (≤30 min) upcomings ignore this map entirely — they always
+// poll at the fast 5s cadence so toss / first-ball detection isn't delayed.
+const lastSlowPollAt: Map<string, number> = new Map();
+const SLOW_POLL_INTERVAL_MS = 60_000;
+const PRE_TOSS_FAST_POLL_WINDOW_MS = 30 * 60_000;
+
+// Returns true if this match must be polled at the fast 5s cadence:
+//   - status === "live"
+//   - status === "upcoming" with startTime within the next 30 min
+//   - status === "upcoming" with missing / past / unparseable startTime
+//     (defensive — assume it could go live any moment).
+// Anything else gets the 60s slow cadence. The defensive null/past
+// fallback exists so that a misconfigured match record can never silently
+// stop polling — at worst we waste a little budget rather than miss a
+// match opening.
+function isImminentOrLive(match: Match): boolean {
+  if (match.status === "live") return true;
+  if (match.status !== "upcoming") return false;
+  if (!match.startTime) return true;
+  const startMs = new Date(match.startTime).getTime();
+  if (!Number.isFinite(startMs)) return true;
+  const msUntilStart = startMs - Date.now();
+  return msUntilStart <= PRE_TOSS_FAST_POLL_WINDOW_MS;
+}
+
 // Main polling function — call this on interval
 export async function pollSportsmonkUpdates(io: SocketIOServer): Promise<void> {
   if (isPolling) {
@@ -1436,6 +1464,27 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
     if (!lastProcessedOver.has(match.id) && match.status === "live") {
       lastProcessedOver.set(match.id, await getTrackingSeed(match));
       console.log(`[Sportsmonk] Initialized tracking for ${match.team1Short} vs ${match.team2Short}: innings=${match.currentInnings}, over=${match.currentOver}`);
+    }
+
+    // Sportsmonk rate-limit gate: 2,000 calls/hr per endpoint per their
+    // plan. With every match in DB hitting /fixtures/{id} once per 5s
+    // tick we exceed that with just 3 matches in the live+upcoming pool.
+    // Tier the cadence by urgency:
+    //   - LIVE matches → always 5s (zero behaviour change).
+    //   - UPCOMING within 30 min of startTime → 5s (toss is at -30 min;
+    //     the user can already be on the match page; don't risk delaying
+    //     prediction availability).
+    //   - UPCOMING with missing or past startTime → 5s (defensive — could
+    //     go live any moment, treat as imminent).
+    //   - UPCOMING more than 30 min away → 60s. Worst case: a status flip
+    //     is detected up to 60s late, but the match isn't due yet so no
+    //     user is waiting on it. The Punter Card midnight check above
+    //     stays at 5s for every upcoming match regardless (pure DB, no
+    //     Sportsmonk call).
+    if (!isImminentOrLive(match)) {
+      const last = lastSlowPollAt.get(match.id) || 0;
+      if (Date.now() - last < SLOW_POLL_INTERVAL_MS) continue;
+      lastSlowPollAt.set(match.id, Date.now());
     }
 
     // Fetch with balls (the bigger payload). Sportsmonk's `?include=balls,
