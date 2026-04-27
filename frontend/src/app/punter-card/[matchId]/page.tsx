@@ -549,8 +549,9 @@ export default function PunterCardPage() {
       )}
 
       {/* Hidden render-to-image share card. Positioned off-screen but in the
-          layout tree so html-to-image can rasterize it. 1080×1350 is the
-          Instagram story / portrait post size. */}
+          layout tree so html-to-image can rasterize it. 1080×1920 is the
+          Instagram Story / 9:16 portrait size — also fits Snapchat,
+          WhatsApp Status, and TikTok story crops without letterboxing. */}
       <div style={{ position: "fixed", left: -10000, top: 0, pointerEvents: "none" }} aria-hidden>
         <ShareCard ref={shareRef} match={match} questions={questions} selections={selections} />
       </div>
@@ -602,7 +603,7 @@ const ShareCard = forwardRef<HTMLDivElement, {
       ref={ref}
       style={{
         width: 1080,
-        minHeight: 1350,
+        minHeight: 1920,
         padding: 56,
         // Per-match gradient driven by the playing teams' brand colours
         // (CSK vs KKR → mustard → deep purple, LSG vs KKR → steel-blue →
