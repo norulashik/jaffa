@@ -10,6 +10,7 @@ import { JAFFA_LOGO_DATA_URL } from "./jaffaLogo";
 import { getTeamLogoDataUrl } from "./teamLogos";
 import TeamBadge from "@/components/TeamBadge";
 import { getTeamColor } from "@/lib/teamColors";
+import { GLOBAL_VENUE_ID } from "@/lib/venue";
 import PunterCardShareModal from "@/components/PunterCardShareModal";
 
 type Question = {
@@ -30,7 +31,17 @@ export default function PunterCardPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const matchId = params?.matchId as string;
-  const venueId = searchParams?.get("venueId") || undefined;
+  // Fallback chain so the page always has a venueId to bind picks to:
+  //   1. ?venueId=<id> in the URL (lobby's "OPEN PUNTER CARD" passes this)
+  //   2. localStorage jaffa_venue_id (set by past-battle nav / cafe onboarding)
+  //   3. The synthetic GLOBAL_VENUE_ID for users who never entered a cafe
+  // Without this, global users tapping the lobby's punter-card button
+  // would land on the page with no venueId, see a "Pick a venue first"
+  // banner, and be unable to lock in any picks.
+  const venueId =
+    searchParams?.get("venueId") ||
+    (typeof window !== "undefined" ? localStorage.getItem("jaffa_venue_id") || undefined : undefined) ||
+    GLOBAL_VENUE_ID;
 
   const [loading, setLoading] = useState(true);
   const [match, setMatch] = useState<any>(null);
@@ -326,14 +337,11 @@ export default function PunterCardPage() {
         </div>
       </div>
 
-      {/* Body — chunky question cards. */}
+      {/* Body — chunky question cards. The "Pick a venue first" banner
+          that used to live here is gone now that venueId always falls
+          back to GLOBAL_VENUE_ID for global users — every page render
+          has a working venueId, so the lock-in CTA is never gated. */}
       <div className="max-w-3xl mx-auto px-4 py-4 space-y-4 relative z-10">
-        {!venueId && (
-          <div className="bg-amber-500/10 border border-amber-500/40 text-amber-200 text-sm rounded-2xl p-4">
-            Pick a venue first to lock in your card. Open this from inside the match lobby.
-          </div>
-        )}
-
         {questions.map((q) => {
           const isOpen = !!expanded[q.id];
           const isPool = POOL_TEMPLATES.has(q.templateKey);

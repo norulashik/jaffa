@@ -11,6 +11,7 @@ import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 import { toast } from "sonner";
 import RoomCard from "@/components/RoomCard";
 import { useGame } from "@/context/GameContext";
+import { GLOBAL_VENUE_ID } from "@/lib/venue";
 
 interface Match {
   id: string;
@@ -562,7 +563,13 @@ export default function HomeLiveMatches() {
                                 const result = await api.importMatch(fixtureId);
                                 realId = result.match.id;
                               }
-                              router.push(`/punter-card/${realId}${storedVenueId ? `?venueId=${storedVenueId}` : ""}`);
+                              // Always pass a venueId so the punter card
+                              // page never lands without one. Global users
+                              // (no cafe context) get the synthetic
+                              // GLOBAL_VENUE_ID — the backend already
+                              // routes their picks through it.
+                              const v = storedVenueId || GLOBAL_VENUE_ID;
+                              router.push(`/punter-card/${realId}?venueId=${v}`);
                             } catch (err: any) {
                               toast.error(err?.message || "Couldn't open Punter Card");
                             }
