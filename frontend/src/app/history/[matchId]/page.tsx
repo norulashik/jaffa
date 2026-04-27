@@ -17,7 +17,7 @@
  *   - api.getMatchState(matchId, venueId)  (for my participant row)
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
@@ -36,7 +36,7 @@ type Reward = {
   createdAt: string;
 };
 
-export default function MatchHistoryPage() {
+function MatchHistoryPageInner() {
   const params = useParams();
   const search = useSearchParams();
   const router = useRouter();
@@ -343,6 +343,16 @@ export default function MatchHistoryPage() {
 
       <BottomNav />
     </div>
+  );
+}
+
+// Suspense wrapper required because MatchHistoryPageInner reads
+// useSearchParams (Next 16 errors during build otherwise).
+export default function MatchHistoryPage() {
+  return (
+    <Suspense fallback={<div className="bg-[#0d0d0d] text-white min-h-screen" />}>
+      <MatchHistoryPageInner />
+    </Suspense>
   );
 }
 

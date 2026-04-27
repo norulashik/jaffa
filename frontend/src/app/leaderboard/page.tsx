@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
@@ -31,7 +31,7 @@ function deriveRound(currentInnings: number, currentOver: number, totalOvers: nu
   return 6;
 }
 
-export default function LeaderboardPage() {
+function LeaderboardPageInner() {
   const { state, dispatch } = useGame();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -150,5 +150,16 @@ export default function LeaderboardPage() {
 
       <BottomNav />
     </div>
+  );
+}
+
+// Suspense wrapper required because LeaderboardPageInner reads
+// useSearchParams (Next 16 errors during build otherwise). Fallback
+// mirrors the page's idle background so there's no visible flash.
+export default function LeaderboardPage() {
+  return (
+    <Suspense fallback={<div className="bg-[#0d0d0d] text-white min-h-screen" />}>
+      <LeaderboardPageInner />
+    </Suspense>
   );
 }

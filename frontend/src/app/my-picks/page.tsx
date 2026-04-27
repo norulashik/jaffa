@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import Header from "@/components/Header";
@@ -75,7 +75,7 @@ function PercentileBadge({ aggregates }: { aggregates: { global?: ScopeAgg; venu
   );
 }
 
-export default function MyPicksPage() {
+function MyPicksPageInner() {
   const { state } = useGame();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -409,5 +409,16 @@ export default function MyPicksPage() {
 
       <BottomNav />
     </div>
+  );
+}
+
+// Suspense wrapper required because MyPicksPageInner reads
+// useSearchParams (Next 16 errors during build otherwise). Fallback
+// mirrors the page's idle background so there's no visible flash.
+export default function MyPicksPage() {
+  return (
+    <Suspense fallback={<div className="bg-[#0d0d0d] text-white min-h-screen" />}>
+      <MyPicksPageInner />
+    </Suspense>
   );
 }
