@@ -570,45 +570,6 @@ const ShareCard = forwardRef<HTMLDivElement, {
         overflow: "hidden",
       }}
     >
-      {/* Floating banana decorations — scattered around the card edges to
-          give it the playful NFT-card feel from the user's reference image.
-          aria-hidden + zIndex 0 keeps them strictly decorative and behind
-          all content. Each banana uses the system color-emoji font, which
-          html-to-image rasterizes correctly on both iOS Safari (Apple
-          Color Emoji) and Android Chrome (Noto Color Emoji). Rotations
-          are varied so no two read as paired. */}
-      <div aria-hidden style={{ position: "absolute", inset: 0, zIndex: 0, pointerEvents: "none" }}>
-        {[
-          { top:  20, left:  -40, size: 180, rotate:  -28, opacity: 0.95 },
-          { top:  60, right:  20, size: 140, rotate:   55, opacity: 0.85 },
-          { top: 240, left:  -30, size: 120, rotate:  110, opacity: 0.85 },
-          { top: 720, right: -40, size: 160, rotate:  -75, opacity: 0.9  },
-          { top: 980, left:  -20, size: 140, rotate:  200, opacity: 0.85 },
-          { bottom: -30, right: -30, size: 200, rotate:   25, opacity: 0.95 },
-          { bottom: 280, left: 460, size:  90, rotate:   12, opacity: 0.55 },
-          { top: 480, right: 360, size:  80, rotate:  -50, opacity: 0.5  },
-        ].map((b, i) => (
-          <span
-            key={i}
-            style={{
-              position: "absolute",
-              top: b.top,
-              left: (b as any).left,
-              right: (b as any).right,
-              bottom: (b as any).bottom,
-              fontSize: b.size,
-              transform: `rotate(${b.rotate}deg)`,
-              opacity: b.opacity,
-              filter: "drop-shadow(0 6px 16px rgba(0,0,0,0.45))",
-              fontFamily: "'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif",
-              lineHeight: 1,
-            }}
-          >
-            🍌
-          </span>
-        ))}
-      </div>
-
       {/* Date pill — anchored to the OUTER card edge (top: 56 / right: 56
           matches the card padding) so it can never clip into the header,
           regardless of how tall the logo is. nowrap forces single-line so
