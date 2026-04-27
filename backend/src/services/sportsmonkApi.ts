@@ -744,10 +744,28 @@ async function fetchAllPages(baseUrl: string): Promise<any[]> {
   return allFixtures;
 }
 
-// Fetch today's fixtures
+// IST is the product's timezone — IPL matches schedule, the Punter Card
+// midnight trigger, and the lobby's "today's matches" view are all framed
+// in IST. The previous implementation used UTC (`new Date().toISOString()`)
+// which between midnight IST and 5:30 AM IST returns the *previous* UTC
+// date, so Sportsmonk's `starts_between=YYYY-MM-DD,YYYY-MM-DD` filter
+// missed the day's IPL fixture (its `starting_at` is e.g.
+// `2026-04-28T14:00:00Z`). That delayed the auto-import — and therefore
+// the Punter Card opening — by up to a few hours after midnight IST,
+// even though the user could already see the fixture in the lobby via
+// the wider 30-day Sportsmonk feed.
+const IST_OFFSET_MS = (5 * 60 + 30) * 60_000;
+function istTodayDate(): string {
+  return new Date(Date.now() + IST_OFFSET_MS).toISOString().split("T")[0];
+}
+function istDateAfterDays(days: number): string {
+  return new Date(Date.now() + IST_OFFSET_MS + days * 86_400_000).toISOString().split("T")[0];
+}
+
+// Fetch today's fixtures (IST calendar day).
 export async function fetchTodayFixtures(): Promise<any[]> {
   try {
-    const today = new Date().toISOString().split("T")[0];
+    const today = istTodayDate();
     const baseUrl = `${getApiBase()}/fixtures?filter[starts_between]=${today},${today}&api_token=${getApiToken()}&include=runs,localteam,visitorteam${IPL_LEAGUE_FILTER}`;
     const fixtures = keepOnlyIplFixtures(await fetchAllPages(baseUrl));
     await enrichFixturesWithTeams(fixtures);
@@ -758,11 +776,11 @@ export async function fetchTodayFixtures(): Promise<any[]> {
   }
 }
 
-// Fetch upcoming fixtures (next 30 days)
+// Fetch upcoming fixtures (next 30 days, anchored on IST today).
 export async function fetchUpcomingFixtures(): Promise<any[]> {
   try {
-    const today = new Date().toISOString().split("T")[0];
-    const futureDate = new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0];
+    const today = istTodayDate();
+    const futureDate = istDateAfterDays(30);
     const baseUrl = `${getApiBase()}/fixtures?filter[starts_between]=${today},${futureDate}&api_token=${getApiToken()}&include=localteam,visitorteam,runs${IPL_LEAGUE_FILTER}`;
     console.log(`[Sportsmonk] Fetching upcoming: ${today} to ${futureDate}`);
     const fixtures = keepOnlyIplFixtures(await fetchAllPages(baseUrl));
@@ -964,7 +982,15 @@ export async function pollSportsmonkUpdates(io: SocketIOServer): Promise<void> {
 // once every 30 minutes. Cron-like daily-at-midnight is the product intent;
 // the 30-minute floor just covers backend restarts so a freshly-booted
 // process still discovers today's fixtures within half an hour.
+//
+// IST midnight bypass: we also track the IST date of the last scan. The
+// instant the IST calendar day flips (i.e. we cross 12 AM IST), the next
+// poll tick forces a fresh scan even if the 30-min window hasn't elapsed,
+// so today's fixture lands in DB within seconds of midnight and the
+// Punter Card opens on time. Without this bypass, a scan at 11:55 PM IST
+// would block the next attempt until 12:25 AM IST.
 let lastTodayImportScanAt = 0;
+let lastTodayImportScanIstDate: string | null = null;
 const TODAY_IMPORT_SCAN_INTERVAL_MS = 30 * 60_000;
 
 /**
@@ -974,8 +1000,11 @@ const TODAY_IMPORT_SCAN_INTERVAL_MS = 30 * 60_000;
  * tapped JOIN on yet — the card needs a real `Match` row to attach to.
  */
 async function autoImportTodayFixtures(): Promise<void> {
-  if (Date.now() - lastTodayImportScanAt < TODAY_IMPORT_SCAN_INTERVAL_MS) return;
+  const istDate = istTodayDate();
+  const dayChanged = lastTodayImportScanIstDate !== null && lastTodayImportScanIstDate !== istDate;
+  if (!dayChanged && Date.now() - lastTodayImportScanAt < TODAY_IMPORT_SCAN_INTERVAL_MS) return;
   lastTodayImportScanAt = Date.now();
+  lastTodayImportScanIstDate = istDate;
 
   try {
     const fixtures = await fetchTodayFixtures();

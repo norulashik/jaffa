@@ -11,6 +11,26 @@ import {
   type PlayerRole,
 } from "../data/iplSquads";
 
+// Sentinel returned by computeCorrectFromBalls when a head-to-head question
+// can't be evaluated fairly — e.g. a named player isn't in the actual XI.
+// resolvePunterCard converts this into a "resolved with no winner" outcome:
+// the prediction is closed but no one's points / stats move, and no
+// myPredictionWin / leaderboardUpdate sockets are emitted.
+export const VOID_OPTION = "__void__";
+
+// Lowercased set of all 22 (or fewer) names in today's actual XI, sourced
+// from match.team1Players + team2Players. Returns null if neither lineup
+// has been populated yet (toss hasn't happened, or this is a legacy row).
+// Callers that need a "did this player feature today" check can fall back
+// to other heuristics in that case.
+function lineupNamesLower(match?: Match | null): Set<string> | null {
+  if (!match) return null;
+  const t1 = Array.isArray(match.team1Players) ? match.team1Players : [];
+  const t2 = Array.isArray(match.team2Players) ? match.team2Players : [];
+  if (t1.length === 0 && t2.length === 0) return null;
+  return new Set([...t1, ...t2].map((n) => String(n || "").toLowerCase().trim()).filter(Boolean));
+}
+
 // Map decimal-odds-style difficulty to in-app points.
 // Reference (from user-supplied screenshot): odds range ~1.07 (very likely)
 // to ~50.00 (very unlikely). We want points to scale with difficulty but stay
@@ -275,25 +295,10 @@ export function buildPunterCardQuestions(
     ],
   });
 
-  // 9. Top order vs death bowling — who disappoints fans faster.
-  //    Always team1's top order vs team2's death bowling for predictability.
-  //    Resolver: sum team1 openers+#3 batting runs vs team2 bowlers' runs
-  //    given in overs 16–20 of team1's batting innings. Higher number =
-  //    that side did "worse" in the comparison and is the answer.
-  const t1Openers = pickOpeners(t1Players);
-  const t1Three = t1Players.length ? pickThreeBatter(t1Players) : null;
-  if (t1Openers && t1Three) {
-    out.push({
-      matchId, category: "punter_card", round: 0,
-      templateKey: "punter_top_vs_death",
-      question: `Who'll disappoint fans faster today: ${team1Full} top order or ${team2Full} death bowling?`,
-      options: [
-        { key: "team1", label: `${team1Full} top order`,     points: oddsToPoints(2.0) },
-        { key: "team2", label: `${team2Full} death bowling`, points: oddsToPoints(2.0) },
-        { key: ALL_CORRECT_OPTION, label: "Tied",            points: oddsToPoints(20.0) },
-      ],
-    });
-  }
+  // (Removed: "Who'll disappoint fans faster — top order vs death bowling".
+  //  Question retired per product call. The `punter_top_vs_death` template
+  //  is still kept in PUNTER_TEMPLATES + the resolver switch below so any
+  //  rows generated before this change continue to resolve cleanly.)
 
   // 10. Death overs (16–20) — which team scores more.
   out.push({
@@ -658,6 +663,16 @@ export async function resolvePunterCard(
       pool,
     );
     if (!correct) continue;
+    if (correct === VOID_OPTION) {
+      // Close the prediction without crediting or debiting anyone. We DON'T
+      // touch UserPredictions — leaving isCorrect=null marks them as
+      // "settled, no result". Frontend can detect a void by matching
+      // correctOption against VOID_OPTION (or "__void__"). No socket
+      // emissions either: nothing changed on the leaderboard.
+      await pred.update({ correctOption: VOID_OPTION, status: "resolved" });
+      resolved += 1;
+      continue;
+    }
     await pred.update({ correctOption: correct, status: "resolved" });
     await scorePunterUserAnswers(pred.id, correct, pred.options, io);
     resolved += 1;
@@ -736,17 +751,23 @@ export function computeCorrectFromBalls(
 
     // -------- v2 head-to-head templates --------
     case "punter_star_batter_lower": {
-      // Two player options + a "Tie" sentinel. Pull the player names from the
-      // option labels, sum each one's runs across both innings, return the
-      // option key for whoever scored FEWER. Equal totals → ALL_CORRECT.
-      // If neither faced a ball (rare — e.g. abandoned innings 1) we leave
-      // the row alone so reResolveMatch's delta path doesn't wipe a guess.
+      // Two player options + a "Tie" sentinel. If either named player isn't
+      // in today's actual XI (announced at toss → match.team1Players /
+      // team2Players), VOID the question — the head-to-head premise is
+      // broken. If they're both in the XI but one didn't face a ball (e.g.
+      // chasing side won before they came in), treat their total as 0 and
+      // resolve normally — they "scored less" by virtue of not batting.
       const players = pred.options.filter((o) => o.key !== ALL_CORRECT_OPTION);
       if (players.length !== 2) return null;
       const p1 = players[0], p2 = players[1];
-      const r1 = runsByBatterName(allBalls, p1.label);
-      const r2 = runsByBatterName(allBalls, p2.label);
-      if (r1 == null || r2 == null) return null;
+      const lineup = lineupNamesLower(match);
+      if (lineup) {
+        const inXI1 = lineup.has(p1.label.toLowerCase().trim());
+        const inXI2 = lineup.has(p2.label.toLowerCase().trim());
+        if (!inXI1 || !inXI2) return VOID_OPTION;
+      }
+      const r1 = runsByBatterName(allBalls, p1.label) ?? 0;
+      const r2 = runsByBatterName(allBalls, p2.label) ?? 0;
       if (r1 < r2) return p1.key;
       if (r2 < r1) return p2.key;
       return ALL_CORRECT_OPTION;
@@ -768,29 +789,38 @@ export function computeCorrectFromBalls(
       return ALL_CORRECT_OPTION;
     }
     case "punter_openers_more_boundaries": {
-      // Need pool to know which two players are each team's openers. If pool
-      // wasn't loaded, leave alone.
+      // Need pool to map each team to its batting scoreboard (S1/S2). The
+      // openers themselves are detected from ball-by-ball data — the first
+      // two unique batters seen on each scoreboard. Picking from the squad
+      // list (the previous approach) was fragile because Sportsmonk's
+      // `batsman.fullname` occasionally differs from squad names (e.g.
+      // "Faf du Plessis" vs "Faf Du Plessis", "KL Rahul" vs "Lokesh Rahul"),
+      // which could leave both teams' boundary count at 0 and force a Tie
+      // even when the actual scoreboard had a clear winner.
       if (!pool) return null;
-      const t1Op = pickOpeners(pool.team1Players);
-      const t2Op = pickOpeners(pool.team2Players);
+      const t1Sb = scoreboardForTeam(allBalls, pool.team1Players);
+      const t2Sb = scoreboardForTeam(allBalls, pool.team2Players);
+      if (!t1Sb || !t2Sb) return null;
+      const t1Op = detectOpenersFromBalls(allBalls, t1Sb);
+      const t2Op = detectOpenersFromBalls(allBalls, t2Sb);
       if (!t1Op || !t2Op) return null;
-      const t1Bnd = boundariesByBatterNames(allBalls, [t1Op[0].name, t1Op[1].name]);
-      const t2Bnd = boundariesByBatterNames(allBalls, [t2Op[0].name, t2Op[1].name]);
+      const t1Bnd = boundariesByBatterNames(allBalls, t1Op);
+      const t2Bnd = boundariesByBatterNames(allBalls, t2Op);
       if (t1Bnd > t2Bnd) return "team1";
       if (t2Bnd > t1Bnd) return "team2";
       return ALL_CORRECT_OPTION;
     }
     case "punter_allrounder_impact": {
       // Impact index = batting runs + wickets taken (excl run-outs) +
-      // catches taken. Single sum, higher wins.
+      // catches taken. Per product spec: missing data for any of the three
+      // counts as 0, so impactIndexForPlayer returning null (player never
+      // appeared on a ball) collapses to 0. Tie if both end up at the same
+      // total — including the both-zero case where neither player featured.
       const players = pred.options.filter((o) => o.key !== ALL_CORRECT_OPTION);
       if (players.length !== 2) return null;
       const p1 = players[0], p2 = players[1];
-      const i1 = impactIndexForPlayer(allBalls, p1.label);
-      const i2 = impactIndexForPlayer(allBalls, p2.label);
-      if (i1 == null && i2 == null) return null;
-      const v1 = i1 ?? 0;
-      const v2 = i2 ?? 0;
+      const v1 = impactIndexForPlayer(allBalls, p1.label) ?? 0;
+      const v2 = impactIndexForPlayer(allBalls, p2.label) ?? 0;
       if (v1 > v2) return p1.key;
       if (v2 > v1) return p2.key;
       return ALL_CORRECT_OPTION;
@@ -964,6 +994,27 @@ function impactIndexForPlayer(allBalls: any[], name: string): number | null {
   }
   if (!appeared) return null;
   return runs + wickets + catches;
+}
+
+// First two unique batters to face a ball on a given scoreboard. These are
+// the actual openers — robust against squad-name mismatches between our
+// roster data and Sportsmonk's `batsman.fullname`.
+function detectOpenersFromBalls(
+  allBalls: any[],
+  scoreboard: "S1" | "S2",
+): [string, string] | null {
+  const seen: string[] = [];
+  const innBalls = allBalls
+    .filter((b) => b.scoreboard === scoreboard)
+    .sort((a, b) => parseFloat(String(a.ball || "0")) - parseFloat(String(b.ball || "0")));
+  for (const b of innBalls) {
+    const name = b.batsman?.fullname;
+    if (!name) continue;
+    if (seen.includes(name)) continue;
+    seen.push(name);
+    if (seen.length === 2) return [seen[0], seen[1]];
+  }
+  return null;
 }
 
 // Walk balls in chronological order (innings 1 first, then innings 2),
