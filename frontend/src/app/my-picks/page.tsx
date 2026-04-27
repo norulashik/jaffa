@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
@@ -78,6 +78,7 @@ function PercentileBadge({ aggregates }: { aggregates: { global?: ScopeAgg; venu
 export default function MyPicksPage() {
   const { state } = useGame();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [predictions, setPredictions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<"correct" | "wrong" | "all" | "pending">("all");
@@ -85,17 +86,20 @@ export default function MyPicksPage() {
   // Empty Set = all collapsed; we add the user's tap targets to expand them.
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
-  // Treat the strings "null" / "undefined" as missing — earlier versions of
-  // the past-battle nav would write those literals into localStorage when the
-  // backend response lacked venueId, leaving the page convinced it had a
-  // venue while every API call 404'd silently.
+  // Resolution order: URL query first (BottomNav forwards ?matchId=&venueId=
+  // when the user taps My Picks from a match page — most authoritative,
+  // immune to GameContext hydration races), then GameContext state, then
+  // localStorage. Treat the strings "null"/"undefined" as missing — legacy
+  // poison from old past-battle nav code.
   const readLs = (k: string) => {
     if (typeof window === "undefined") return null;
     const v = localStorage.getItem(k);
     return !v || v === "null" || v === "undefined" ? null : v;
   };
-  const matchId = state.matchId || readLs("jaffa_match_id");
-  const venueId = state.venueId || readLs("jaffa_venue_id");
+  const matchId =
+    searchParams?.get("matchId") || state.matchId || readLs("jaffa_match_id");
+  const venueId =
+    searchParams?.get("venueId") || state.venueId || readLs("jaffa_venue_id");
 
   useEffect(() => {
     const token = localStorage.getItem("jaffa_token");

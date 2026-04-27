@@ -37,12 +37,29 @@ let matchesCache: { at: number; data: unknown } | null = null;
 let matchesInflight: Promise<unknown> | null = null;
 const MATCHES_CACHE_MS = 12_000;
 
+// IPL franchise short codes — used to filter out non-IPL Match rows that
+// were imported into the DB before the league filter shipped (or via a
+// manual admin import). Match model has no league_id column, so team-short
+// membership is the cheapest reliable signal. Both team shorts must be IPL
+// for the match to render in the lobby.
+const IPL_TEAM_SHORTS = new Set([
+  "RCB", "GT", "MI", "CSK", "LSG", "RR", "SRH", "DC", "PBKS", "KKR",
+]);
+const isIplDbMatch = (m: { team1Short?: string | null; team2Short?: string | null }): boolean => {
+  const t1 = (m.team1Short || "").toUpperCase();
+  const t2 = (m.team2Short || "").toUpperCase();
+  return IPL_TEAM_SHORTS.has(t1) && IPL_TEAM_SHORTS.has(t2);
+};
+
 async function buildMatchesPayload(): Promise<unknown> {
-  // 1. Local DB matches (already imported)
-  const dbMatches = await Match.findAll({
+  // 1. Local DB matches (already imported). Filter out any non-IPL row
+  //    that snuck in before the Sportsmonk-side league filter was added —
+  //    those would otherwise render in the lobby alongside IPL fixtures.
+  const dbMatchesAll = await Match.findAll({
     where: { status: ["upcoming", "live"] },
     order: [["startTime", "ASC"]],
   });
+  const dbMatches = dbMatchesAll.filter(isIplDbMatch);
 
   // 2. Fetch live + upcoming from Sportsmonk
   const [liveFixtures, upcomingFixtures] = await Promise.all([

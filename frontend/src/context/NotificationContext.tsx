@@ -199,7 +199,13 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         (o: any) => (o.key || o.label) === r.selectedOption
       );
       const tsRaw = r.answeredAt ? new Date(r.answeredAt).getTime() : Date.now();
-      const alreadyPopped = poppedIdsRef.current.has(r.prediction.id);
+      // Backfilled wins always count as "already seen" — they go into the
+      // bell drawer but never pop in-face. The pop-on-backfill behaviour
+      // was meant to recover wins missed during a live-match disconnect,
+      // but it was also firing every time the user opened a PAST battle
+      // (LS gets the past match's id → backfill fetches every win that
+      // was ever correct → pops the queue). The user can review backfilled
+      // wins via the bell when they want; live socket events still pop.
       const note: WinNotification = {
         id: `${r.prediction.id}-bf-${tsRaw}`,
         predictionId: r.prediction.id,
@@ -211,17 +217,15 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         category: r.prediction.category || "",
         overNumber: r.prediction.overNumber ?? null,
         receivedAt: tsRaw,
-        seenInBell: alreadyPopped,
+        seenInBell: true,
       };
-      if (!alreadyPopped && popsBudget > 0) {
-        popsBudget -= 1;
-        if (currentRef.current === null) {
-          setCurrentPopup(note);
-          currentRef.current = note;
-        } else {
-          setQueue((prev) => [...prev, note]);
-        }
-      }
+      // Mark as "popped" in the dedup set so a stray live event for the
+      // same prediction (race window during innings break, etc.) doesn't
+      // double-pop. The history-only path is enough for backfill.
+      poppedIdsRef.current.add(r.prediction.id);
+      // popsBudget intentionally unused now — kept variable name for any
+      // future tweak that wants a cap on, say, sound effects.
+      void popsBudget;
       wins.push(note);
     }
 

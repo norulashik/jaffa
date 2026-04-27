@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
 import Leaderboard from "@/components/Leaderboard";
@@ -34,10 +34,26 @@ function deriveRound(currentInnings: number, currentOver: number, totalOvers: nu
 export default function LeaderboardPage() {
   const { state, dispatch } = useGame();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
-  // Use context values with localStorage fallback
-  const [matchId, setMatchId] = useState(state.matchId);
-  const [venueId, setVenueId] = useState(state.venueId);
+  // Resolution order for matchId / venueId:
+  //   1. URL query (?matchId=&venueId=) — forwarded by BottomNav when
+  //      the user taps Ranks from a match page. Most authoritative because
+  //      it's set at click time, immune to state-hydration races.
+  //   2. GameContext state — set by the match page on mount.
+  //   3. localStorage — fallback for hydration / hard reloads.
+  // Treat the strings "null"/"undefined" as missing for the LS path —
+  // legacy poison from old past-battle nav code.
+  const readLs = (k: string) => {
+    if (typeof window === "undefined") return null;
+    const v = localStorage.getItem(k);
+    return !v || v === "null" || v === "undefined" ? null : v;
+  };
+  const urlMatchId = searchParams?.get("matchId") || null;
+  const urlVenueId = searchParams?.get("venueId") || null;
+
+  const [matchId, setMatchId] = useState(urlMatchId || state.matchId || readLs("jaffa_match_id"));
+  const [venueId, setVenueId] = useState(urlVenueId || state.venueId || readLs("jaffa_venue_id"));
   const [roomId, setRoomId] = useState(state.roomId);
 
   useEffect(() => {
@@ -46,17 +62,15 @@ export default function LeaderboardPage() {
       router.replace(isCafeRoute() ? cafeUrl("/login") : "/login");
       return;
     }
-
-    // Treat poisoned "null"/"undefined" strings as missing — see my-picks
-    // for why these can end up in localStorage from past-battle nav.
-    const readLs = (k: string) => {
-      const v = localStorage.getItem(k);
-      return !v || v === "null" || v === "undefined" ? null : v;
-    };
-    if (!matchId) setMatchId(readLs("jaffa_match_id"));
-    if (!venueId) setVenueId(readLs("jaffa_venue_id"));
+    // Re-derive from the same priority order on every state change so
+    // changes to GameContext (e.g. user joins a different match in
+    // another tab and the context broadcasts) flow through.
+    const next = urlMatchId || state.matchId || readLs("jaffa_match_id");
+    const nextV = urlVenueId || state.venueId || readLs("jaffa_venue_id");
+    if (next && next !== matchId) setMatchId(next);
+    if (nextV && nextV !== venueId) setVenueId(nextV);
     if (!roomId) setRoomId(readLs("jaffa_room_id"));
-  }, [state.matchId, state.venueId, state.roomId, matchId, venueId, roomId, router]);
+  }, [state.matchId, state.venueId, state.roomId, urlMatchId, urlVenueId, matchId, venueId, roomId, router]);
 
   // Pull match state when this page is the user's first stop, so context's
   // currentRound is set before <Leaderboard> mounts. Without this, the round

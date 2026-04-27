@@ -52,7 +52,27 @@ export default function BottomNav() {
           const homeHref = activeMatchId && !isOnActiveMatch
             ? `/match/${activeMatchId}${activeVenueId ? `?venueId=${activeVenueId}` : ""}`
             : "/lobby";
-          const href = item.key === "home" ? homeHref : item.href;
+
+          // For Ranks (/leaderboard) and My Picks (/my-picks), forward the
+          // active match context as URL query params. The destination
+          // pages prefer URL params over GameContext / localStorage so a
+          // user who taps Ranks immediately after entering a past battle
+          // never sees a "no active match" empty state due to a state
+          // hydration race.
+          const matchScopedQs = activeMatchId
+            ? `?matchId=${activeMatchId}${activeVenueId ? `&venueId=${activeVenueId}` : ""}`
+            : "";
+          let href: string;
+          if (item.key === "home") {
+            href = homeHref;
+          } else if (
+            (item.key === "leaderboard" || item.key === "my-picks") &&
+            activeMatchId
+          ) {
+            href = `${item.href}${matchScopedQs}`;
+          } else {
+            href = item.href;
+          }
           const resolvedHref = mounted && isCafeRoute() ? cafeUrl(href) : href;
           const isActive =
             item.key === "home"
