@@ -23,27 +23,62 @@ const SPORTSMONK_HEADERS = {
   "user-agent": "JaffaBackend/1.0",
 };
 
-// IPL has league_id = 1 on the Sportsmonk Cricket API (stable across
-// seasons — season_id rotates yearly, league_id does not). Configurable
-// via JAFFA_LEAGUE_IDS=1,3 if we ever want to surface a different
-// tournament alongside IPL (e.g. Big Bash). Without this filter the
-// /livescores and /fixtures endpoints return every cricket fixture
-// worldwide and a BAN vs NZ international leaks into the lobby.
+// IPL on Sportsmonk Cricket. Originally we passed `&filter[league]=1` on
+// every fixtures URL plus a client-side `keepOnlyIplFixtures` pass. The
+// URL-side filter turned out to be unreliable across plan tiers — at
+// times it silently rejected legitimate IPL fixtures (the symptom: today's
+// PBKS vs RR vanishing from the lobby on match day even though the
+// fixture clearly existed in `/livescores`). Client-side filtering by
+// `league_id` allow-list AND IPL team-codes (see keepOnlyIplFixtures
+// below) is robust enough by itself to keep BAN/NZ internationals out,
+// so we no longer add the URL-side filter. Set
+// `JAFFA_USE_LEAGUE_URL_FILTER=1` to opt back in if the bandwidth of
+// fetching the global fixture list ever becomes a concern.
 const IPL_LEAGUE_IDS: readonly number[] = (process.env.JAFFA_LEAGUE_IDS || "1")
   .split(",")
   .map((s) => Number(s.trim()))
   .filter((n) => Number.isFinite(n) && n > 0);
-const IPL_LEAGUE_FILTER = IPL_LEAGUE_IDS.length
+const USE_LEAGUE_URL_FILTER = process.env.JAFFA_USE_LEAGUE_URL_FILTER === "1";
+const IPL_LEAGUE_FILTER = USE_LEAGUE_URL_FILTER && IPL_LEAGUE_IDS.length
   ? `&filter[league]=${IPL_LEAGUE_IDS.join(",")}`
   : "";
 
-// Defensive client-side filter for the case where Sportsmonk silently
-// ignores filter[league] on this plan tier — drop anything whose
-// league_id isn't in the allow-list. Cheap; runs after the network call.
+// IPL franchise short codes — the 10-team allow-list mirrored from the
+// lobby's DB-side filter (routes/match.ts). Used as a belt-and-suspenders
+// signal in case Sportsmonk's `league_id` is missing or different from
+// the value our `JAFFA_LEAGUE_IDS` env expects.
+const IPL_TEAM_CODES = new Set([
+  "RCB", "GT", "MI", "CSK", "LSG", "RR", "SRH", "DC", "PBKS", "KKR",
+]);
+
+// Pull both team codes from a Sportsmonk fixture object. With
+// `include=localteam,visitorteam` set, codes live at `f.localteam.data.code`
+// / `f.visitorteam.data.code`. After enrichFixturesWithTeams runs they may
+// also be on the fixture root. Returns uppercase codes (or empty strings).
+function extractTeamCodes(f: any): { t1: string; t2: string } {
+  const t1 = (f?.localteam?.data?.code || f?.team1Short || "").toString().toUpperCase();
+  const t2 = (f?.visitorteam?.data?.code || f?.team2Short || "").toString().toUpperCase();
+  return { t1, t2 };
+}
+
+// Defensive client-side filter. The URL-side `filter[league]=…` parameter
+// is unreliable across Sportsmonk plan tiers — sometimes silently ignored,
+// sometimes rejecting valid fixtures whose `league_id` isn't what we
+// configured. Accept a fixture when EITHER (a) its `league_id` is in the
+// allow-list OR (b) both team codes are recognised IPL franchise shorts.
+// Either signal alone is enough to keep IPL-only matches in and BAN/NZ
+// internationals out — combining them via OR removes the single point of
+// failure that previously made today's PBKS vs RR fixture vanish from the
+// lobby when Sportsmonk's league_id didn't match our env.
 function keepOnlyIplFixtures<T extends { league_id?: number | null }>(fixtures: T[]): T[] {
   if (IPL_LEAGUE_IDS.length === 0) return fixtures;
-  const allowed = new Set<number>(IPL_LEAGUE_IDS);
-  return fixtures.filter((f) => f.league_id != null && allowed.has(Number(f.league_id)));
+  const allowedLeagues = new Set<number>(IPL_LEAGUE_IDS);
+  return fixtures.filter((f) => {
+    const leagueOk = f.league_id != null && allowedLeagues.has(Number(f.league_id));
+    if (leagueOk) return true;
+    const { t1, t2 } = extractTeamCodes(f);
+    return !!t1 && !!t2 && IPL_TEAM_CODES.has(t1) && IPL_TEAM_CODES.has(t2);
+  });
 }
 
 // ── Team cache ─────────────────────────────────────────────────────
@@ -714,9 +749,11 @@ export async function fetchSportsmonkLiveScores(): Promise<any[]> {
     const url = `${getApiBase()}/livescores?api_token=${getApiToken()}&include=balls,runs,localteam,visitorteam${IPL_LEAGUE_FILTER}`;
     const res = await fetch(url, { headers: SPORTSMONK_HEADERS });
     const data: any = await res.json();
-    const fixtures = keepOnlyIplFixtures(data.data || []);
-    await enrichFixturesWithTeams(fixtures);
-    return fixtures;
+    const raw = data.data || [];
+    // Enrich first so keepOnlyIplFixtures can fall back on team-codes
+    // when Sportsmonk doesn't fill in `localteam.data` on this plan tier.
+    await enrichFixturesWithTeams(raw);
+    return keepOnlyIplFixtures(raw);
   } catch (error) {
     console.error("Sportsmonk livescores error:", error);
     return [];
@@ -767,9 +804,12 @@ export async function fetchTodayFixtures(): Promise<any[]> {
   try {
     const today = istTodayDate();
     const baseUrl = `${getApiBase()}/fixtures?filter[starts_between]=${today},${today}&api_token=${getApiToken()}&include=runs,localteam,visitorteam${IPL_LEAGUE_FILTER}`;
-    const fixtures = keepOnlyIplFixtures(await fetchAllPages(baseUrl));
-    await enrichFixturesWithTeams(fixtures);
-    return fixtures;
+    const raw = await fetchAllPages(baseUrl);
+    // Enrich BEFORE filtering — keepOnlyIplFixtures uses team codes as a
+    // backup signal, and Sportsmonk's `include=localteam,visitorteam`
+    // doesn't always populate the nested `data` object on every plan tier.
+    await enrichFixturesWithTeams(raw);
+    return keepOnlyIplFixtures(raw);
   } catch (error) {
     console.error("Sportsmonk fixtures error:", error);
     return [];
@@ -783,9 +823,10 @@ export async function fetchUpcomingFixtures(): Promise<any[]> {
     const futureDate = istDateAfterDays(30);
     const baseUrl = `${getApiBase()}/fixtures?filter[starts_between]=${today},${futureDate}&api_token=${getApiToken()}&include=localteam,visitorteam,runs${IPL_LEAGUE_FILTER}`;
     console.log(`[Sportsmonk] Fetching upcoming: ${today} to ${futureDate}`);
-    const fixtures = keepOnlyIplFixtures(await fetchAllPages(baseUrl));
-    console.log(`[Sportsmonk] Upcoming fixtures found: ${fixtures.length} (IPL only)`);
-    await enrichFixturesWithTeams(fixtures);
+    const raw = await fetchAllPages(baseUrl);
+    await enrichFixturesWithTeams(raw);
+    const fixtures = keepOnlyIplFixtures(raw);
+    console.log(`[Sportsmonk] Upcoming fixtures found: ${fixtures.length} (IPL only, of ${raw.length} total)`);
     return fixtures;
   } catch (error) {
     console.error("Sportsmonk upcoming fixtures error:", error);
