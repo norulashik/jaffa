@@ -120,6 +120,7 @@ export const api = {
         status: string;
         scoreData: any;
         myStats: { totalPoints: number; correctPredictions: number; totalPredictions: number; bestStreak: number };
+        rooms?: Array<{ id: string; name: string; code: string }>;
       }>;
       page: number;
       pageSize: number;

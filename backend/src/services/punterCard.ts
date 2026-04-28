@@ -1,9 +1,10 @@
 import { Op } from "sequelize";
 import { Server as SocketIOServer } from "socket.io";
-import { Match, Prediction, UserPrediction, MatchParticipant } from "../models";
+import { Match, Prediction, UserPrediction, MatchParticipant, User } from "../models";
 import sequelize from "../config/database";
 import { playerKey } from "./predictionEngine";
 import { ALL_CORRECT_OPTION } from "./pointsEngine";
+import { getYearWeekNumber } from "../utils/weekHelper";
 import {
   squadWithRolesForTeam,
   getPlayerRole,
@@ -1331,6 +1332,27 @@ async function scorePunterUserAnswers(
         updateData.correctPredictions = participant.correctPredictions + 1;
       }
       await participant.update(updateData as any, { transaction: t });
+
+      // Mirror pointsEngine.resolvePrediction: punter_card wins must also
+      // accrue to User.weeklyPoints + lifetimePoints so the bottom-nav
+      // weekly badge and /profile lifetime stats include them. Without
+      // this update, points show on the leaderboard (MatchParticipant)
+      // but silently drop out of the user-scoped totals.
+      if (isCorrect && pointsEarned > 0) {
+        const user = await User.findByPk(ua.userId, { transaction: t, lock: t.LOCK.UPDATE });
+        if (user) {
+          const currentWeek = getYearWeekNumber();
+          const currentWeeklyPoints = user.weekNumber !== currentWeek ? 0 : user.weeklyPoints;
+          await user.update(
+            {
+              weeklyPoints: Math.max(0, currentWeeklyPoints + pointsEarned),
+              weekNumber: currentWeek,
+              lifetimePoints: Math.max(0, (user.lifetimePoints || 0) + pointsEarned),
+            },
+            { transaction: t },
+          );
+        }
+      }
     });
 
     if (isCorrect && pointsEarned > 0) {

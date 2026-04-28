@@ -47,6 +47,10 @@ export default function HomeLiveMatches() {
   // past every upcoming match to reach past battles. Headers expand on tap.
   const [upcomingExpanded, setUpcomingExpanded] = useState(false);
   const [pastExpanded, setPastExpanded] = useState(false);
+  // Per-row expansion for past battles. Keyed by `${matchId}:${venueId}`.
+  // Only meaningful for room-played rows (where `pm.rooms` is populated) —
+  // venue rows never render the room sub-list.
+  const [expandedRooms, setExpandedRooms] = useState<Set<string>>(new Set());
 
   // Match code modal state
   const [codeModal, setCodeModal] = useState<{ match: Match; code: string; error: string; validating: boolean } | null>(null);
@@ -638,44 +642,56 @@ export default function HomeLiveMatches() {
                 const acc = pm.myStats.totalPredictions > 0
                   ? Math.round((pm.myStats.correctPredictions / pm.myStats.totalPredictions) * 100)
                   : 0;
-                return (
-                  <button
-                    key={pm.matchId + ":" + pm.venueId}
-                    onClick={() => {
-                      // Stash match + venue so any subsequent tab nav (MY PICKS,
-                      // RANKS) inside /match scopes to this completed match.
-                      // Guard against undefined/null venueId, which would
-                      // otherwise be saved as the literal string "undefined"
-                      // and poison every downstream check that does `|| ls.get`.
-                      try {
-                        if (pm.matchId) localStorage.setItem("jaffa_match_id", pm.matchId);
-                        if (pm.venueId) localStorage.setItem("jaffa_venue_id", pm.venueId);
-                        else localStorage.removeItem("jaffa_venue_id");
-                      } catch {}
-                      // Hydrate GameContext SYNCHRONOUSLY before navigation
-                      // so the destination /match page (and any tab the user
-                      // taps from there before its own init effect fires)
-                      // sees the past-battle's matchId/venueId immediately.
-                      // Without this, the match page's api.getMatch await
-                      // introduces a 0.5–2s window where state.matchId is
-                      // still null (just cleared by the lobby's CLEAR_MATCH
-                      // on entry) and Ranks / My Picks fall back to an
-                      // empty-state.
-                      if (pm.venueId) {
-                        dispatch({
-                          type: "SET_VENUE",
-                          venueId: pm.venueId,
-                          venueName: pm.venueName || "",
-                        });
-                      }
-                      if (pm.matchId) {
-                        dispatch({ type: "SET_MATCH", matchId: pm.matchId });
-                      }
-                      const qs = pm.venueId ? `?venueId=${pm.venueId}` : "";
-                      router.push(`/match/${pm.matchId}${qs}`);
-                    }}
-                    className="w-full game-card text-left hover:border-[#ff6341] transition-colors"
-                  >
+                const rowKey = pm.matchId + ":" + pm.venueId;
+                // Show the room sub-list only when the server returned rooms
+                // for this row (i.e. the participant's venueId is the
+                // synthetic ROOM_VENUE_ID and the user joined ≥1 room for
+                // this match). Non-room rows behave exactly like before.
+                const hasRooms = !!pm.rooms && pm.rooms.length > 0;
+                const isExpanded = expandedRooms.has(rowKey);
+
+                // Hydrate GameContext + localStorage so the destination
+                // /match page picks up the right (match, venue, room) tuple
+                // synchronously — same pattern as the existing single-tap
+                // flow. roomCtx is `null` for venue plays.
+                const navigateToMatch = (
+                  roomCtx: { id: string; code: string } | null,
+                ) => {
+                  try {
+                    if (pm.matchId) localStorage.setItem("jaffa_match_id", pm.matchId);
+                    if (pm.venueId) localStorage.setItem("jaffa_venue_id", pm.venueId);
+                    else localStorage.removeItem("jaffa_venue_id");
+                    if (roomCtx) {
+                      localStorage.setItem("jaffa_room_id", roomCtx.id);
+                      localStorage.setItem("jaffa_room_code", roomCtx.code);
+                    } else {
+                      localStorage.removeItem("jaffa_room_id");
+                      localStorage.removeItem("jaffa_room_code");
+                    }
+                  } catch {}
+                  if (pm.venueId) {
+                    dispatch({
+                      type: "SET_VENUE",
+                      venueId: pm.venueId,
+                      venueName: pm.venueName || "",
+                    });
+                  }
+                  if (pm.matchId) {
+                    dispatch({ type: "SET_MATCH", matchId: pm.matchId });
+                  }
+                  if (roomCtx) {
+                    dispatch({ type: "SET_ROOM", roomId: roomCtx.id, roomCode: roomCtx.code });
+                  }
+                  const qs = pm.venueId ? `?venueId=${pm.venueId}` : "";
+                  const roomQs = roomCtx ? `${qs ? "&" : "?"}roomId=${roomCtx.id}` : "";
+                  router.push(`/match/${pm.matchId}${qs}${roomQs}`);
+                };
+
+                // Shared body so the venue/no-room <button> path stays
+                // keyboard-accessible (Enter/Space) and the room <div> path
+                // can host nested buttons (HTML forbids button-in-button).
+                const headerBody = (
+                  <>
                     <div className="flex justify-between items-start mb-2">
                       <span
                         className="text-sm font-bold text-white uppercase"
@@ -700,9 +716,73 @@ export default function HomeLiveMatches() {
                       </span>
                       <span>·</span>
                       <span>{acc}%</span>
-                      <span className="ml-auto text-[#6b7280]">›</span>
+                      {hasRooms ? (
+                        <button
+                          type="button"
+                          className="ml-auto flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#ff6341] font-bold"
+                          onClick={() => {
+                            setExpandedRooms((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(rowKey)) next.delete(rowKey);
+                              else next.add(rowKey);
+                              return next;
+                            });
+                          }}
+                        >
+                          {pm.rooms!.length} {pm.rooms!.length === 1 ? "room" : "rooms"}
+                          {isExpanded ? (
+                            <ChevronUp className="w-3 h-3" />
+                          ) : (
+                            <ChevronDown className="w-3 h-3" />
+                          )}
+                        </button>
+                      ) : (
+                        <span className="ml-auto text-[#6b7280]">›</span>
+                      )}
                     </div>
-                  </button>
+                  </>
+                );
+
+                return (
+                  <div key={rowKey} className="space-y-1">
+                    {hasRooms ? (
+                      <div className="w-full game-card text-left">{headerBody}</div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => navigateToMatch(null)}
+                        className="w-full game-card text-left hover:border-[#ff6341] transition-colors"
+                      >
+                        {headerBody}
+                      </button>
+                    )}
+
+                    {hasRooms && isExpanded && (
+                      <div className="pl-3 space-y-1">
+                        {pm.rooms!.map((room) => (
+                          <button
+                            key={room.id}
+                            type="button"
+                            onClick={() => navigateToMatch({ id: room.id, code: room.code })}
+                            className="w-full text-left px-3 py-2 rounded border border-[#333] bg-[#141414] hover:border-[#ff6341] hover:bg-[#1a1a1a] transition-colors flex items-center justify-between"
+                          >
+                            <div className="flex flex-col">
+                              <span
+                                className="text-xs font-bold text-white uppercase"
+                                style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                              >
+                                {room.name}
+                              </span>
+                              <span className="text-[10px] text-[#6b7280] uppercase tracking-wider">
+                                Code {room.code}
+                              </span>
+                            </div>
+                            <span className="text-[#ff6341] text-sm">›</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
               {pastLoading && (

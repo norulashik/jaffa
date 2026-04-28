@@ -1,11 +1,12 @@
 import { Router, Request, Response } from "express";
 import { Op } from "sequelize";
-import { Match, MatchParticipant, Prediction, MatchCode, User, Venue, UserPrediction, PredictionAggregate } from "../models";
+import { Match, MatchParticipant, Prediction, MatchCode, User, Venue, UserPrediction, PredictionAggregate, Room, RoomMember } from "../models";
 import { authenticateUser, AuthRequest } from "../middleware/auth";
 import { fetchUpcomingFixtures, fetchSportsmonkLiveScores, fetchTeamData } from "../services/sportsmonkApi";
 import { generatePreMatchPredictions, getCurrentRound } from "../services/predictionEngine";
 import { buildStory } from "../services/storyBuilder";
 import { parsePagination, paginationMeta } from "../utils/pagination";
+import { ROOM_VENUE_ID } from "../services/roomVenue";
 
 const router = Router();
 
@@ -280,6 +281,36 @@ router.get("/my-past", authenticateUser, async (req: AuthRequest, res: Response)
       distinct: true,
     });
 
+    // For room-played matches (synthetic ROOM_VENUE_ID), every room the user
+    // joined for that match shares one MatchParticipant row. Surface the list
+    // of rooms so the lobby can expand the past-battle row into per-room
+    // navigation. Keyed by matchId — there can be 2+ rooms for the same match.
+    const roomMatchIds = rows
+      .filter((r: any) => r.venueId === ROOM_VENUE_ID)
+      .map((r: any) => r.matchId);
+    const roomsByMatchId = new Map<string, Array<{ id: string; name: string; code: string }>>();
+    if (roomMatchIds.length > 0) {
+      const memberships = await RoomMember.findAll({
+        where: { userId },
+        include: [
+          {
+            model: Room,
+            as: "room",
+            required: true,
+            where: { matchId: { [Op.in]: roomMatchIds } },
+            attributes: ["id", "name", "code", "matchId"],
+          },
+        ],
+      });
+      for (const m of memberships as any[]) {
+        const room = m.room;
+        if (!room) continue;
+        const list = roomsByMatchId.get(room.matchId) || [];
+        list.push({ id: room.id, name: room.name, code: room.code });
+        roomsByMatchId.set(room.matchId, list);
+      }
+    }
+
     const matches = rows.map((r: any) => ({
       matchId: r.matchId,
       venueId: r.venueId,
@@ -300,6 +331,9 @@ router.get("/my-past", authenticateUser, async (req: AuthRequest, res: Response)
         totalPredictions: r.totalPredictions || 0,
         bestStreak: r.bestStreak || 0,
       },
+      rooms: r.venueId === ROOM_VENUE_ID
+        ? (roomsByMatchId.get(r.matchId) || [])
+        : undefined,
     }));
 
     res.json({ matches, ...paginationMeta(p, count) });
