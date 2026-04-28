@@ -7,12 +7,14 @@ import { IoFlame, IoRocket, IoTrophy } from "react-icons/io5";
 import { GiCrownCoin } from "react-icons/gi";
 import CricketAvatar from "@/components/CricketAvatar";
 import { AvatarConfig } from "@/types/avatar";
+import { ensureV2 } from "@/lib/avatarMigrate";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 const SOCKET_URL = process.env.NEXT_PUBLIC_SOCKET_URL || (typeof window !== "undefined" ? window.location.origin : "");
 
 interface TVLeaderboardEntry {
   rank: number;
+  userId: string;
   displayName: string;
   points: number;
   totalPoints: number;
@@ -406,10 +408,12 @@ function TVLeaderboard({
             {entry.rank}
           </span>
 
-          {/* Avatar */}
-          {entry.avatarConfig && (
+          {/* Avatar — ensureV2 migrates legacy v1 configs on the fly so the
+              chibi renderer always gets a valid v2 shape. The TV display is
+              read-only — no PUT-back here, that happens on /profile load. */}
+          {entry.avatarConfig && entry.userId && (
             <CricketAvatar
-              config={entry.avatarConfig}
+              config={ensureV2(entry.avatarConfig, entry.userId)}
               size="md"
               mood={index === 0 ? "excited" : "idle"}
             />

@@ -10,6 +10,7 @@ import AvatarCustomizer from "@/components/AvatarCustomizer";
 import { Settings, HelpCircle, LogOut, ChevronRight, User, MapPin, Trophy, Ticket } from "lucide-react";
 import { api } from "@/lib/api";
 import { AvatarConfig } from "@/types/avatar";
+import { ensureV2, isV2 } from "@/lib/avatarMigrate";
 import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 import { GiCrownCoin } from "react-icons/gi";
 import { toast } from "sonner";
@@ -39,8 +40,20 @@ export default function ProfilePage() {
       try {
         const parsed = JSON.parse(userData);
         setUser(parsed);
-        if (parsed.avatarConfig) {
-          setAvatarConfig(parsed.avatarConfig);
+        // Lazy v1 → v2 migration. If the stored config is already v2, ensureV2
+        // returns the same reference (so we skip the network round-trip).
+        // Otherwise it builds a fresh v2 config preserving skinTone +
+        // expression and persists it back so subsequent reads are clean.
+        if (parsed.avatarConfig && parsed.id) {
+          const migrated = ensureV2(parsed.avatarConfig, parsed.id);
+          setAvatarConfig(migrated);
+          if (!isV2(parsed.avatarConfig)) {
+            parsed.avatarConfig = migrated;
+            localStorage.setItem("jaffa_user", JSON.stringify(parsed));
+            api.updateAvatar(migrated).catch(() => {
+              // Non-fatal: next /profile visit will retry. UI already shows v2.
+            });
+          }
         }
       } catch {}
     }
@@ -272,17 +285,7 @@ export default function ProfilePage() {
       {/* Avatar Customizer */}
       {showCustomizer && (
         <AvatarCustomizer
-          initialConfig={avatarConfig || {
-            skinTone: "#F5C5A3",
-            jerseyColor: "#00FFAB",
-            helmetColor: "#1e3a5f",
-            helmetStyle: 0,
-            accessory: 0,
-            expression: 0,
-            bodyType: 0,
-            jerseyPattern: 0,
-            batStyle: 0,
-          }}
+          initialConfig={avatarConfig || ensureV2(null, user?.id || "anon")}
           onSave={handleSaveAvatar}
           onClose={() => setShowCustomizer(false)}
         />
