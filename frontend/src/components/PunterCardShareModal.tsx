@@ -28,6 +28,10 @@ interface Props {
   imageDataUrl: string | null;
   imageBlob: Blob | null;
   shareText: string;
+  // Per-match filename for the Save download + the File passed to
+  // navigator.share. Lets two cards from different matches coexist in the
+  // Downloads folder without browser-appended " (1)" suffixes.
+  filename?: string;
 }
 
 export default function PunterCardShareModal({
@@ -36,7 +40,9 @@ export default function PunterCardShareModal({
   imageDataUrl,
   imageBlob,
   shareText,
+  filename,
 }: Props) {
+  const downloadName = filename || "punter-card.jpg";
   // Lock body scroll while open so the dim layer feels modal-correct.
   useEffect(() => {
     if (!open) return;
@@ -56,12 +62,12 @@ export default function PunterCardShareModal({
     const navAny = navigator as any;
     if (typeof navAny.canShare !== "function") return false;
     try {
-      const file = new File([imageBlob], "punter-card.jpg", { type: "image/jpeg" });
+      const file = new File([imageBlob], downloadName, { type: "image/jpeg" });
       return !!navAny.canShare({ files: [file] });
     } catch {
       return false;
     }
-  }, [imageBlob]);
+  }, [imageBlob, downloadName]);
 
   if (!open) return null;
 
@@ -69,7 +75,7 @@ export default function PunterCardShareModal({
     if (!imageDataUrl) return;
     const a = document.createElement("a");
     a.href = imageDataUrl;
-    a.download = "punter-card.jpg";
+    a.download = downloadName;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -79,7 +85,7 @@ export default function PunterCardShareModal({
   const handleShare = async () => {
     if (!imageBlob) return;
     try {
-      const file = new File([imageBlob], "punter-card.jpg", { type: "image/jpeg" });
+      const file = new File([imageBlob], downloadName, { type: "image/jpeg" });
       await (navigator as any).share({ files: [file], text: shareText });
     } catch {
       // User cancelled — silent.

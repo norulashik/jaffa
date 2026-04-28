@@ -562,6 +562,7 @@ export default function PunterCardPage() {
         imageDataUrl={shareDataUrl}
         imageBlob={shareBlob}
         shareText={`My ${t1} vs ${t2} Punter Card · playjaffa.com 🏏`}
+        filename={t1 && t2 ? `${t1} vs ${t2}-punter-card.jpg` : "punter-card.jpg"}
       />
     </main>
   );
@@ -657,18 +658,18 @@ const ShareCard = forwardRef<HTMLDivElement, {
           the logo is centered horizontally), and a `data-jaffa-logo-slot`
           attribute lets the composite pass find this exact box at runtime
           to position the logo over the right pixels. */}
-      <div style={{ position: "relative", marginBottom: 20, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 340 }}>
+      <div style={{ position: "relative", marginBottom: 20, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 480 }}>
         <div
           data-jaffa-logo-slot
           aria-label="JAFFA"
           role="img"
           style={{
-            height: 380,
+            height: 520,
             // Aspect ratio matches the source PNG (1280x720 ≈ 16:9).
             // Pinning a width keeps the layout stable in the off-screen
             // measurement pass — the composite step uses this box's
             // bounding rect as the destination rectangle for drawImage.
-            width: 676,
+            width: 924,
           }}
         />
       </div>
