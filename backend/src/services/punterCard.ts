@@ -5,6 +5,7 @@ import sequelize from "../config/database";
 import { playerKey } from "./predictionEngine";
 import { ALL_CORRECT_OPTION } from "./pointsEngine";
 import { getYearWeekNumber } from "../utils/weekHelper";
+import { resolveBallName, isInLineup } from "./playerNameMatch";
 import {
   squadWithRolesForTeam,
   getPlayerRole,
@@ -103,9 +104,10 @@ async function resolveTeamPool(
     return enrichWithRoles(matchXI);
   }
 
-  // 2. Hardcoded latest XI from the PDF data. Already role-tagged.
+  // 2. Hardcoded latest XI from the PDF data, merged with any SquadOverride
+  // rows written by post-match squad sync. Already role-tagged.
   if (short) {
-    const known = squadWithRolesForTeam(short);
+    const known = await squadWithRolesForTeam(short);
     if (known && known.length >= 6) return known;
   }
 
@@ -755,36 +757,54 @@ export function computeCorrectFromBalls(
       // Two player options + a "Tie" sentinel. If either named player isn't
       // in today's actual XI (announced at toss → match.team1Players /
       // team2Players), VOID the question — the head-to-head premise is
-      // broken. If they're both in the XI but one didn't face a ball (e.g.
-      // chasing side won before they came in), treat their total as 0 and
-      // resolve normally — they "scored less" by virtue of not batting.
+      // broken.
+      //
+      // Name resolution is fuzzy (see playerNameMatch.ts) because squad-
+      // side spellings like "Prabhsimran Singh" don't always exact-match
+      // Sportsmonk's "Prabh Simran Singh". A previous bug here returned
+      // ALL_CORRECT ("Tie") whenever the lookup silently fell back to 0
+      // for both players, even when one clearly outscored the other.
       const players = pred.options.filter((o) => o.key !== ALL_CORRECT_OPTION);
       if (players.length !== 2) return null;
       const p1 = players[0], p2 = players[1];
-      const lineup = lineupNamesLower(match);
-      if (lineup) {
-        const inXI1 = lineup.has(p1.label.toLowerCase().trim());
-        const inXI2 = lineup.has(p2.label.toLowerCase().trim());
-        if (!inXI1 || !inXI2) return VOID_OPTION;
+      const lineup = match?.team1Players || match?.team2Players
+        ? [...(match?.team1Players || []), ...(match?.team2Players || [])]
+        : null;
+      if (lineup && lineup.length > 0) {
+        if (!isInLineup(p1.label, lineup) || !isInLineup(p2.label, lineup)) {
+          return VOID_OPTION;
+        }
       }
-      const r1 = runsByBatterName(allBalls, p1.label) ?? 0;
-      const r2 = runsByBatterName(allBalls, p2.label) ?? 0;
+      const r1 = runsByBatterName(allBalls, p1.label);
+      const r2 = runsByBatterName(allBalls, p2.label);
+      // Asymmetric or total absence → VOID rather than fabricating a tie.
+      if (r1 == null && r2 == null) return VOID_OPTION;
+      if (r1 == null || r2 == null) return VOID_OPTION;
       if (r1 < r2) return p1.key;
       if (r2 < r1) return p2.key;
       return ALL_CORRECT_OPTION;
     }
     case "punter_wk_better_sr": {
       // Higher strike rate wins. SR = runs / legal balls faced * 100.
-      // A WK who never batted (e.g. team won the chase before they came in)
-      // gets SR = 0. If BOTH never batted → "Neither bats" (ALL_CORRECT).
+      // Promote the same XI void check + fuzzy lookup pattern as
+      // star_batter_lower above. Previously, a name mismatch produced
+      // null+null → "Neither bats" — the exact bug that surfaced in the
+      // PBKS-vs-RR match (Prabhsimran "Neither bats" despite scoring 59).
       const players = pred.options.filter((o) => o.key !== ALL_CORRECT_OPTION);
       if (players.length !== 2) return null;
       const p1 = players[0], p2 = players[1];
+      const lineup = match?.team1Players || match?.team2Players
+        ? [...(match?.team1Players || []), ...(match?.team2Players || [])]
+        : null;
+      if (lineup && lineup.length > 0) {
+        if (!isInLineup(p1.label, lineup) || !isInLineup(p2.label, lineup)) {
+          return VOID_OPTION;
+        }
+      }
       const sr1 = strikeRateForBatter(allBalls, p1.label);
       const sr2 = strikeRateForBatter(allBalls, p2.label);
-      if (sr1 == null && sr2 == null) return ALL_CORRECT_OPTION;
-      if (sr1 == null) return p2.key;
-      if (sr2 == null) return p1.key;
+      if (sr1 == null && sr2 == null) return VOID_OPTION;
+      if (sr1 == null || sr2 == null) return VOID_OPTION;
       if (sr1 > sr2) return p1.key;
       if (sr2 > sr1) return p2.key;
       return ALL_CORRECT_OPTION;
@@ -813,15 +833,25 @@ export function computeCorrectFromBalls(
     }
     case "punter_allrounder_impact": {
       // Impact index = batting runs + wickets taken (excl run-outs) +
-      // catches taken. Per product spec: missing data for any of the three
-      // counts as 0, so impactIndexForPlayer returning null (player never
-      // appeared on a ball) collapses to 0. Tie if both end up at the same
-      // total — including the both-zero case where neither player featured.
+      // catches taken. Same XI-void + fuzzy-resolve treatment as the other
+      // head-to-heads. If a player simply didn't bat / bowl / field a
+      // dismissal, impactIndexForPlayer returns null — that's a real "no
+      // data" signal, not a 0, so VOID rather than fake-comparing zeros.
       const players = pred.options.filter((o) => o.key !== ALL_CORRECT_OPTION);
       if (players.length !== 2) return null;
       const p1 = players[0], p2 = players[1];
-      const v1 = impactIndexForPlayer(allBalls, p1.label) ?? 0;
-      const v2 = impactIndexForPlayer(allBalls, p2.label) ?? 0;
+      const lineup = match?.team1Players || match?.team2Players
+        ? [...(match?.team1Players || []), ...(match?.team2Players || [])]
+        : null;
+      if (lineup && lineup.length > 0) {
+        if (!isInLineup(p1.label, lineup) || !isInLineup(p2.label, lineup)) {
+          return VOID_OPTION;
+        }
+      }
+      const v1 = impactIndexForPlayer(allBalls, p1.label);
+      const v2 = impactIndexForPlayer(allBalls, p2.label);
+      if (v1 == null && v2 == null) return VOID_OPTION;
+      if (v1 == null || v2 == null) return VOID_OPTION;
       if (v1 > v2) return p1.key;
       if (v2 > v1) return p2.key;
       return ALL_CORRECT_OPTION;
@@ -897,11 +927,16 @@ export function computeCorrectFromBalls(
 
 // ==== v2 helpers — single-player + per-team computations =====================
 
-// Total batting runs across BOTH innings for a named batter (case-insensitive
-// match on Sportsmonk's `batsman.fullname`). Returns null if the player never
-// faced a ball — distinguishes "we don't know" from "scored 0".
+// Total batting runs across BOTH innings for a named batter. Resolves the
+// squad-side `name` to the actual fullname Sportsmonk uses on this match's
+// balls (via the alias + fuzzy matcher in playerNameMatch.ts) before doing
+// the per-ball comparison — so a "Prabhsimran Singh" squad name lands on a
+// "Prabh Simran Singh" ball entry. Returns null if the player never faced a
+// ball — distinguishes "we don't know" from "scored 0".
 function runsByBatterName(allBalls: any[], name: string): number | null {
-  const target = name.toLowerCase().trim();
+  const resolved = resolveBallName(name, allBalls, "batsman");
+  if (!resolved) return null;
+  const target = resolved.toLowerCase().trim();
   let total = 0;
   let appeared = false;
   for (const b of allBalls) {
@@ -926,10 +961,13 @@ function runsForBatterNames(allBalls: any[], names: string[]): number {
   return total;
 }
 
-// Strike rate for a single batter across both innings.
+// Strike rate for a single batter across both innings. Resolves squad-side
+// names to the actual Sportsmonk fullname before comparing per-ball.
 // Returns null if they never faced a legal ball.
 function strikeRateForBatter(allBalls: any[], name: string): number | null {
-  const target = name.toLowerCase().trim();
+  const resolved = resolveBallName(name, allBalls, "batsman");
+  if (!resolved) return null;
+  const target = resolved.toLowerCase().trim();
   let runs = 0;
   let legalBalls = 0;
   for (const b of allBalls) {
@@ -964,9 +1002,14 @@ function boundariesByBatterNames(allBalls: any[], names: string[]): number {
 }
 
 // Impact index = total batting runs + wickets taken (excl. run-outs) +
-// catches taken. Returns null only if the player never appeared on any ball.
+// catches taken. Resolves the squad-side name against the union of
+// batsman + bowler fullnames seen in the match (an all-rounder by
+// definition could appear in either pool). Returns null only if the
+// player never appeared on any ball.
 function impactIndexForPlayer(allBalls: any[], name: string): number | null {
-  const target = name.toLowerCase().trim();
+  const resolved = resolveBallName(name, allBalls, "any");
+  if (!resolved) return null;
+  const target = resolved.toLowerCase().trim();
   let runs = 0, wickets = 0, catches = 0;
   let appeared = false;
   for (const b of allBalls) {
@@ -1042,7 +1085,7 @@ function firstSixOrWicketEvent(allBalls: any[]): "six" | "wicket" | null {
 // Detect which scoreboard (S1 / S2) a team batted in by counting how often
 // their squad members appear as batsmen on each scoreboard. Robust against
 // a stray substitute: the team's actual batting innings will dominate.
-function scoreboardForTeam(allBalls: any[], teamPlayers: Player[]): "S1" | "S2" | null {
+export function scoreboardForTeam(allBalls: any[], teamPlayers: Player[]): "S1" | "S2" | null {
   if (!teamPlayers?.length) return null;
   const names = new Set(teamPlayers.map((p) => p.name.toLowerCase().trim()));
   let s1 = 0, s2 = 0;

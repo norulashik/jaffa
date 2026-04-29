@@ -1,0 +1,93 @@
+import { DataTypes, Model, Optional } from "sequelize";
+import sequelize from "../config/database";
+
+export type SquadRole = "bat" | "wk" | "all" | "bowl";
+export type SquadSource = "match" | "manual";
+
+interface SquadOverrideAttributes {
+  id: string;
+  team: string;            // uppercased team short ("CSK", "MI", ...)
+  playerName: string;      // canonical name as written by Sportsmonk
+  role: SquadRole;
+  source: SquadSource;     // "match" = auto-synced; "manual" = admin override
+  addedFromMatchId: string | null;
+  lastSeenAt: Date;        // bumped each time the player features in a match
+  removedAt: Date | null;  // soft-delete: null = active
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+interface SquadOverrideCreationAttributes
+  extends Optional<SquadOverrideAttributes, "id" | "addedFromMatchId" | "lastSeenAt" | "removedAt" | "source"> {}
+
+class SquadOverride
+  extends Model<SquadOverrideAttributes, SquadOverrideCreationAttributes>
+  implements SquadOverrideAttributes
+{
+  public id!: string;
+  public team!: string;
+  public playerName!: string;
+  public role!: SquadRole;
+  public source!: SquadSource;
+  public addedFromMatchId!: string | null;
+  public lastSeenAt!: Date;
+  public removedAt!: Date | null;
+  public readonly createdAt!: Date;
+  public readonly updatedAt!: Date;
+}
+
+SquadOverride.init(
+  {
+    id: {
+      type: DataTypes.UUID,
+      defaultValue: DataTypes.UUIDV4,
+      primaryKey: true,
+    },
+    team: {
+      type: DataTypes.STRING(8),
+      allowNull: false,
+    },
+    playerName: {
+      type: DataTypes.STRING(80),
+      allowNull: false,
+    },
+    role: {
+      type: DataTypes.STRING(8),
+      allowNull: false,
+    },
+    source: {
+      type: DataTypes.STRING(8),
+      allowNull: false,
+      defaultValue: "match",
+    },
+    addedFromMatchId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+    lastSeenAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW,
+    },
+    removedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+  },
+  {
+    sequelize,
+    tableName: "squad_overrides",
+    timestamps: true,
+    indexes: [
+      // (team, lower(playerName)) is the natural key — re-syncing the same
+      // player from a later match should UPDATE, not duplicate. We can't
+      // express the lower() in a Sequelize index portably, so the
+      // squadSync.ts service does case-insensitive lookup before insert.
+      { fields: ["team"] },
+      { fields: ["team", "playerName"] },
+      { fields: ["lastSeenAt"] },
+    ],
+  }
+);
+
+export default SquadOverride;

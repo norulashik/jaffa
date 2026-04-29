@@ -1151,6 +1151,20 @@ async function finalizeMatch(
     console.error("[PunterCard] resolve error:", err);
   }
 
+  // Reconcile the static squad against the actual playing XI (incl. impact
+  // sub) so the next match's punter card generator pulls from the freshest
+  // player set. Errors are logged but don't block match-end — the squad
+  // sync is best-effort, the static squad still works as a fallback.
+  try {
+    const { syncSquadFromMatch } = await import("./squadSync");
+    const sync = await syncSquadFromMatch(match, fullFixture || fixture, allBalls);
+    if (sync.added.length > 0 || sync.updated > 0) {
+      console.log(`[SquadSync] match=${match.id} added=${sync.added.length}${sync.added.length ? ` (${sync.added.join(", ")})` : ""} updated=${sync.updated}`);
+    }
+  } catch (err) {
+    console.error("[SquadSync] error:", err);
+  }
+
   // Generate final-round + grand-prize rewards per venue.
   const venues = await MatchParticipant.findAll({
     where: { matchId: match.id },

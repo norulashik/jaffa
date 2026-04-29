@@ -12,6 +12,7 @@ import Room from "./Room";
 import RoomMember from "./RoomMember";
 import WeeklyRedemption from "./WeeklyRedemption";
 import PredictionAggregate from "./PredictionAggregate";
+import SquadOverride from "./SquadOverride";
 
 // Associations
 
@@ -87,4 +88,5 @@ export {
   RoomMember,
   WeeklyRedemption,
   PredictionAggregate,
+  SquadOverride,
 };

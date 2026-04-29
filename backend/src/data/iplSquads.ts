@@ -215,10 +215,62 @@ export function squadForTeam(short: string | null | undefined): string[] | null 
   return sq ? sq.map((p) => p.name) : null;
 }
 
-// Role-aware: full Player[] list for a team.
-export function squadWithRolesForTeam(short: string | null | undefined): Player[] | null {
+// Role-aware: full Player[] list for a team. Merges the static seed list
+// with any SquadOverride rows written by the post-match squad sync — so the
+// next match's punter card generator pulls from the freshest player set,
+// not just whatever was hand-curated at season start.
+//
+// Merge rules:
+//   - Players in the static squad are always included (with their static role).
+//   - Override rows whose name matches a static player update the role only
+//     when the override role is "stronger" (bat → all → bowl never downgrades
+//     a wk; we keep wk explicit).
+//   - Override rows whose name doesn't appear in the static squad are
+//     appended as new players.
+export async function squadWithRolesForTeam(short: string | null | undefined): Promise<Player[] | null> {
   if (!short) return null;
-  return IPL_SQUADS_2026[short.toUpperCase()] || null;
+  const team = short.toUpperCase();
+  const base = IPL_SQUADS_2026[team];
+  if (!base) return null;
+
+  // Lazy-load the model to avoid a circular import (models/index.ts
+  // imports utility code, and this file might be reached during model init
+  // in pathological test setups).
+  let overrides: Array<{ playerName: string; role: PlayerRole }> = [];
+  try {
+    const { SquadOverride } = await import("../models");
+    const rows = await SquadOverride.findAll({
+      where: { team, removedAt: null },
+      attributes: ["playerName", "role"],
+    });
+    overrides = rows.map((r) => ({ playerName: r.playerName, role: r.role as PlayerRole }));
+  } catch {
+    // Table may not exist yet on a fresh deploy before sequelize.sync
+    // creates it. Fall back to static-only — same behaviour as v1.
+    return base;
+  }
+
+  const merged: Player[] = base.map((p) => ({ ...p }));
+  const baseLowerToIdx = new Map<string, number>();
+  base.forEach((p, i) => baseLowerToIdx.set(p.name.toLowerCase(), i));
+
+  for (const o of overrides) {
+    const lower = o.playerName.toLowerCase();
+    const idx = baseLowerToIdx.get(lower);
+    if (idx != null) {
+      // Player already in the static squad. Promote the role only when the
+      // override is more specific than `bat` (the inferRole default for an
+      // unknown player) — we don't want to downgrade a wk → bat just
+      // because the auto-sync defaulted them.
+      const current = merged[idx].role;
+      if (current === "bat" && (o.role === "bowl" || o.role === "all" || o.role === "wk")) {
+        merged[idx] = { name: merged[idx].name, role: o.role };
+      }
+    } else {
+      merged.push({ name: o.playerName, role: o.role });
+    }
+  }
+  return merged;
 }
 
 // Global name → role lookup (search across every squad). Used to enrich
