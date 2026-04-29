@@ -98,6 +98,22 @@ export default function PunterCardPage() {
 
   const canLock = pendingSelections.length > 0 && !!venueId;
 
+  // Once the match is completed the share card swaps from pre-match
+  // ("picks", showing max-potential per question) to post-match
+  // ("results", showing actual points awarded with ✓/✗ + the correct
+  // answer when wrong). Drives the off-screen ShareCard mode prop, the
+  // Share button label, the filename, and the shareText below.
+  const shareMode: ShareCardMode = match?.status === "completed" ? "results" : "picks";
+
+  // Total points actually scored across all resolved punter card answers.
+  // Used in the post-match shareText so the Instagram caption reads
+  // "My LSG vs KKR Punter Card · 165 pts · playjaffa.com 🏏" instead of
+  // the generic pre-match copy.
+  const finalScored = useMemo(() => {
+    if (shareMode !== "results") return 0;
+    return questions.reduce((s, q) => s + (q.userAnswer?.pointsEarned || 0), 0);
+  }, [questions, shareMode]);
+
   const handleSelect = (qid: string, optKey: string) => {
     setSelections((s) => ({ ...s, [qid]: optKey }));
   };
@@ -338,7 +354,7 @@ export default function PunterCardPage() {
               {t1} <span className="opacity-40 mx-1">VS</span> {t2}
             </p>
           </div>
-          {allAnswered && (
+          {(allAnswered || shareMode === "results") && (
             <div className="flex items-center gap-2">
               <button
                 onClick={handleCopyLink}
@@ -352,10 +368,12 @@ export default function PunterCardPage() {
                 onClick={handleShare}
                 disabled={sharing}
                 className="p-2 sm:px-3 sm:py-2 rounded-xl bg-orange-500 hover:bg-orange-400 text-black text-xs font-bold flex items-center gap-1.5 transition disabled:opacity-60"
-                title="Share card image"
+                title={shareMode === "results" ? "Share final result image" : "Share card image"}
               >
                 <Share2 className="w-4 h-4" />
-                <span className="hidden sm:inline uppercase tracking-wider">Share</span>
+                <span className="hidden sm:inline uppercase tracking-wider">
+                  {shareMode === "results" ? "Share Results" : "Share"}
+                </span>
               </button>
             </div>
           )}
@@ -553,7 +571,7 @@ export default function PunterCardPage() {
           Instagram Story / 9:16 portrait size — also fits Snapchat,
           WhatsApp Status, and TikTok story crops without letterboxing. */}
       <div style={{ position: "fixed", left: -10000, top: 0, pointerEvents: "none" }} aria-hidden>
-        <ShareCard ref={shareRef} match={match} questions={questions} selections={selections} />
+        <ShareCard ref={shareRef} match={match} questions={questions} selections={selections} mode={shareMode} />
       </div>
 
       <PunterCardShareModal
@@ -561,8 +579,16 @@ export default function PunterCardPage() {
         onClose={() => setShowShareModal(false)}
         imageDataUrl={shareDataUrl}
         imageBlob={shareBlob}
-        shareText={`My ${t1} vs ${t2} Punter Card · playjaffa.com 🏏`}
-        filename={t1 && t2 ? `${t1} vs ${t2}-punter-card.jpg` : "punter-card.jpg"}
+        shareText={
+          shareMode === "results"
+            ? `My ${t1} vs ${t2} Punter Card · ${finalScored} pts · playjaffa.com 🏏`
+            : `My ${t1} vs ${t2} Punter Card · playjaffa.com 🏏`
+        }
+        filename={
+          t1 && t2
+            ? `${t1} vs ${t2}-punter-card${shareMode === "results" ? "-results" : ""}.jpg`
+            : `punter-card${shareMode === "results" ? "-results" : ""}.jpg`
+        }
       />
     </main>
   );
@@ -570,14 +596,33 @@ export default function PunterCardPage() {
 
 // ---- Share card (rendered off-screen, rasterized to PNG on Share) ----
 
+// Sentinels mirroring backend constants in services/pointsEngine.ts
+// (ALL_CORRECT_OPTION) and services/punterCard.ts (VOID_OPTION). Kept in
+// sync via grep — these literal strings should change here only if they
+// change there.
+const ALL_CORRECT_OPTION = "__all__";
+const VOID_OPTION = "__void__";
+
+type ShareCardMode = "picks" | "results";
+
+// Per-question render state used by the post-match results mode. Derived
+// from userAnswer.isCorrect + question.correctOption + question.status.
+type ResultState =
+  | { kind: "correct"; points: number }
+  | { kind: "wrong"; correctLabels: string[] }
+  | { kind: "pending" }
+  | { kind: "voided" };
+
 const ShareCard = forwardRef<HTMLDivElement, {
   match: any;
   questions: Question[];
   selections: Record<string, string>;
-}>(function ShareCard({ match, questions, selections }, ref) {
+  mode: ShareCardMode;
+}>(function ShareCard({ match, questions, selections, mode }, ref) {
   const t1 = match?.team1Short || match?.team1 || "T1";
   const t2 = match?.team2Short || match?.team2 || "T2";
   const startLabel = match?.startTime ? new Date(match.startTime).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "";
+  const isResults = mode === "results";
 
   // Per-match palette: same teamColors map the in-app page uses, so the
   // shared image and the in-app view stay visually consistent for any
@@ -593,11 +638,66 @@ const ShareCard = forwardRef<HTMLDivElement, {
       if (!key) return null;
       const opt = q.options.find((o) => o.key === key);
       if (!opt) return null;
-      return { question: q.question, pick: opt.label, points: opt.points };
-    })
-    .filter(Boolean) as { question: string; pick: string; points: number }[];
 
-  const totalPts = picks.reduce((s, p) => s + p.points, 0);
+      // Build the post-match result state once per row so the JSX below
+      // stays linear. The voided check covers both an explicit "voided"
+      // status (set by resolvePunterCard for VOID_OPTION returns) and
+      // any stray case where correctOption was stored as the sentinel.
+      let result: ResultState | null = null;
+      if (isResults) {
+        const isVoided = q.status === "voided" || q.correctOption === VOID_OPTION;
+        if (isVoided) {
+          result = { kind: "voided" };
+        } else if (q.userAnswer?.isCorrect === true) {
+          result = { kind: "correct", points: q.userAnswer.pointsEarned ?? 0 };
+        } else if (q.userAnswer?.isCorrect === false) {
+          // correctOption may be a comma-joined list of keys when multiple
+          // tied (top batter ties). Look each one up in this question's
+          // options array; ALL_CORRECT_OPTION resolves to the labelled
+          // sentinel ("Tie", "Neither bats", etc.) which is already in the
+          // options list at generation time.
+          const correctKeys = (q.correctOption || "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+          const correctLabels = correctKeys
+            .map((k) => q.options.find((o) => o.key === k)?.label)
+            .filter(Boolean) as string[];
+          result = { kind: "wrong", correctLabels };
+        } else {
+          result = { kind: "pending" };
+        }
+      }
+
+      return {
+        question: q.question,
+        pick: opt.label,
+        maxPoints: opt.points,
+        result,
+      };
+    })
+    .filter(Boolean) as Array<{
+      question: string;
+      pick: string;
+      maxPoints: number;
+      result: ResultState | null;
+    }>;
+
+  // Footer total flips between "max if everything hit" (picks mode) and
+  // "actual points awarded" (results mode). Pending / voided rows
+  // contribute 0 to the results total.
+  const totalPts = isResults
+    ? picks.reduce((s, p) => s + (p.result?.kind === "correct" ? p.result.points : 0), 0)
+    : picks.reduce((s, p) => s + p.maxPoints, 0);
+
+  // Tally row shown only in results mode — small chip at the top of the
+  // glass card so people skimming the image see the headline number first.
+  const correctCount = isResults
+    ? picks.filter((p) => p.result?.kind === "correct").length
+    : 0;
+  const resolvedCount = isResults
+    ? picks.filter((p) => p.result && p.result.kind !== "pending").length
+    : 0;
 
   return (
     <div
@@ -697,7 +797,7 @@ const ShareCard = forwardRef<HTMLDivElement, {
             regardless of the team's brand colour. */}
         <div>
           <div style={{ fontSize: 24, opacity: 0.7, letterSpacing: 4, fontFamily: "'Bungee', 'Impact', cursive" }}>
-            PUNTER CARD
+            {isResults ? "PUNTER CARD · FINAL" : "PUNTER CARD"}
           </div>
           <div
             style={{
@@ -767,41 +867,130 @@ const ShareCard = forwardRef<HTMLDivElement, {
           </div>
         </div>
 
+        {/* Results-mode summary chip — small "X/Y RIGHT" tally above the
+            picks list so the headline number is the first thing the eye
+            lands on after the team header. Hidden in picks mode. */}
+        {isResults && resolvedCount > 0 && (
+          <div
+            style={{
+              alignSelf: "flex-start",
+              padding: "6px 14px",
+              borderRadius: 999,
+              background: "rgba(255,255,255,0.10)",
+              border: "1px solid rgba(255,255,255,0.22)",
+              fontSize: 18,
+              letterSpacing: 1.5,
+              fontFamily: "'Bungee', 'Impact', cursive",
+              color: "#7be4ff",
+            }}
+          >
+            {correctCount} / {resolvedCount} RIGHT
+          </div>
+        )}
+
         {/* Picks list */}
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {picks.map((p, i) => (
-            <div
-              key={i}
-              style={{
-                background: "rgba(255,255,255,0.05)",
-                border: "1px solid rgba(255,255,255,0.12)",
-                borderRadius: 14,
-                padding: "12px 20px",
-                display: "flex",
-                alignItems: "center",
-                gap: 18,
-              }}
-            >
-              <div style={{ flex: 1, fontFamily: "system-ui, -apple-system, sans-serif" }}>
-                <div style={{ fontSize: 14, opacity: 0.6, marginBottom: 2, fontWeight: 500 }}>{p.question}</div>
-                <div style={{ fontSize: 22, fontWeight: 700 }}>{p.pick}</div>
-              </div>
+          {picks.map((p, i) => {
+            // Pill colour + content branches by mode + result state.
+            // Picks mode: cyan {maxPoints} PTS (potential).
+            // Results mode:
+            //   correct → green +{points} PTS
+            //   wrong   → red MISSED  (correct answer rendered inline below pick)
+            //   pending → grey PENDING
+            //   voided  → grey VOIDED
+            let pillBg = "rgba(123,228,255,0.14)";
+            let pillFg = "#7be4ff";
+            let pillGlow = "0 0 12px rgba(123,228,255,0.6)";
+            let pillText = `${p.maxPoints} PTS`;
+
+            if (isResults && p.result) {
+              if (p.result.kind === "correct") {
+                pillBg = "rgba(74,222,128,0.18)";
+                pillFg = "#4ade80";
+                pillGlow = "0 0 12px rgba(74,222,128,0.6)";
+                pillText = `+${p.result.points} PTS`;
+              } else if (p.result.kind === "wrong") {
+                pillBg = "rgba(248,113,113,0.18)";
+                pillFg = "#f87171";
+                pillGlow = "0 0 12px rgba(248,113,113,0.55)";
+                pillText = "MISSED";
+              } else if (p.result.kind === "pending") {
+                pillBg = "rgba(255,255,255,0.08)";
+                pillFg = "rgba(255,255,255,0.55)";
+                pillGlow = "none";
+                pillText = "PENDING";
+              } else {
+                pillBg = "rgba(255,255,255,0.08)";
+                pillFg = "rgba(255,255,255,0.55)";
+                pillGlow = "none";
+                pillText = "VOIDED";
+              }
+            }
+
+            // Show the correct answer inline beneath the user's pick when
+            // the user got it wrong. Helps the screenshot tell the full
+            // story to anyone seeing it on Instagram / WhatsApp.
+            const showAnswerLine =
+              isResults && p.result?.kind === "wrong" && p.result.correctLabels.length > 0;
+
+            return (
               <div
+                key={i}
                 style={{
-                  fontSize: 22,
-                  fontFamily: "'Bungee', 'Impact', cursive",
-                  color: "#7be4ff",
-                  background: "rgba(123,228,255,0.14)",
-                  padding: "8px 16px",
-                  borderRadius: 10,
-                  whiteSpace: "nowrap",
-                  textShadow: "0 0 12px rgba(123,228,255,0.6)",
+                  background: "rgba(255,255,255,0.05)",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  borderRadius: 14,
+                  padding: "12px 20px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 18,
                 }}
               >
-                {p.points} PTS
+                <div style={{ flex: 1, fontFamily: "system-ui, -apple-system, sans-serif" }}>
+                  <div style={{ fontSize: 14, opacity: 0.6, marginBottom: 2, fontWeight: 500 }}>{p.question}</div>
+                  <div
+                    style={{
+                      fontSize: 22,
+                      fontWeight: 700,
+                      // Strike-through the user's pick when wrong so the
+                      // viewer's eye finds the actual answer next.
+                      textDecoration: showAnswerLine ? "line-through" : "none",
+                      opacity: showAnswerLine ? 0.6 : 1,
+                    }}
+                  >
+                    {p.pick}
+                  </div>
+                  {showAnswerLine && (
+                    <div
+                      style={{
+                        marginTop: 4,
+                        fontSize: 16,
+                        fontWeight: 600,
+                        color: "#4ade80",
+                        textShadow: "0 0 10px rgba(74,222,128,0.45)",
+                      }}
+                    >
+                      ANSWER: {(p.result as { correctLabels: string[] }).correctLabels.join(" / ")}
+                    </div>
+                  )}
+                </div>
+                <div
+                  style={{
+                    fontSize: 22,
+                    fontFamily: "'Bungee', 'Impact', cursive",
+                    color: pillFg,
+                    background: pillBg,
+                    padding: "8px 16px",
+                    borderRadius: 10,
+                    whiteSpace: "nowrap",
+                    textShadow: pillGlow !== "none" ? pillGlow : undefined,
+                  }}
+                >
+                  {pillText}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Max-potential footer */}
@@ -816,14 +1005,21 @@ const ShareCard = forwardRef<HTMLDivElement, {
           }}
         >
           <div>
-            <div style={{ fontSize: 18, opacity: 0.6, letterSpacing: 3 }}>MAX POTENTIAL</div>
+            <div style={{ fontSize: 18, opacity: 0.6, letterSpacing: 3 }}>
+              {isResults ? "FINAL SCORE" : "MAX POTENTIAL"}
+            </div>
             <div
               style={{
                 fontSize: 64,
                 marginTop: 4,
-                color: "#ff79f0",
+                // Switch the glow-colour with the label so the FINAL SCORE
+                // moment reads as a celebration (gold) instead of "what
+                // could have been" (pink).
+                color: isResults ? "#ffd60a" : "#ff79f0",
                 fontFamily: "'Bungee', 'Impact', cursive",
-                textShadow: "0 0 22px rgba(255,121,240,0.65)",
+                textShadow: isResults
+                  ? "0 0 22px rgba(255,214,10,0.7)"
+                  : "0 0 22px rgba(255,121,240,0.65)",
               }}
             >
               {totalPts} PTS
