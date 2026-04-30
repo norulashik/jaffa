@@ -10,6 +10,13 @@ interface SquadOverrideAttributes {
   playerName: string;      // canonical name as written by Sportsmonk
   role: SquadRole;
   source: SquadSource;     // "match" = auto-synced; "manual" = admin override
+  // Optional pointer to the squad-side spelling (from iplSquads.ts) that
+  // this override merged into. Set when syncSquadFromMatch fuzzy-matches a
+  // ball-feed fullname to an existing static-squad name. resolveBallName
+  // reads this column to resolve squad-side names → ball-feed names without
+  // re-running the fuzzy matcher every match. Null when the override was
+  // a brand-new player no static-squad entry covered.
+  canonicalName: string | null;
   addedFromMatchId: string | null;
   lastSeenAt: Date;        // bumped each time the player features in a match
   removedAt: Date | null;  // soft-delete: null = active
@@ -18,7 +25,7 @@ interface SquadOverrideAttributes {
 }
 
 interface SquadOverrideCreationAttributes
-  extends Optional<SquadOverrideAttributes, "id" | "addedFromMatchId" | "lastSeenAt" | "removedAt" | "source"> {}
+  extends Optional<SquadOverrideAttributes, "id" | "addedFromMatchId" | "lastSeenAt" | "removedAt" | "source" | "canonicalName"> {}
 
 class SquadOverride
   extends Model<SquadOverrideAttributes, SquadOverrideCreationAttributes>
@@ -29,6 +36,7 @@ class SquadOverride
   public playerName!: string;
   public role!: SquadRole;
   public source!: SquadSource;
+  public canonicalName!: string | null;
   public addedFromMatchId!: string | null;
   public lastSeenAt!: Date;
   public removedAt!: Date | null;
@@ -59,6 +67,10 @@ SquadOverride.init(
       type: DataTypes.STRING(8),
       allowNull: false,
       defaultValue: "match",
+    },
+    canonicalName: {
+      type: DataTypes.STRING(80),
+      allowNull: true,
     },
     addedFromMatchId: {
       type: DataTypes.UUID,

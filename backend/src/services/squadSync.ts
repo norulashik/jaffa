@@ -118,6 +118,16 @@ async function knownNamesForTeam(team: string): Promise<string[]> {
   return [...baseNames, ...overrides.map((o) => o.playerName)];
 }
 
+// True when `matched` is a name from the static IPL_SQUADS_2026 list for
+// `team`. We use exact (case-insensitive) compare here — knownNamesForTeam
+// returns base names verbatim, so any match we get back from findFuzzyMatch
+// against that list is one of the original entries with original casing.
+function isStaticSquadName(team: string, matched: string): boolean {
+  const baseStatic = IPL_SQUADS_2026[team] || [];
+  const lower = matched.toLowerCase();
+  return baseStatic.some((p: Player) => p.name.toLowerCase() === lower);
+}
+
 async function syncTeam(
   team: string,
   matchId: string,
@@ -130,28 +140,52 @@ async function syncTeam(
   for (const [fullname, activity] of roster) {
     const matched = findFuzzyMatch(fullname, known);
     if (matched) {
-      // We already know this player. Bump lastSeenAt on the override row if
-      // one exists; if they're only in the static squad, create a "match"
-      // override anchored on this match so future audits can see when we
-      // last confirmed them.
+      // `matched` is the canonical spelling we already know — could be a
+      // static-squad entry OR an existing override.playerName. The actual
+      // fullname Sportsmonk used in this match's balls is `fullname`, which
+      // may differ (the whole reason we're plumbing aliases). When the
+      // match landed on a static-squad entry, persist the pair so future
+      // matches' resolveBallName can short-circuit straight to the right
+      // ball-feed spelling — this is the auto-grown alias table.
+      const isStatic = isStaticSquadName(team, matched);
+      const ballFeedName = fullname;
+
+      // Look up either by the exact ball-feed spelling we just observed
+      // OR by the canonical squad name — handles both "we already wrote
+      // this exact override" and "we previously wrote a different spelling
+      // for the same canonical player".
       const existing = await SquadOverride.findOne({
-        where: { team, playerName: { [Op.iLike]: matched } },
+        where: {
+          team,
+          [Op.or]: [
+            { playerName: { [Op.iLike]: ballFeedName } },
+            ...(isStatic ? [{ canonicalName: { [Op.iLike]: matched } }] : []),
+          ],
+        },
       });
+
       if (existing) {
-        await existing.update({ lastSeenAt: new Date(), removedAt: null });
+        const patch: Record<string, unknown> = {
+          lastSeenAt: new Date(),
+          removedAt: null,
+        };
+        // If the ball-feed name has drifted to a new spelling (e.g.
+        // Sportsmonk fixed a typo), store the latest spelling. The
+        // canonicalName is sticky — once we know who they are, we don't
+        // re-guess.
+        if (existing.playerName !== ballFeedName) patch.playerName = ballFeedName;
+        if (isStatic && !existing.canonicalName) patch.canonicalName = matched;
+        await existing.update(patch);
         updated += 1;
       } else {
-        // Player is in the static squad but has no override row yet. Insert
-        // a match-sourced row to start tracking lastSeenAt. Role is inferred
-        // from this match's activity — overrides the static role only when
-        // the new role is more permissive (e.g. static says "bat" but they
-        // bowled today → upgrade to "all"). Don't downgrade.
-        // For simplicity: just record a match row keeping the static role
-        // (we can't know it from here without re-importing the static map).
-        // Use inferred role; static merge happens in iplSquads.ts read path.
+        // No override row yet for this player — create one. canonicalName
+        // gets set whenever the fuzzy match landed on a static-squad
+        // entry; left null when the matched candidate was itself another
+        // override (we only learn aliases for static-squad anchors).
         await SquadOverride.create({
           team,
-          playerName: matched,
+          playerName: ballFeedName,
+          canonicalName: isStatic ? matched : null,
           role: inferRole(activity),
           source: "match",
           addedFromMatchId: matchId,
@@ -163,10 +197,12 @@ async function syncTeam(
       continue;
     }
 
-    // Brand-new player: insert a SquadOverride row.
+    // Brand-new player: insert a SquadOverride row. No canonicalName because
+    // they don't correspond to anyone in the static squad yet.
     await SquadOverride.create({
       team,
       playerName: fullname,
+      canonicalName: null,
       role: inferRole(activity),
       source: "match",
       addedFromMatchId: matchId,

@@ -774,7 +774,13 @@ const ShareCard = forwardRef<HTMLDivElement, {
         />
       </div>
 
-      {/* Glassmorphism inner card */}
+      {/* Glassmorphism inner card. Glow colour is driven by the two playing
+          teams' primaries so the bloom never carries a foreign-team accent
+          (e.g. magenta on a RCB-vs-GT card). Two box-shadows: shareC1 leans
+          toward the top-left where the first radial sits, shareC2 toward the
+          bottom-right where the second radial sits — together they feel
+          symmetric without picking a single team's colour over the other.
+          Inset white stays for the glass highlight. */}
       <div
         style={{
           flex: 1,
@@ -783,7 +789,7 @@ const ShareCard = forwardRef<HTMLDivElement, {
           background: "rgba(255,255,255,0.07)",
           border: "2px solid rgba(255,255,255,0.18)",
           backdropFilter: "blur(20px)",
-          boxShadow: "0 0 80px rgba(180,40,220,0.45), inset 0 0 40px rgba(255,255,255,0.04)",
+          boxShadow: `-32px -32px 80px ${shareC1.primary}55, 32px 32px 80px ${shareC2.primary}55, inset 0 0 40px rgba(255,255,255,0.04)`,
           display: "flex",
           flexDirection: "column",
           gap: 20,

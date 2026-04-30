@@ -100,10 +100,41 @@ function uniqueFullnames(allBalls: any[], role: ResolveRole): Set<string> {
 // to know about loudly, not silently fuzzy-merge into the wrong player.
 const FUZZY_THRESHOLD = 0.6;
 
+// Learned aliases — populated at the start of resolvePunterCard from the
+// SquadOverride table (canonicalName → playerName pairs). Indexed by
+// normalized canonicalName so we can do single-Map lookups instead of
+// scanning the whole table per resolveBallName call. Per-process state;
+// resolvePunterCard refreshes it for every match it processes.
+//
+// Why this exists: tier-2 KNOWN_ALIASES is hand-maintained, while this
+// learned map auto-grows from real Sportsmonk data. Every match where
+// syncSquadFromMatch fuzzy-merges a ball-feed name into an existing static
+// squad entry writes a (canonicalName, playerName) pair to the DB; the
+// next match's resolver picks it up here and short-circuits the fuzzy
+// search with an exact known-good mapping.
+const LEARNED_ALIASES = new Map<string, Set<string>>();
+
+export function clearLearnedAliases(): void {
+  LEARNED_ALIASES.clear();
+}
+
+export function addLearnedAlias(canonicalName: string, ballFeedName: string): void {
+  if (!canonicalName || !ballFeedName) return;
+  const key = normalizePlayerName(canonicalName);
+  if (!key) return;
+  let set = LEARNED_ALIASES.get(key);
+  if (!set) {
+    set = new Set();
+    LEARNED_ALIASES.set(key, set);
+  }
+  set.add(ballFeedName);
+}
+
 // Generic fuzzy matcher — squad name against ANY iterable of candidate
 // strings (ball-feed fullnames, lineup XI names, an override-table list,
-// etc.). Three-tier match: exact-normalized → alias-table → fuzzy token-set.
-// Returns the matched candidate (preserving its original casing) or null.
+// etc.). Four-tier match: exact-normalized → hardcoded-alias →
+// learned-alias (DB-sourced) → fuzzy token-set. Returns the matched
+// candidate (preserving its original casing) or null.
 export function findFuzzyMatch(
   squadName: string,
   candidates: Iterable<string>,
@@ -139,7 +170,23 @@ export function findFuzzyMatch(
     if (back && normalizePlayerName(back) === target) return c;
   }
 
-  // 3. Token-set fuzzy. Highest score above threshold wins; alphabetical tie-break.
+  // 3. Learned aliases — pairs we've observed in past matches via squad
+  //    sync. These are observed mappings, not guessed ones, so they're
+  //    safe to apply ahead of the fuzzy fallback.
+  const learned = LEARNED_ALIASES.get(target);
+  if (learned) {
+    for (const c of list) {
+      if (learned.has(c)) return c;
+      // Allow normalized comparison too — DB may have stored a slightly
+      // different casing/punctuation than the current candidate.
+      const cn = normalizePlayerName(c);
+      for (const known of learned) {
+        if (normalizePlayerName(known) === cn) return c;
+      }
+    }
+  }
+
+  // 4. Token-set fuzzy. Highest score above threshold wins; alphabetical tie-break.
   let best: { name: string; score: number } | null = null;
   for (const c of list) {
     const score = tokenSetOverlap(squadName, c);

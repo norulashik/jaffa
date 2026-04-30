@@ -5,7 +5,7 @@ import sequelize from "../config/database";
 import { playerKey } from "./predictionEngine";
 import { ALL_CORRECT_OPTION } from "./pointsEngine";
 import { getYearWeekNumber } from "../utils/weekHelper";
-import { resolveBallName, isInLineup } from "./playerNameMatch";
+import { resolveBallName, isInLineup, addLearnedAlias, clearLearnedAliases } from "./playerNameMatch";
 import {
   squadWithRolesForTeam,
   getPlayerRole,
@@ -648,6 +648,32 @@ export async function resolvePunterCard(
   const balls: any[] = Array.isArray(allBalls) ? allBalls : [];
   const fix: any = fixture || {};
 
+  // Hydrate the in-memory learned-alias cache for this match's two teams.
+  // SquadOverride rows written by past matches' syncSquadFromMatch carry
+  // (canonicalName → playerName) pairs that resolveBallName can short-
+  // circuit through ahead of the fuzzy fallback. Cleared first so a stale
+  // cache from a different match's resolution can't bleed in.
+  try {
+    const { SquadOverride } = await import("../models");
+    const teamShorts = [match.team1Short, match.team2Short]
+      .filter((s): s is string => !!s)
+      .map((s) => s.toUpperCase());
+    if (teamShorts.length > 0) {
+      const rows = await SquadOverride.findAll({
+        where: { team: { [Op.in]: teamShorts }, removedAt: null },
+        attributes: ["playerName", "canonicalName"],
+      });
+      clearLearnedAliases();
+      for (const r of rows) {
+        if (r.canonicalName) addLearnedAlias(r.canonicalName, r.playerName);
+      }
+    }
+  } catch (err) {
+    // Table may not exist on a fresh deploy before sequelize.sync creates
+    // it. Resolver still works via the static + alias + fuzzy tiers.
+    console.warn("[PunterCard] could not load learned aliases:", err);
+  }
+
   // Load the squad pool once for the whole batch — v2 head-to-head templates
   // (openers, top-vs-death, overs 16–20, balls/boundary) need it to map
   // batsman names to teams. Cheap (one DB read or hardcoded lookup) so we
@@ -777,8 +803,21 @@ export function computeCorrectFromBalls(
       }
       const r1 = runsByBatterName(allBalls, p1.label);
       const r2 = runsByBatterName(allBalls, p2.label);
-      // Asymmetric or total absence → VOID rather than fabricating a tie.
-      if (r1 == null && r2 == null) return VOID_OPTION;
+      // Once the XI check has confirmed both players are in today's
+      // announced lineup, a null from runsByBatterName is no longer
+      // ambiguous — it means "didn't face a ball", which is genuinely a 0.
+      // The "Tied" sentinel option exists precisely for this case (e.g.
+      // both batters got out before scoring, both never came in). Only
+      // VOID when XI couldn't be checked AND we still have a null —
+      // that's the unresolvable case where we'd otherwise fabricate a tie.
+      const xiConfirmed = lineup && lineup.length > 0;
+      if (xiConfirmed) {
+        const a = r1 ?? 0;
+        const b = r2 ?? 0;
+        if (a < b) return p1.key;
+        if (b < a) return p2.key;
+        return ALL_CORRECT_OPTION;
+      }
       if (r1 == null || r2 == null) return VOID_OPTION;
       if (r1 < r2) return p1.key;
       if (r2 < r1) return p2.key;
@@ -803,7 +842,20 @@ export function computeCorrectFromBalls(
       }
       const sr1 = strikeRateForBatter(allBalls, p1.label);
       const sr2 = strikeRateForBatter(allBalls, p2.label);
-      if (sr1 == null && sr2 == null) return VOID_OPTION;
+      // XI-confirmed both → null means "never faced a legal ball" which
+      // makes the ALL_CORRECT_OPTION sentinel (literally labelled
+      // "Neither bats" for this template) the right answer. Only VOID
+      // when XI wasn't populated and we can't tell whether a null is
+      // "didn't play" or "name didn't resolve".
+      const xiConfirmed = lineup && lineup.length > 0;
+      if (xiConfirmed) {
+        if (sr1 == null && sr2 == null) return ALL_CORRECT_OPTION;
+        if (sr1 == null) return p2.key;
+        if (sr2 == null) return p1.key;
+        if (sr1 > sr2) return p1.key;
+        if (sr2 > sr1) return p2.key;
+        return ALL_CORRECT_OPTION;
+      }
       if (sr1 == null || sr2 == null) return VOID_OPTION;
       if (sr1 > sr2) return p1.key;
       if (sr2 > sr1) return p2.key;
@@ -850,7 +902,17 @@ export function computeCorrectFromBalls(
       }
       const v1 = impactIndexForPlayer(allBalls, p1.label);
       const v2 = impactIndexForPlayer(allBalls, p2.label);
-      if (v1 == null && v2 == null) return VOID_OPTION;
+      // XI-confirmed both → null impact = "didn't bat / bowl / take a
+      // catch" which is a genuine 0. Two zeros → ALL_CORRECT (Tied),
+      // not a fabricated VOID. Only VOID when XI wasn't populated.
+      const xiConfirmed = lineup && lineup.length > 0;
+      if (xiConfirmed) {
+        const a = v1 ?? 0;
+        const b = v2 ?? 0;
+        if (a > b) return p1.key;
+        if (b > a) return p2.key;
+        return ALL_CORRECT_OPTION;
+      }
       if (v1 == null || v2 == null) return VOID_OPTION;
       if (v1 > v2) return p1.key;
       if (v2 > v1) return p2.key;

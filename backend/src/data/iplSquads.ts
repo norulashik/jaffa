@@ -236,27 +236,56 @@ export async function squadWithRolesForTeam(short: string | null | undefined): P
   // Lazy-load the model to avoid a circular import (models/index.ts
   // imports utility code, and this file might be reached during model init
   // in pathological test setups).
-  let overrides: Array<{ playerName: string; role: PlayerRole }> = [];
+  type OverrideRow = { playerName: string; canonicalName: string | null; role: PlayerRole };
+  let overrides: OverrideRow[] = [];
   try {
     const { SquadOverride } = await import("../models");
     const rows = await SquadOverride.findAll({
       where: { team, removedAt: null },
-      attributes: ["playerName", "role"],
+      attributes: ["playerName", "canonicalName", "role"],
     });
-    overrides = rows.map((r) => ({ playerName: r.playerName, role: r.role as PlayerRole }));
+    overrides = rows.map((r) => ({
+      playerName: r.playerName,
+      canonicalName: r.canonicalName,
+      role: r.role as PlayerRole,
+    }));
   } catch {
     // Table may not exist yet on a fresh deploy before sequelize.sync
     // creates it. Fall back to static-only — same behaviour as v1.
     return base;
   }
 
+  // Lazy import to avoid a hard dependency from data/ → services/ in the
+  // circular-import path. Only used for fuzzy-name dedup below.
+  const { findFuzzyMatch } = await import("../services/playerNameMatch");
+
   const merged: Player[] = base.map((p) => ({ ...p }));
   const baseLowerToIdx = new Map<string, number>();
   base.forEach((p, i) => baseLowerToIdx.set(p.name.toLowerCase(), i));
 
   for (const o of overrides) {
-    const lower = o.playerName.toLowerCase();
-    const idx = baseLowerToIdx.get(lower);
+    // First preference: the override carries an explicit canonicalName
+    // pointing back to a static-squad row (set by syncSquadFromMatch when
+    // it fuzzy-matched the ball-feed spelling to an existing entry). Use
+    // that canonical name to find the merge target — exact, no guessing.
+    let idx: number | undefined;
+    if (o.canonicalName) {
+      idx = baseLowerToIdx.get(o.canonicalName.toLowerCase());
+    }
+    // Otherwise fall back to exact lowercase match on the override's own
+    // playerName (covers older overrides written before canonicalName
+    // existed).
+    if (idx == null) {
+      idx = baseLowerToIdx.get(o.playerName.toLowerCase());
+    }
+    // Final fallback: fuzzy match the override's playerName against the
+    // base squad. Stops "Hardik H Pandya" + "Hardik Pandya" from showing
+    // up as two separate options in the next punter card.
+    if (idx == null) {
+      const fuzzyMatched = findFuzzyMatch(o.playerName, base.map((p) => p.name));
+      if (fuzzyMatched) idx = baseLowerToIdx.get(fuzzyMatched.toLowerCase());
+    }
+
     if (idx != null) {
       // Player already in the static squad. Promote the role only when the
       // override is more specific than `bat` (the inferRole default for an
@@ -267,7 +296,17 @@ export async function squadWithRolesForTeam(short: string | null | undefined): P
         merged[idx] = { name: merged[idx].name, role: o.role };
       }
     } else {
-      merged.push({ name: o.playerName, role: o.role });
+      // Brand-new player not in the static squad. Append, but de-dupe
+      // against earlier overrides we already pushed onto `merged` so
+      // multiple overrides for the same person (e.g. one row per match
+      // with slightly different spellings) collapse to a single entry.
+      const alreadyAdded = findFuzzyMatch(
+        o.playerName,
+        merged.slice(base.length).map((p) => p.name),
+      );
+      if (!alreadyAdded) {
+        merged.push({ name: o.playerName, role: o.role });
+      }
     }
   }
   return merged;
