@@ -136,7 +136,7 @@ export default function MatchDashboard() {
       setCurrentCardIndex(0);
       setPhase("live");
     }
-  }, [matchId, venueId]);
+  }, [matchId, venueId, roomId]);
 
   // Phase 1: Join match and load pre-match predictions
   useEffect(() => {
@@ -202,7 +202,7 @@ export default function MatchDashboard() {
     };
 
     initMatch();
-  }, [matchId, venueId, refreshPreMatchState]);
+  }, [matchId, venueId, roomId, refreshPreMatchState]);
 
   // Phase 2: In prematch, listen for toss detection to reload unlocked questions
   useEffect(() => {
@@ -240,7 +240,7 @@ export default function MatchDashboard() {
       socket.off("matchStarted");
       socket.off("predictionsLocked");
     };
-  }, [phase, matchId, venueId, refreshPreMatchState]);
+  }, [phase, matchId, venueId, roomId, refreshPreMatchState]);
 
   // Phase 3: Connect socket when entering live phase
   useEffect(() => {
@@ -338,7 +338,7 @@ export default function MatchDashboard() {
       socket.off("predictionResult");
       disconnectSocket();
     };
-  }, [phase, matchId, venueId]);
+  }, [phase, matchId, venueId, roomId]);
 
   const loadLiveData = async () => {
     try {
@@ -452,7 +452,7 @@ export default function MatchDashboard() {
       setSelectedPreMatchOption(null);
       setPreMatchSubmitting(false);
     }
-  }, [preMatchSubmitting, selectedPreMatchOption, preMatchPredictions, currentCardIndex, venueId, refreshPreMatchState]);
+  }, [preMatchSubmitting, selectedPreMatchOption, preMatchPredictions, currentCardIndex, venueId, roomId, refreshPreMatchState]);
 
   // Live: handle option select
   const handleOptionSelect = (predictionId: string, optionKey: string) => {

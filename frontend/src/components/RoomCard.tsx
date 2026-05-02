@@ -9,6 +9,7 @@ interface RoomCardProps {
     name: string;
     code: string;
     status: string;
+    isSeasonRoom?: boolean;
     memberCount: number;
     maxPlayers: number;
     match?: {
@@ -46,7 +47,7 @@ export default function RoomCard({ room }: RoomCardProps) {
         </span>
       </div>
 
-      {room.match && (
+      {!room.isSeasonRoom && room.match && (
         <div className="flex items-center gap-2 mb-2">
           <span className="text-xs font-bold" style={{ fontFamily: "'Bungee', 'Impact', cursive" }}>
             {(room.match.team1Short || room.match.team1?.slice(0, 3))?.toUpperCase()}

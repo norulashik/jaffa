@@ -8,6 +8,7 @@ import { buildStory } from "../services/storyBuilder";
 import { parsePagination, paginationMeta } from "../utils/pagination";
 import { ROOM_VENUE_ID } from "../services/roomVenue";
 import { scopedRoomId } from "../utils/roomScope";
+import { ensureRoomMatchParticipant } from "../services/roomParticipation";
 
 const router = Router();
 
@@ -629,9 +630,13 @@ router.get("/:matchId/state", authenticateUser, async (req: AuthRequest, res: Re
       return;
     }
 
-    const participant = await MatchParticipant.findOne({
+    let participant = await MatchParticipant.findOne({
       where: { userId, matchId, venueId, roomId },
     });
+
+    if (!participant && roomId) {
+      participant = await ensureRoomMatchParticipant(userId, roomId, matchId);
+    }
 
     const openPredictions = await Prediction.findAll({
       where: { matchId, status: "open" },

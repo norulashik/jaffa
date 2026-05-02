@@ -170,9 +170,7 @@ export default function RoomLobby() {
     }
     setEnteringMatch(true);
     try {
-      if (room.isSeasonRoom) {
-        await api.enterRoomMatch(room.id, targetMatchId);
-      }
+      await api.enterRoomMatch(room.id, targetMatchId);
     dispatch({ type: "SET_VENUE", venueId });
     dispatch({ type: "SET_MATCH", matchId: targetMatchId });
     dispatch({ type: "SET_ROOM", roomId: room.id, roomCode: room.code });

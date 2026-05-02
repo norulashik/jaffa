@@ -71,19 +71,19 @@ function CreateRoomContent() {
   };
 
   const handleCreate = async () => {
-    if (!selectedMatch || !roomName.trim()) return;
+    if ((!selectedMatch && !isSeasonRoom) || !roomName.trim()) return;
     setCreating(true);
     try {
       let matchId = selectedMatch;
 
       // Auto-import Sportsmonk matches
-      if (matchId.startsWith("sportsmonk_")) {
+      if (matchId && matchId.startsWith("sportsmonk_")) {
         const fixtureId = matchId.replace("sportsmonk_", "");
         const result = await api.importMatch(fixtureId);
         matchId = result.match.id;
       }
 
-      const { room, venueId } = await api.createRoom(matchId, roomName.trim(), isPublic, maxPlayers, isSeasonRoom);
+      const { room, venueId } = await api.createRoom(matchId || null, roomName.trim(), isPublic, maxPlayers, isSeasonRoom);
       dispatch({ type: "SET_VENUE", venueId });
       dispatch({ type: "SET_MATCH", matchId: room.matchId });
       dispatch({ type: "SET_ROOM", roomId: room.id, roomCode: room.code });
@@ -214,6 +214,9 @@ function CreateRoomContent() {
           {!loading && matches.length === 0 && (
             <div className="game-card text-center">
               <p className="text-sm text-[#6b7280]">No matches available right now</p>
+              {isSeasonRoom && (
+                <p className="text-xs text-[#3b9eff] mt-2">Season Rooms can still be created and will attach to the next IPL match later.</p>
+              )}
             </div>
           )}
 
@@ -292,7 +295,7 @@ function CreateRoomContent() {
         {/* Create Button */}
         <button
           onClick={handleCreate}
-          disabled={!selectedMatch || !roomName.trim() || creating}
+          disabled={((!selectedMatch && !isSeasonRoom) || !roomName.trim() || creating)}
           className="w-full btn-sticker btn-orange uppercase tracking-tight py-4 text-lg disabled:opacity-40"
         >
           {creating ? (

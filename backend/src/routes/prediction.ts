@@ -5,6 +5,7 @@ import { GLOBAL_SCOPE_ID } from "../models/PredictionAggregate";
 import { authenticateUser, AuthRequest } from "../middleware/auth";
 import sequelize from "../config/database";
 import { scopedRoomId } from "../utils/roomScope";
+import { ensureRoomMatchParticipant } from "../services/roomParticipation";
 
 type AggregatePayload = {
   totalAnswered: number;
@@ -145,11 +146,15 @@ router.post("/:predictionId/answer", authenticateUser, async (req: AuthRequest, 
         throw new Error("ALREADY_ANSWERED");
       }
 
-      const participant = await MatchParticipant.findOne({
+      let participant = await MatchParticipant.findOne({
         where: { userId, matchId: prediction.matchId, venueId, roomId },
         transaction: t,
         lock: t.LOCK.UPDATE,
       });
+
+      if (!participant && roomId) {
+        participant = await ensureRoomMatchParticipant(userId, roomId, prediction.matchId, t);
+      }
 
       if (!participant) {
         throw new Error("NOT_PARTICIPANT");

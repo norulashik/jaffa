@@ -21,6 +21,23 @@ const ROUND_LABELS: Record<number, string> = {
   6: "R6",
 };
 
+function CapBadge({ type }: { type: "orange" | "violet" }) {
+  const isOrange = type === "orange";
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-[3px] px-2 py-0.5 text-[9px] font-black uppercase tracking-wider border ${
+        isOrange
+          ? "bg-[#2a1200] text-[#ffb347] border-[#ff8a1e]"
+          : "bg-[#1c1230] text-[#c4b5fd] border-[#8b5cf6]"
+      }`}
+    >
+      <Crown className={`w-3.5 h-3.5 ${isOrange ? "text-[#ff8a1e]" : "text-[#8b5cf6]"}`} />
+      {isOrange ? "Orange Cap" : "Violet Cap"}
+    </span>
+  );
+}
+
 export default function RoomLeaderboard({ roomId, isSeasonRoom = false }: RoomLeaderboardProps) {
   const { state } = useGame();
   const { currentRound, userId } = state;
@@ -29,12 +46,47 @@ export default function RoomLeaderboard({ roomId, isSeasonRoom = false }: RoomLe
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"round" | "match" | "season">(isSeasonRoom ? "season" : "match");
   const [selectedRound, setSelectedRound] = useState(currentRound || 1);
+  const [hasActiveSeasonMatch, setHasActiveSeasonMatch] = useState(!isSeasonRoom);
 
   useEffect(() => {
     if (currentRound && currentRound > 0) {
       setSelectedRound(currentRound);
     }
   }, [currentRound]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!isSeasonRoom) {
+      setHasActiveSeasonMatch(true);
+      return;
+    }
+
+    api.getRoom(roomId)
+      .then((result) => {
+        if (cancelled) return;
+        const currentSeasonMatch = result.currentSeasonMatch;
+        const active = Boolean(
+          currentSeasonMatch && ["live", "upcoming"].includes(currentSeasonMatch.status)
+        );
+        setHasActiveSeasonMatch(active);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setHasActiveSeasonMatch(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId, isSeasonRoom]);
+
+  useEffect(() => {
+    if (isSeasonRoom && !hasActiveSeasonMatch && activeTab !== "season") {
+      setActiveTab("season");
+    }
+  }, [isSeasonRoom, hasActiveSeasonMatch, activeTab]);
 
   useEffect(() => {
     loadLeaderboard();
@@ -87,18 +139,22 @@ export default function RoomLeaderboard({ roomId, isSeasonRoom = false }: RoomLe
     <div className="space-y-4">
       {/* Main tabs: Round / Full Match */}
       <div className="w-full bg-[#0d0d0d] border-2 border-[#2a2a2a] rounded-[3px] p-1 flex gap-1">
-        <button
-          onClick={() => setActiveTab("round")}
-          className={tabClass(activeTab === "round")}
-        >
-          Round {selectedRound}
-        </button>
-        <button
-          onClick={() => setActiveTab("match")}
-          className={tabClass(activeTab === "match")}
-        >
-          Full Match
-        </button>
+        {(!isSeasonRoom || hasActiveSeasonMatch) && (
+          <>
+            <button
+              onClick={() => setActiveTab("round")}
+              className={tabClass(activeTab === "round")}
+            >
+              Round {selectedRound}
+            </button>
+            <button
+              onClick={() => setActiveTab("match")}
+              className={tabClass(activeTab === "match")}
+            >
+              Full Match
+            </button>
+          </>
+        )}
         {isSeasonRoom && (
           <button
             onClick={() => setActiveTab("season")}
@@ -176,11 +232,12 @@ export default function RoomLeaderboard({ roomId, isSeasonRoom = false }: RoomLe
 
                 {/* Player name */}
                 <div className="flex-1 min-w-0">
-                  <span
-                    className={`player-name truncate block ${isMe ? "text-[#ff6341]" : ""}`}
-                  >
-                    {showOrangeCap && <Crown className="inline-block w-3.5 h-3.5 mr-1 text-[#ff8a1e]" />}
-                    {showVioletCap && <Crown className="inline-block w-3.5 h-3.5 mr-1 text-[#8b5cf6]" />}
+                  {(showOrangeCap || showVioletCap) && (
+                    <div className="mb-1">
+                      <CapBadge type={showOrangeCap ? "orange" : "violet"} />
+                    </div>
+                  )}
+                  <span className={`player-name truncate block ${isMe ? "text-[#ff6341]" : ""}`}>
                     {player.displayName}
                     {isMe && " (You)"}
                   </span>

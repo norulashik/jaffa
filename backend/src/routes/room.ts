@@ -93,6 +93,17 @@ async function findBestSeasonMatch(): Promise<Match | null> {
   return live || ipl[0];
 }
 
+async function findSeasonAnchorMatch(): Promise<Match | null> {
+  const active = await findBestSeasonMatch();
+  if (active) return active;
+
+  const historicalMatches = await Match.findAll({
+    order: [["startTime", "DESC"]],
+  });
+  const ipl = historicalMatches.filter(isIplMatch);
+  return ipl[0] || null;
+}
+
 async function buildSeasonLeaderboard(roomId: string) {
   const members = await RoomMember.findAll({
     where: { roomId },
@@ -176,8 +187,8 @@ router.post("/", authenticateUser, async (req: AuthRequest, res: Response): Prom
     const { matchId, name, isPublic, maxPlayers, isSeasonRoom } = req.body;
     const userId = req.userId!;
 
-    if (!matchId || !name) {
-      res.status(400).json({ error: "matchId and name are required" });
+    if (!name) {
+      res.status(400).json({ error: "name is required" });
       return;
     }
 
@@ -186,18 +197,24 @@ router.post("/", authenticateUser, async (req: AuthRequest, res: Response): Prom
       return;
     }
 
-    const match = await Match.findByPk(matchId);
+    let match: Match | null = null;
+    if (matchId) {
+      match = await Match.findByPk(matchId);
+    } else if (isSeasonRoom) {
+      match = await findSeasonAnchorMatch();
+    }
+
     if (!match) {
-      res.status(404).json({ error: "Match not found" });
+      res.status(404).json({ error: isSeasonRoom ? "No IPL match history found to anchor this season room" : "Match not found" });
       return;
     }
 
-    if (match.status === "completed") {
+    if (!isSeasonRoom && match.status === "completed") {
       res.status(400).json({ error: "Cannot create room for a completed match" });
       return;
     }
 
-    if (!isTodayMatch(match.startTime)) {
+    if (!isSeasonRoom && !isTodayMatch(match.startTime)) {
       res.status(400).json({ error: "Can only create rooms for today's matches" });
       return;
     }
@@ -221,7 +238,7 @@ router.post("/", authenticateUser, async (req: AuthRequest, res: Response): Prom
         {
           name,
           hostUserId: userId,
-          matchId,
+          matchId: match.id,
           code,
           isSeasonRoom: Boolean(isSeasonRoom),
           seasonKey: isSeasonRoom ? "ipl_2026" : null,

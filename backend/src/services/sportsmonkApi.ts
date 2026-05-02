@@ -2125,6 +2125,32 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           console.log(`[Sportsmonk] Locked ${openOverPreds.length} predictions for over ${currentOver} (ball detected)`);
         }
 
+        // Break-only UX: the standard team over questions for the *next* over
+        // should disappear as soon as the current over begins. That keeps the
+        // answer window limited to the innings break between overs, while live
+        // player questions (subjectType != null) continue using their own flow.
+        const nextOverNum = currentOver + 1;
+        if (nextOverNum <= (match.totalOvers || 20)) {
+          const nextOverRound = getCurrentRound(currentInnings, nextOverNum, match.totalOvers);
+          const nextOverTeamPreds = await Prediction.findAll({
+            where: {
+              matchId: match.id,
+              overNumber: nextOverNum,
+              round: nextOverRound,
+              category: "per_over",
+              status: "open",
+              subjectType: { [Op.is]: null },
+            },
+          });
+          if (nextOverTeamPreds.length > 0) {
+            for (const pred of nextOverTeamPreds) {
+              await pred.update({ status: "locked" });
+            }
+            io.to(`match:${match.id}`).emit("predictionsLocked", { matchId: match.id, overNumber: nextOverNum });
+            console.log(`[Sportsmonk] Locked ${nextOverTeamPreds.length} team over predictions for over ${nextOverNum} (current over started)`);
+          }
+        }
+
         // Lock any remaining pre-match predictions if still open (fallback for edge cases)
         const openPreMatch = await Prediction.findAll({
           where: { matchId: match.id, category: "pre_match", status: "open" },
@@ -2155,7 +2181,6 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
         // decimal is "balls bowled into the in-progress over" (0.3 = 3 balls
         // into Over 1, 1.3 = 3 balls into Over 2). We trigger on ≥ 3.
         const legalBallsInCurrentOver = Math.round((nowOvers - Math.floor(nowOvers)) * 10);
-        const nextOverNum = currentOver + 1;
         if (legalBallsInCurrentOver >= 3 && nextOverNum <= (match.totalOvers || 20)) {
           const nextOverRound = getCurrentRound(currentInnings, nextOverNum, match.totalOvers);
           const existingNextPreds = await Prediction.findAll({
@@ -2962,34 +2987,27 @@ function resolvePreMatchPrediction(
   match: Match,
   allBalls: BallData[]
 ): string | null {
+  const teamShortForTeamId = (teamId: number | null | undefined): string | null => {
+    if (teamId == null) return null;
+    if (teamId === fixture.localteam_id) return match.team1Short;
+    if (teamId === fixture.visitorteam_id) return match.team2Short;
+
+    const scoreData = match.scoreData as any;
+    if (teamId === scoreData?.innings1?.teamId) {
+      return scoreData?.innings1?.teamShort || null;
+    }
+    if (teamId === scoreData?.innings2?.teamId) {
+      return scoreData?.innings2?.teamShort || null;
+    }
+    return null;
+  };
+
   const q = prediction.question.toLowerCase();
   // Q1: "Who wins tonight?"
   if (q.includes("who wins") && !q.includes("toss")) {
     const winnerTeamId = fixture.winner_team_id;
     if (!winnerTeamId) return null;
-
-    // Match team IDs from scoreData to determine which short name won
-    const scoreData = match.scoreData as any;
-    const inn1TeamId = scoreData?.innings1?.teamId;
-    const inn2TeamId = scoreData?.innings2?.teamId;
-
-    // Determine winner short name by matching team IDs
-    let winnerShort: string | null = null;
-    if (winnerTeamId === inn1TeamId) {
-      // First batting team won — that's localteam in most cases
-      winnerShort = match.team1Short;
-    } else if (winnerTeamId === inn2TeamId) {
-      winnerShort = match.team2Short;
-    }
-
-    // Also check fixture's localteam_id/visitorteam_id
-    if (!winnerShort) {
-      if (winnerTeamId === fixture.localteam_id) {
-        winnerShort = match.team1Short;
-      } else if (winnerTeamId === fixture.visitorteam_id) {
-        winnerShort = match.team2Short;
-      }
-    }
+    const winnerShort = teamShortForTeamId(winnerTeamId);
 
     if (winnerShort) {
       return winnerShort.toLowerCase();
@@ -3286,10 +3304,18 @@ function resolveEndOfMatchPrediction(
     const inn1 = runs.find((r: any) => r.inning === 1);
     if (!inn2 || !inn1) return "not_chased";
 
-    // Did chasing team win? (also handles null winner_team_id for abandoned matches)
-    if (!fixture.winner_team_id || fixture.winner_team_id !== inn2.team_id) return "not_chased";
+    const target = Number(inn1.score || 0) + 1;
+    const chaseCompletedOnScore = Number(inn2.score || 0) >= target;
 
-    const overs = inn2.overs;
+    // Prefer the authoritative winner when Sportsmonk has it, but fall back
+    // to the scoreboard if winner_team_id has not landed yet.
+    if (fixture.winner_team_id != null) {
+      if (fixture.winner_team_id !== inn2.team_id) return "not_chased";
+    } else if (!chaseCompletedOnScore) {
+      return "not_chased";
+    }
+
+    const overs = Number(inn2.overs || 0);
     if (overs <= 6) return "powerplay";
     if (overs <= 15) return "middle";
     return "death";

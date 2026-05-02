@@ -184,7 +184,7 @@ export const api = {
     request<{ players: any[]; count: number }>(`/admin/venue/players/${matchId}`),
 
   // Rooms
-  createRoom: (matchId: string, name: string, isPublic?: boolean, maxPlayers?: number, isSeasonRoom?: boolean) =>
+  createRoom: (matchId: string | null, name: string, isPublic?: boolean, maxPlayers?: number, isSeasonRoom?: boolean) =>
     request<{ room: any; shareLink: string; venueId: string }>("/rooms", {
       method: "POST",
       body: JSON.stringify({ matchId, name, isPublic, maxPlayers, isSeasonRoom }),
