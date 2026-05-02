@@ -172,12 +172,13 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     if (typeof window === "undefined") return;
     const matchId = localStorage.getItem("jaffa_match_id");
     const venueId = localStorage.getItem("jaffa_venue_id");
+    const roomId = localStorage.getItem("jaffa_room_id");
     if (!matchId || !venueId) return;
     const clearedAt = readClearedAt();
 
     let rows: any[] = [];
     try {
-      rows = (await api.getMyPredictions(matchId, venueId)) || [];
+      rows = (await api.getMyPredictions(matchId, venueId, roomId)) || [];
     } catch {
       return; // silent — periodic poller will try again
     }

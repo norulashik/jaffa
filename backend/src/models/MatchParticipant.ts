@@ -6,6 +6,7 @@ interface MatchParticipantAttributes {
   userId: string;
   matchId: string;
   venueId: string;
+  roomId?: string | null;
   totalPoints: number;
   round1Points: number;
   round2Points: number;
@@ -34,6 +35,7 @@ class MatchParticipant extends Model<MatchParticipantAttributes, MatchParticipan
   public userId!: string;
   public matchId!: string;
   public venueId!: string;
+  public roomId!: string | null;
   public totalPoints!: number;
   public round1Points!: number;
   public round2Points!: number;
@@ -76,6 +78,11 @@ MatchParticipant.init(
       type: DataTypes.UUID,
       allowNull: false,
       references: { model: "venues", key: "id" },
+    },
+    roomId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+      references: { model: "rooms", key: "id" },
     },
     totalPoints: {
       type: DataTypes.INTEGER,
@@ -133,8 +140,8 @@ MatchParticipant.init(
     tableName: "match_participants",
     timestamps: true,
     indexes: [
-      { unique: true, fields: ["userId", "matchId", "venueId"] },
-      { fields: ["matchId", "venueId", "totalPoints"] },
+      { fields: ["userId", "matchId", "venueId", "roomId"] },
+      { fields: ["matchId", "venueId", "roomId", "totalPoints"] },
       { fields: ["matchId", "venueId", "round1Points"] },
       { fields: ["matchId", "venueId", "round2Points"] },
       { fields: ["matchId", "venueId", "round3Points"] },

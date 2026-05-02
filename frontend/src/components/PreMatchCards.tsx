@@ -23,7 +23,7 @@ export default function PreMatchCards({ matchId, venueId }: PreMatchCardsProps) 
     if (!venueId) return;
 
     api
-      .getPredictions(matchId, venueId, 0)
+      .getPredictions(matchId, venueId, 0, localStorage.getItem("jaffa_room_id"))
       .then((preds) => {
         const preMatch = preds.filter(
           (p: any) =>
@@ -48,7 +48,7 @@ export default function PreMatchCards({ matchId, venueId }: PreMatchCardsProps) 
     setSubmitting(true);
 
     try {
-      await api.submitPrediction(currentPred.id, optionKey, venueId);
+      await api.submitPrediction(currentPred.id, optionKey, venueId, undefined, localStorage.getItem("jaffa_room_id"));
       toast("Answer locked!");
 
       setTimeout(() => {

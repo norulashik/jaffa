@@ -103,6 +103,7 @@ export default function MatchDashboard() {
   const { state: gameState, dispatch } = useGame();
 
   const [venueId, setVenueId] = useState("");
+  const roomId = gameState.roomId || (typeof window !== "undefined" ? localStorage.getItem("jaffa_room_id") : null);
 
   useEffect(() => {
     const token = localStorage.getItem("jaffa_token");
@@ -121,7 +122,7 @@ export default function MatchDashboard() {
   }, []);
 
   const refreshPreMatchState = useCallback(async () => {
-    const preds = await api.getPredictions(matchId, venueId, 0);
+    const preds = await api.getPredictions(matchId, venueId, 0, roomId);
     const unanswered = (preds || []).filter(
       (p: any) => p.category === "pre_match" && !p.userAnswer && p.status === "open"
     );
@@ -343,7 +344,7 @@ export default function MatchDashboard() {
     try {
       const [match, preds] = await Promise.all([
         api.getMatch(matchId),
-        api.getPredictions(matchId, venueId),
+        api.getPredictions(matchId, venueId, undefined, roomId),
       ]);
       setMatchData(match);
 
@@ -365,7 +366,7 @@ export default function MatchDashboard() {
       try {
         const roomId = gameState.roomId || localStorage.getItem("jaffa_room_id");
         const [matchState, lb] = await Promise.all([
-          api.getMatchState(matchId, venueId),
+          api.getMatchState(matchId, venueId, roomId),
           roomId ? api.getRoomLeaderboard(roomId) : api.getMatchLeaderboard(matchId, venueId),
         ]);
         if (matchState.participant) {
@@ -422,7 +423,7 @@ export default function MatchDashboard() {
     setPreMatchSubmitting(true);
 
     try {
-      await api.submitPrediction(currentPred.id, optionKey, venueId);
+      await api.submitPrediction(currentPred.id, optionKey, venueId, undefined, roomId);
       setShowPreMatchResult(true);
 
       setTimeout(() => {
@@ -488,7 +489,7 @@ export default function MatchDashboard() {
     const boostType = activeBoostForPrediction?.type;
 
     try {
-      await api.submitPrediction(predictionId, selectedOption, venueId, boostType);
+      await api.submitPrediction(predictionId, selectedOption, venueId, boostType, roomId);
       setSelectedAnswers((prev) => ({ ...prev, [predictionId]: selectedOption }));
       setDraftAnswers((prev) => {
         const next = { ...prev };
