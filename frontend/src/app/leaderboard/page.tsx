@@ -55,8 +55,6 @@ function LeaderboardPageInner() {
   const [matchId, setMatchId] = useState(urlMatchId || state.matchId || readLs("jaffa_match_id"));
   const [venueId, setVenueId] = useState(urlVenueId || state.venueId || readLs("jaffa_venue_id"));
   const [roomId, setRoomId] = useState(state.roomId);
-  const [seasonRooms, setSeasonRooms] = useState<any[]>([]);
-  const [selectedSeasonRoomId, setSelectedSeasonRoomId] = useState<string | null>(null);
 
   useEffect(() => {
     const token = localStorage.getItem("jaffa_token");
@@ -82,7 +80,7 @@ function LeaderboardPageInner() {
   useEffect(() => {
     if (!matchId || !venueId) return;
     let cancelled = false;
-    api.getMatchState(matchId, venueId, roomId).then((ms: any) => {
+    api.getMatchState(matchId, venueId).then((ms: any) => {
       if (cancelled || !ms?.participant) return;
       const liveInn = ms.match?.currentInnings || ms.match?.scoreData?.currentInnings || 1;
       const liveOver = ms.match?.currentOver || ms.match?.scoreData?.currentOver || 0;
@@ -111,19 +109,6 @@ function LeaderboardPageInner() {
     return () => { cancelled = true; };
   }, [matchId, venueId, state.currentRound, dispatch]);
 
-  useEffect(() => {
-    if (matchId || venueId || roomId) return;
-    api.getMyRooms()
-      .then((result) => {
-        const joinedSeasonRooms = (result.rooms || []).filter((room: any) => room.isSeasonRoom);
-        setSeasonRooms(joinedSeasonRooms);
-        if (joinedSeasonRooms.length > 0 && !selectedSeasonRoomId) {
-          setSelectedSeasonRoomId(joinedSeasonRooms[0].id);
-        }
-      })
-      .catch(() => {});
-  }, [matchId, venueId, roomId, selectedSeasonRoomId]);
-
   return (
     <div className="bg-[#0d0d0d] text-white min-h-screen">
       <Header />
@@ -139,32 +124,12 @@ function LeaderboardPageInner() {
         </section>
 
         {matchId && roomId ? (
-          <RoomLeaderboard roomId={roomId} isSeasonRoom />
+          <RoomLeaderboard roomId={roomId} />
         ) : matchId && venueId ? (
           <Leaderboard
             matchId={matchId}
             venueId={venueId}
           />
-        ) : selectedSeasonRoomId ? (
-          <section className="px-6 space-y-4">
-            <div className="game-card">
-              <label className="text-[10px] text-[#6b7280] font-bold uppercase tracking-wider block mb-2">
-                Season Rooms
-              </label>
-              <select
-                value={selectedSeasonRoomId}
-                onChange={(e) => setSelectedSeasonRoomId(e.target.value)}
-                className="nb-input w-full text-sm py-3"
-              >
-                {seasonRooms.map((room) => (
-                  <option key={room.id} value={room.id}>
-                    {room.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <RoomLeaderboard roomId={selectedSeasonRoomId} isSeasonRoom />
-          </section>
         ) : (
           <div className="flex flex-col items-center justify-center py-20 text-center px-6">
             <div className="game-card flex flex-col items-center py-10">

@@ -40,9 +40,6 @@ MatchParticipant.belongsTo(Match, { foreignKey: "matchId", as: "match" });
 Venue.hasMany(MatchParticipant, { foreignKey: "venueId", as: "participants" });
 MatchParticipant.belongsTo(Venue, { foreignKey: "venueId", as: "venue" });
 
-Room.hasMany(MatchParticipant, { foreignKey: "roomId", as: "participants" });
-MatchParticipant.belongsTo(Room, { foreignKey: "roomId", as: "room" });
-
 // Venue has many Rewards
 Venue.hasMany(Reward, { foreignKey: "venueId", as: "rewards" });
 Reward.belongsTo(Venue, { foreignKey: "venueId", as: "venue" });

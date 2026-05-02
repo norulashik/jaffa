@@ -9,7 +9,6 @@ import sequelize from "../config/database";
 const router = Router();
 
 const CODE_CHARSET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-const IPL_TEAM_SHORTS = new Set(["RCB", "GT", "MI", "CSK", "LSG", "RR", "SRH", "DC", "PBKS", "KKR"]);
 
 function generateRoomCode(): string {
   let code = "";
@@ -19,161 +18,10 @@ function generateRoomCode(): string {
   return code;
 }
 
-function isTodayMatch(startTime?: Date | null): boolean {
-  if (!startTime) return true;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const matchDate = new Date(startTime);
-  return matchDate >= today && matchDate < tomorrow;
-}
-
-function isIplMatch(match: Match): boolean {
-  const t1 = (match.team1Short || "").toUpperCase();
-  const t2 = (match.team2Short || "").toUpperCase();
-  return IPL_TEAM_SHORTS.has(t1) && IPL_TEAM_SHORTS.has(t2);
-}
-
-async function createRoomParticipant(userId: string, roomId: string, match: Match, transaction?: any): Promise<void> {
-  const currentRound = match.status === "live"
-    ? getCurrentRound(match.currentInnings || 1, match.currentOver || 1, match.totalOvers)
-    : 0;
-
-  const existing = await MatchParticipant.findOne({
-    where: { userId, matchId: match.id, venueId: ROOM_VENUE_ID, roomId },
-    transaction,
-  });
-  if (existing) return;
-
-  await MatchParticipant.create(
-    { userId, matchId: match.id, venueId: ROOM_VENUE_ID, roomId, currentRound },
-    { transaction }
-  );
-}
-
-async function buildRoomPayload(roomId: string) {
-  const room = await Room.findByPk(roomId, {
-    include: [
-      { model: Match, as: "match", attributes: ["id", "team1", "team2", "team1Short", "team2Short", "status", "startTime", "currentPhase", "currentOver", "currentInnings", "scoreData"] },
-      { model: User, as: "host", attributes: ["id", "displayName", "avatarConfig"] },
-    ],
-  });
-  if (!room) return null;
-
-  const members = await RoomMember.findAll({
-    where: { roomId },
-    include: [{ model: User, as: "user", attributes: ["id", "displayName", "avatarConfig"] }],
-    order: [["joinedAt", "ASC"]],
-  });
-
-  return {
-    room: {
-      ...room.toJSON(),
-      members: members.map((m) => ({
-        userId: m.userId,
-        displayName: (m as any).user?.displayName,
-        avatarConfig: (m as any).user?.avatarConfig,
-        joinedAt: m.joinedAt,
-      })),
-      memberCount: members.length,
-    },
-    venueId: ROOM_VENUE_ID,
-  };
-}
-
-async function findBestSeasonMatch(): Promise<Match | null> {
-  const matches = await Match.findAll({
-    where: { status: { [Op.in]: ["live", "upcoming"] } },
-    order: [["startTime", "ASC"]],
-  });
-  const ipl = matches.filter(isIplMatch);
-  if (ipl.length === 0) return null;
-  const live = ipl.find((m) => m.status === "live");
-  return live || ipl[0];
-}
-
-async function buildSeasonLeaderboard(roomId: string) {
-  const members = await RoomMember.findAll({
-    where: { roomId },
-    include: [{ model: User, as: "user", attributes: ["id", "displayName", "avatarConfig"] }],
-    order: [["joinedAt", "ASC"]],
-  });
-
-  const memberMap = new Map(members.map((m) => [m.userId, m]));
-  const userIds = members.map((m) => m.userId);
-
-  const participants = userIds.length === 0
-    ? []
-    : await MatchParticipant.findAll({
-        where: { roomId, venueId: ROOM_VENUE_ID, userId: { [Op.in]: userIds } },
-        order: [["createdAt", "ASC"]],
-      });
-
-  const totals = new Map<string, {
-    userId: string;
-    displayName: string;
-    avatarConfig: any;
-    totalPoints: number;
-    currentStreak: number;
-    bestStreak: number;
-    correctPredictions: number;
-    totalPredictions: number;
-    matchCount: number;
-  }>();
-
-  for (const member of members) {
-    totals.set(member.userId, {
-      userId: member.userId,
-      displayName: (member as any).user?.displayName || "Unknown",
-      avatarConfig: (member as any).user?.avatarConfig || null,
-      totalPoints: 0,
-      currentStreak: 0,
-      bestStreak: 0,
-      correctPredictions: 0,
-      totalPredictions: 0,
-      matchCount: 0,
-    });
-  }
-
-  for (const participant of participants) {
-    const member = memberMap.get(participant.userId);
-    const total = totals.get(participant.userId);
-    if (!member || !total) continue;
-    if (new Date(participant.joinedAt) < new Date(member.joinedAt)) continue;
-    total.totalPoints += participant.totalPoints;
-    total.currentStreak = Math.max(total.currentStreak, participant.currentStreak);
-    total.bestStreak = Math.max(total.bestStreak, participant.bestStreak);
-    total.correctPredictions += participant.correctPredictions;
-    total.totalPredictions += participant.totalPredictions;
-    total.matchCount += 1;
-  }
-
-  return Array.from(totals.values())
-    .sort((a, b) => {
-      if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
-      if (b.correctPredictions !== a.correctPredictions) return b.correctPredictions - a.correctPredictions;
-      return a.displayName.localeCompare(b.displayName);
-    })
-    .map((row, idx) => ({
-      rank: idx + 1,
-      userId: row.userId,
-      displayName: row.displayName,
-      avatarConfig: row.avatarConfig,
-      totalPoints: row.totalPoints,
-      currentStreak: row.currentStreak,
-      bestStreak: row.bestStreak,
-      correctPredictions: row.correctPredictions,
-      totalPredictions: row.totalPredictions,
-      accuracy: row.totalPredictions > 0 ? Math.round((row.correctPredictions / row.totalPredictions) * 100) : 0,
-      matchCount: row.matchCount,
-      capStatus: idx === 0 ? "orange" : idx === 1 ? "violet" : null,
-    }));
-}
-
+// Create a room
 router.post("/", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { matchId, name, isPublic, maxPlayers, isSeasonRoom } = req.body;
+    const { matchId, name, isPublic, maxPlayers } = req.body;
     const userId = req.userId!;
 
     if (!matchId || !name) {
@@ -197,11 +45,20 @@ router.post("/", authenticateUser, async (req: AuthRequest, res: Response): Prom
       return;
     }
 
-    if (!isTodayMatch(match.startTime)) {
-      res.status(400).json({ error: "Can only create rooms for today's matches" });
-      return;
+    // Only allow rooms for today's matches
+    if (match.startTime) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const matchDate = new Date(match.startTime);
+      if (matchDate < today || matchDate >= tomorrow) {
+        res.status(400).json({ error: "Can only create rooms for today's matches" });
+        return;
+      }
     }
 
+    // Generate unique code (retry up to 5 times)
     let code = "";
     for (let attempt = 0; attempt < 5; attempt++) {
       const candidate = generateRoomCode();
@@ -223,28 +80,42 @@ router.post("/", authenticateUser, async (req: AuthRequest, res: Response): Prom
           hostUserId: userId,
           matchId,
           code,
-          isSeasonRoom: Boolean(isSeasonRoom),
-          seasonKey: isSeasonRoom ? "ipl_2026" : null,
-          isPublic: Boolean(isPublic),
+          isPublic: isPublic || false,
           maxPlayers: maxPlayers || 10,
           status: match.status === "live" ? "active" : "waiting",
         },
         { transaction: t }
       );
 
-      await RoomMember.create({ roomId: newRoom.id, userId }, { transaction: t });
+      // Add host as first member
+      await RoomMember.create(
+        { roomId: newRoom.id, userId },
+        { transaction: t }
+      );
 
-      if (!newRoom.isSeasonRoom) {
-        await createRoomParticipant(userId, newRoom.id, match, t);
-      }
+      // Create MatchParticipant for the host with ROOM_VENUE_ID
+      const currentRound = match.status === "live"
+        ? getCurrentRound(match.currentInnings || 1, match.currentOver || 1, match.totalOvers)
+        : 0;
+      await MatchParticipant.findOrCreate({
+        where: { userId, matchId, venueId: ROOM_VENUE_ID },
+        defaults: { userId, matchId, venueId: ROOM_VENUE_ID, currentRound },
+        transaction: t,
+      });
 
       return newRoom;
     });
 
-    const payload = await buildRoomPayload(room.id);
+    const host = await User.findByPk(userId, { attributes: ["id", "displayName", "avatarConfig"] });
+
     res.status(201).json({
-      ...payload,
+      room: {
+        ...room.toJSON(),
+        members: [{ userId, displayName: host?.displayName, avatarConfig: host?.avatarConfig, joinedAt: new Date() }],
+        memberCount: 1,
+      },
       shareLink: `/room/join?code=${room.code}`,
+      venueId: ROOM_VENUE_ID,
     });
   } catch (error) {
     console.error("Create room error:", error);
@@ -252,6 +123,7 @@ router.post("/", authenticateUser, async (req: AuthRequest, res: Response): Prom
   }
 });
 
+// Get user's rooms
 router.get("/my", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const userId = req.userId!;
@@ -276,7 +148,7 @@ router.get("/my", authenticateUser, async (req: AuthRequest, res: Response): Pro
       memberships.map(async (m) => {
         const room = (m as any).room;
         const memberCount = await RoomMember.count({ where: { roomId: room.id } });
-        return { ...room.toJSON(), memberCount, joinedAt: m.joinedAt };
+        return { ...room.toJSON(), memberCount };
       })
     );
 
@@ -287,12 +159,12 @@ router.get("/my", authenticateUser, async (req: AuthRequest, res: Response): Pro
   }
 });
 
-router.get("/public", authenticateUser, async (_req: AuthRequest, res: Response): Promise<void> => {
+// List public rooms
+router.get("/public", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const publicRooms = await Room.findAll({
       where: {
         isPublic: true,
-        isSeasonRoom: false,
         status: { [Op.in]: ["waiting", "active"] },
       },
       include: [
@@ -316,30 +188,49 @@ router.get("/public", authenticateUser, async (_req: AuthRequest, res: Response)
   }
 });
 
+// Get room details
 router.get("/:roomId", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const roomId = req.params.roomId as string;
-    const payload = await buildRoomPayload(roomId);
 
-    if (!payload) {
+    const room = await Room.findByPk(roomId, {
+      include: [
+        { model: Match, as: "match", attributes: ["id", "team1", "team2", "team1Short", "team2Short", "status", "startTime", "currentPhase", "currentOver", "currentInnings", "scoreData"] },
+        { model: User, as: "host", attributes: ["id", "displayName", "avatarConfig"] },
+      ],
+    });
+
+    if (!room) {
       res.status(404).json({ error: "Room not found" });
       return;
     }
 
-    const room = payload.room as any;
-    if (room.isSeasonRoom) {
-      const currentSeasonMatch = await findBestSeasonMatch();
-      res.json({ ...payload, currentSeasonMatch });
-      return;
-    }
+    const members = await RoomMember.findAll({
+      where: { roomId },
+      include: [{ model: User, as: "user", attributes: ["id", "displayName", "avatarConfig"] }],
+      order: [["joinedAt", "ASC"]],
+    });
 
-    res.json(payload);
+    res.json({
+      room: {
+        ...room.toJSON(),
+        members: members.map((m) => ({
+          userId: m.userId,
+          displayName: (m as any).user?.displayName,
+          avatarConfig: (m as any).user?.avatarConfig,
+          joinedAt: m.joinedAt,
+        })),
+        memberCount: members.length,
+      },
+      venueId: ROOM_VENUE_ID,
+    });
   } catch (error) {
     console.error("Get room error:", error);
     res.status(500).json({ error: "Failed to get room" });
   }
 });
 
+// Join room by code
 router.post("/join", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { code } = req.body;
@@ -352,7 +243,9 @@ router.post("/join", authenticateUser, async (req: AuthRequest, res: Response): 
 
     const room = await Room.findOne({
       where: { code: code.toUpperCase() },
-      include: [{ model: Match, as: "match", attributes: ["id", "team1", "team2", "team1Short", "team2Short", "status", "startTime"] }],
+      include: [
+        { model: Match, as: "match", attributes: ["id", "team1", "team2", "team1Short", "team2Short", "status", "startTime"] },
+      ],
     });
 
     if (!room) {
@@ -365,10 +258,17 @@ router.post("/join", authenticateUser, async (req: AuthRequest, res: Response): 
       return;
     }
 
-    const existingMember = await RoomMember.findOne({ where: { roomId: room.id, userId } });
+    // Check if already a member (idempotent)
+    const existingMember = await RoomMember.findOne({
+      where: { roomId: room.id, userId },
+    });
+
     if (existingMember) {
-      const payload = await buildRoomPayload(room.id);
-      res.json({ ...payload, message: "Already a member of this room" });
+      res.json({
+        room: room.toJSON(),
+        venueId: ROOM_VENUE_ID,
+        message: "Already a member of this room",
+      });
       return;
     }
 
@@ -379,32 +279,45 @@ router.post("/join", authenticateUser, async (req: AuthRequest, res: Response): 
     }
 
     await sequelize.transaction(async (t) => {
-      await RoomMember.create({ roomId: room.id, userId }, { transaction: t });
-      if (!room.isSeasonRoom) {
-        const match = await Match.findByPk(room.matchId, { transaction: t });
-        if (match) {
-          await createRoomParticipant(userId, room.id, match, t);
-        }
-      }
+      await RoomMember.create(
+        { roomId: room.id, userId },
+        { transaction: t }
+      );
+
+      const match = await Match.findByPk(room.matchId, { transaction: t });
+      const currentRound = match && match.status === "live"
+        ? getCurrentRound(match.currentInnings || 1, match.currentOver || 1, match.totalOvers)
+        : 0;
+      await MatchParticipant.findOrCreate({
+        where: { userId, matchId: room.matchId, venueId: ROOM_VENUE_ID },
+        defaults: { userId, matchId: room.matchId, venueId: ROOM_VENUE_ID, currentRound },
+        transaction: t,
+      });
     });
 
+    // Emit member joined via socket
     const io = req.app.get("io");
     const user = await User.findByPk(userId, { attributes: ["id", "displayName", "avatarConfig"] });
+    const newMemberCount = memberCount + 1;
+
     io.to(`room:${room.id}`).emit("memberJoined", {
       userId,
       displayName: user?.displayName,
       avatarConfig: user?.avatarConfig,
-      memberCount: memberCount + 1,
+      memberCount: newMemberCount,
     });
 
-    const payload = await buildRoomPayload(room.id);
-    res.json(payload);
+    res.json({
+      room: { ...room.toJSON(), memberCount: newMemberCount },
+      venueId: ROOM_VENUE_ID,
+    });
   } catch (error) {
     console.error("Join room error:", error);
     res.status(500).json({ error: "Failed to join room" });
   }
 });
 
+// Join random public room
 router.post("/join-random", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { matchId } = req.body;
@@ -419,7 +332,6 @@ router.post("/join-random", authenticateUser, async (req: AuthRequest, res: Resp
       where: {
         matchId,
         isPublic: true,
-        isSeasonRoom: false,
         status: { [Op.in]: ["waiting", "active"] },
       },
     });
@@ -429,10 +341,12 @@ router.post("/join-random", authenticateUser, async (req: AuthRequest, res: Resp
       return;
     }
 
+    // Find rooms with available slots, pick the fullest one
     let bestRoom: typeof publicRooms[0] | null = null;
     let bestCount = -1;
 
     for (const room of publicRooms) {
+      // Skip rooms user is already in
       const alreadyIn = await RoomMember.findOne({ where: { roomId: room.id, userId } });
       if (alreadyIn) continue;
 
@@ -449,79 +363,50 @@ router.post("/join-random", authenticateUser, async (req: AuthRequest, res: Resp
     }
 
     await sequelize.transaction(async (t) => {
-      await RoomMember.create({ roomId: bestRoom!.id, userId }, { transaction: t });
+      await RoomMember.create(
+        { roomId: bestRoom!.id, userId },
+        { transaction: t }
+      );
+
       const match = await Match.findByPk(bestRoom!.matchId, { transaction: t });
-      if (match) {
-        await createRoomParticipant(userId, bestRoom!.id, match, t);
-      }
+      const currentRound = match && match.status === "live"
+        ? getCurrentRound(match.currentInnings || 1, match.currentOver || 1, match.totalOvers)
+        : 0;
+      await MatchParticipant.findOrCreate({
+        where: { userId, matchId: bestRoom!.matchId, venueId: ROOM_VENUE_ID },
+        defaults: { userId, matchId: bestRoom!.matchId, venueId: ROOM_VENUE_ID, currentRound },
+        transaction: t,
+      });
     });
 
     const io = req.app.get("io");
     const user = await User.findByPk(userId, { attributes: ["id", "displayName", "avatarConfig"] });
+    const newCount = bestCount + 1;
+
     io.to(`room:${bestRoom.id}`).emit("memberJoined", {
       userId,
       displayName: user?.displayName,
       avatarConfig: user?.avatarConfig,
-      memberCount: bestCount + 1,
+      memberCount: newCount,
     });
 
-    const payload = await buildRoomPayload(bestRoom.id);
-    res.json(payload);
+    const roomWithMatch = await Room.findByPk(bestRoom.id, {
+      include: [
+        { model: Match, as: "match", attributes: ["id", "team1", "team2", "team1Short", "team2Short", "status", "startTime"] },
+      ],
+    });
+
+    res.json({
+      room: { ...roomWithMatch!.toJSON(), memberCount: newCount },
+      venueId: ROOM_VENUE_ID,
+    });
   } catch (error) {
     console.error("Join random room error:", error);
     res.status(500).json({ error: "Failed to join random room" });
   }
 });
 
-router.post("/:roomId/enter-match", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const roomId = req.params.roomId as string;
-    const { matchId } = req.body;
-    const userId = req.userId!;
-
-    const member = await RoomMember.findOne({ where: { roomId, userId } });
-    if (!member) {
-      res.status(403).json({ error: "Not a member of this room" });
-      return;
-    }
-
-    const room = await Room.findByPk(roomId);
-    if (!room) {
-      res.status(404).json({ error: "Room not found" });
-      return;
-    }
-
-    const targetMatchId = matchId || room.matchId;
-    const match = await Match.findByPk(targetMatchId);
-    if (!match) {
-      res.status(404).json({ error: "Match not found" });
-      return;
-    }
-
-    if (match.status === "completed") {
-      res.status(400).json({ error: "Cannot enter a completed match" });
-      return;
-    }
-
-    if (room.isSeasonRoom && !isIplMatch(match)) {
-      res.status(400).json({ error: "Season rooms only support IPL matches" });
-      return;
-    }
-
-    await sequelize.transaction(async (t) => {
-      await createRoomParticipant(userId, roomId, match, t);
-      if (room.matchId !== match.id) {
-        await room.update({ matchId: match.id, status: match.status === "live" ? "active" : "waiting" }, { transaction: t });
-      }
-    });
-
-    res.json({ roomId, matchId: match.id, venueId: ROOM_VENUE_ID });
-  } catch (error) {
-    console.error("Enter room match error:", error);
-    res.status(500).json({ error: "Failed to enter match" });
-  }
-});
-
+// Leave room
 router.post("/:roomId/leave", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const roomId = req.params.roomId as string;
@@ -549,11 +434,13 @@ router.post("/:roomId/leave", authenticateUser, async (req: AuthRequest, res: Re
     if (remainingMembers.length === 0) {
       await room.update({ status: "closed" });
     } else if (room.hostUserId === userId) {
+      // Transfer host to earliest member
       await room.update({ hostUserId: remainingMembers[0].userId });
     }
 
     const io = req.app.get("io");
     const user = await User.findByPk(userId, { attributes: ["displayName"] });
+
     io.to(`room:${roomId}`).emit("memberLeft", {
       userId,
       displayName: user?.displayName,
@@ -567,66 +454,57 @@ router.post("/:roomId/leave", authenticateUser, async (req: AuthRequest, res: Re
   }
 });
 
+// Room match leaderboard
 router.get("/:roomId/leaderboard", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const roomId = req.params.roomId as string;
+
     const room = await Room.findByPk(roomId);
     if (!room) {
       res.status(404).json({ error: "Room not found" });
       return;
     }
 
+    const memberUserIds = (
+      await RoomMember.findAll({ where: { roomId }, attributes: ["userId"] })
+    ).map((m) => m.userId);
+
     const participants = await MatchParticipant.findAll({
-      where: { matchId: room.matchId, venueId: ROOM_VENUE_ID, roomId },
+      where: {
+        matchId: room.matchId,
+        venueId: ROOM_VENUE_ID,
+        userId: { [Op.in]: memberUserIds },
+      },
       include: [{ model: User, as: "user", attributes: ["id", "displayName", "avatarConfig"] }],
       order: [["totalPoints", "DESC"]],
     });
 
-    res.json({
-      leaderboard: participants.map((p, idx) => ({
-        rank: idx + 1,
-        userId: p.userId,
-        displayName: (p as any).user?.displayName,
-        avatarConfig: (p as any).user?.avatarConfig,
-        totalPoints: p.totalPoints,
-        currentStreak: p.currentStreak,
-        bestStreak: p.bestStreak,
-        correctPredictions: p.correctPredictions,
-        totalPredictions: p.totalPredictions,
-        accuracy: p.totalPredictions > 0 ? Math.round((p.correctPredictions / p.totalPredictions) * 100) : 0,
-      })),
-    });
+    const leaderboard = participants.map((p, idx) => ({
+      rank: idx + 1,
+      userId: p.userId,
+      displayName: (p as any).user?.displayName,
+      avatarConfig: (p as any).user?.avatarConfig,
+      totalPoints: p.totalPoints,
+      currentStreak: p.currentStreak,
+      bestStreak: p.bestStreak,
+      correctPredictions: p.correctPredictions,
+      totalPredictions: p.totalPredictions,
+      accuracy: p.totalPredictions > 0 ? Math.round((p.correctPredictions / p.totalPredictions) * 100) : 0,
+    }));
+
+    res.json({ leaderboard });
   } catch (error) {
     console.error("Room leaderboard error:", error);
     res.status(500).json({ error: "Failed to get room leaderboard" });
   }
 });
 
-router.get("/:roomId/leaderboard/season", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const roomId = req.params.roomId as string;
-    const room = await Room.findByPk(roomId);
-    if (!room) {
-      res.status(404).json({ error: "Room not found" });
-      return;
-    }
-    if (!room.isSeasonRoom) {
-      res.status(400).json({ error: "Season leaderboard is only available for season rooms" });
-      return;
-    }
-
-    const leaderboard = await buildSeasonLeaderboard(roomId);
-    res.json({ leaderboard });
-  } catch (error) {
-    console.error("Season room leaderboard error:", error);
-    res.status(500).json({ error: "Failed to get season leaderboard" });
-  }
-});
-
+// Room round leaderboard
 router.get("/:roomId/leaderboard/round/:round", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const roomId = req.params.roomId as string;
-    const roundNum = parseInt(req.params.round as string, 10);
+    const round = req.params.round as string;
+    const roundNum = parseInt(round, 10);
 
     if (isNaN(roundNum) || roundNum < 0 || roundNum > 6) {
       res.status(400).json({ error: "Invalid round number" });
@@ -639,24 +517,32 @@ router.get("/:roomId/leaderboard/round/:round", authenticateUser, async (req: Au
       return;
     }
 
+    const memberUserIds = (
+      await RoomMember.findAll({ where: { roomId }, attributes: ["userId"] })
+    ).map((m) => m.userId);
+
     const roundPointsField = `round${roundNum}Points`;
+
     const participants = await MatchParticipant.findAll({
-      where: { matchId: room.matchId, venueId: ROOM_VENUE_ID, roomId },
+      where: {
+        matchId: room.matchId,
+        venueId: ROOM_VENUE_ID,
+        userId: { [Op.in]: memberUserIds },
+      },
       include: [{ model: User, as: "user", attributes: ["id", "displayName", "avatarConfig"] }],
       order: [[roundPointsField, "DESC"]],
     });
 
-    res.json({
-      round: roundNum,
-      leaderboard: participants.map((p, idx) => ({
-        rank: idx + 1,
-        userId: p.userId,
-        displayName: (p as any).user?.displayName,
-        avatarConfig: (p as any).user?.avatarConfig,
-        roundPoints: (p as any)[roundPointsField] || 0,
-        totalPoints: p.totalPoints,
-      })),
-    });
+    const leaderboard = participants.map((p, idx) => ({
+      rank: idx + 1,
+      userId: p.userId,
+      displayName: (p as any).user?.displayName,
+      avatarConfig: (p as any).user?.avatarConfig,
+      roundPoints: (p as any)[roundPointsField] || 0,
+      totalPoints: p.totalPoints,
+    }));
+
+    res.json({ round: roundNum, leaderboard });
   } catch (error) {
     console.error("Room round leaderboard error:", error);
     res.status(500).json({ error: "Failed to get room round leaderboard" });

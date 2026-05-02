@@ -118,7 +118,7 @@ export async function writePredictionAggregates(prediction: Prediction): Promise
 
     const userPredictions = await UserPrediction.findAll({
       where: { predictionId: prediction.id },
-      attributes: ["id", "venueId", "roomId", "selectedOption"],
+      attributes: ["id", "venueId", "selectedOption"],
     });
 
     if (userPredictions.length === 0) return;
@@ -144,18 +144,17 @@ export async function writePredictionAggregates(prediction: Prediction): Promise
     // Per venue
     const venueMap = new Map<string, { total: number; correct: number }>();
     for (const up of userPredictions) {
-      const scopeId = up.roomId || up.venueId;
-      const bucket = venueMap.get(scopeId) || { total: 0, correct: 0 };
+      const bucket = venueMap.get(up.venueId) || { total: 0, correct: 0 };
       bucket.total += 1;
       if (isSelectedOptionCorrect(prediction, up.selectedOption)) bucket.correct += 1;
-      venueMap.set(scopeId, bucket);
+      venueMap.set(up.venueId, bucket);
     }
 
-    for (const [scopeId, { total, correct }] of venueMap.entries()) {
+    for (const [venueId, { total, correct }] of venueMap.entries()) {
       await PredictionAggregate.upsert({
         predictionId: prediction.id,
         scope: "venue",
-        scopeId,
+        scopeId: venueId,
         totalAnswered: total,
         correctCount: correct,
         correctPct: pct(correct, total),
@@ -206,7 +205,7 @@ export async function resolvePrediction(
 
     await sequelize.transaction(async (t) => {
       const participant = await MatchParticipant.findOne({
-        where: { userId: up.userId, matchId: up.matchId, venueId: up.venueId, roomId: up.roomId ?? null },
+        where: { userId: up.userId, matchId: up.matchId, venueId: up.venueId },
         transaction: t,
         lock: t.LOCK.UPDATE,
       });
@@ -424,7 +423,6 @@ export async function voidPrediction(
             userId: up.userId,
             matchId: up.matchId,
             venueId: up.venueId,
-            roomId: up.roomId ?? null,
           },
           transaction: t,
           lock: t.LOCK.UPDATE,
@@ -548,7 +546,6 @@ export async function recomputeParticipantScores(
         userId: participant.userId,
         matchId: participant.matchId,
         venueId: participant.venueId,
-        roomId: participant.roomId ?? null,
       },
       include: [{ model: Prediction, as: "prediction" }],
       order: [["answeredAt", "ASC"], ["createdAt", "ASC"]],

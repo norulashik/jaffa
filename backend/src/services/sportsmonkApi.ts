@@ -230,7 +230,7 @@ async function fetchFixtureWithRuns(fixtureId: number): Promise<any> {
 // Fetch fixture with ball-by-ball data (slow — only for prediction resolution)
 async function fetchFixtureWithBalls(fixtureId: number): Promise<any> {
   try {
-    const url = `${getApiBase()}/fixtures/${fixtureId}?api_token=${getApiToken()}&include=balls,runs,batting,bowling,lineup`;
+    const url = `${getApiBase()}/fixtures/${fixtureId}?api_token=${getApiToken()}&include=balls,runs`;
     const res = await fetch(url, { headers: SPORTSMONK_HEADERS });
     const data: any = await res.json();
     return data.data || null;
@@ -362,7 +362,7 @@ async function fetchLiveFixtureDetail(
     }
   }
 
-  const include = includeBalls ? "balls,runs,batting,bowling,lineup" : "runs";
+  const include = includeBalls ? "balls,runs" : "runs";
   const liveFixture = await fetchFixtureFromLivescores(fixtureId, include);
   if (liveFixture) {
     lastGoodFixture.set(cacheKey, { at: Date.now(), data: liveFixture });
@@ -1179,7 +1179,7 @@ async function finalizeMatch(
   // Close any active rooms for this match.
   try {
     const { Room } = await import("../models");
-    await Room.update({ status: "closed" }, { where: { matchId: match.id, status: "active", isSeasonRoom: false } });
+    await Room.update({ status: "closed" }, { where: { matchId: match.id, status: "active" } });
   } catch (err) {
     console.error("[Sportsmonk] Room close error:", err);
   }
@@ -1723,7 +1723,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
         // Activate rooms for this match
         try {
           const { Room } = await import("../models");
-          await Room.update({ status: "active" }, { where: { matchId: match.id, status: "waiting", isSeasonRoom: false } });
+          await Room.update({ status: "active" }, { where: { matchId: match.id, status: "waiting" } });
         } catch (err) {
           console.error("[Sportsmonk] Room activation error:", err);
         }

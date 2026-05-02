@@ -33,7 +33,6 @@ function CreateRoomContent() {
   const [selectedMatch, setSelectedMatch] = useState<string | null>(null);
   const [roomName, setRoomName] = useState("");
   const [isPublic, setIsPublic] = useState(false);
-  const [isSeasonRoom, setIsSeasonRoom] = useState(false);
   const [maxPlayers, setMaxPlayers] = useState(10);
 
   useEffect(() => {
@@ -83,7 +82,7 @@ function CreateRoomContent() {
         matchId = result.match.id;
       }
 
-      const { room, venueId } = await api.createRoom(matchId, roomName.trim(), isPublic, maxPlayers, isSeasonRoom);
+      const { room, venueId } = await api.createRoom(matchId, roomName.trim(), isPublic, maxPlayers);
       dispatch({ type: "SET_VENUE", venueId });
       dispatch({ type: "SET_MATCH", matchId: room.matchId });
       dispatch({ type: "SET_ROOM", roomId: room.id, roomCode: room.code });
@@ -144,23 +143,6 @@ function CreateRoomContent() {
               <div
                 className="w-5 h-5 rounded-full bg-white absolute top-1 transition-all"
                 style={{ left: isPublic ? "26px" : "4px" }}
-              />
-            </button>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-bold text-white">Season Room</p>
-              <p className="text-[10px] text-[#6b7280]">Keep this room code and member list across IPL matches</p>
-            </div>
-            <button
-              onClick={() => setIsSeasonRoom(!isSeasonRoom)}
-              className="w-12 h-7 rounded-full transition-colors relative"
-              style={{ background: isSeasonRoom ? "#3b9eff" : "#333" }}
-            >
-              <div
-                className="w-5 h-5 rounded-full bg-white absolute top-1 transition-all"
-                style={{ left: isSeasonRoom ? "26px" : "4px" }}
               />
             </button>
           </div>

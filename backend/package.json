@@ -8,8 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "db:sync": "ts-node src/scripts/syncDb.ts",
-    "db:repair-over-predictions": "ts-node src/scripts/repairOverPredictions.ts",
-    "test:punter-card": "ts-node src/scripts/testPunterCardRegression.ts"
+    "db:repair-over-predictions": "ts-node src/scripts/repairOverPredictions.ts"
   },
   "dependencies": {
     "@types/nodemailer": "^7.0.11",

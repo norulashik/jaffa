@@ -1,9 +1,5 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
-function withRoomId(roomId?: string | null): string {
-  return roomId ? `&roomId=${encodeURIComponent(roomId)}` : "";
-}
-
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = typeof window !== "undefined" ? localStorage.getItem("jaffa_token") : null;
 
@@ -83,30 +79,30 @@ export const api = {
       body: JSON.stringify({ venueId, matchCode, latitude, longitude }),
     }),
 
-  getMatchState: (matchId: string, venueId: string, roomId?: string | null) =>
+  getMatchState: (matchId: string, venueId: string) =>
     request<{ match: any; participant: any; openPredictions: any[]; playerCount: number }>(
-      `/matches/${matchId}/state?venueId=${venueId}${withRoomId(roomId)}`
+      `/matches/${matchId}/state?venueId=${venueId}`
     ),
 
   // Predictions
-  getPredictions: (matchId: string, venueId: string, round?: number, roomId?: string | null) =>
-    request<any[]>(`/predictions/${matchId}?venueId=${venueId}${round !== undefined ? `&round=${round}` : ""}${withRoomId(roomId)}`),
+  getPredictions: (matchId: string, venueId: string, round?: number) =>
+    request<any[]>(`/predictions/${matchId}?venueId=${venueId}${round !== undefined ? `&round=${round}` : ""}`),
 
-  submitPrediction: (predictionId: string, selectedOption: string, venueId: string, boostType?: string, roomId?: string | null) =>
+  submitPrediction: (predictionId: string, selectedOption: string, venueId: string, boostType?: string) =>
     request<{ userPrediction: any }>(`/predictions/${predictionId}/answer`, {
       method: "POST",
-      body: JSON.stringify({ selectedOption, venueId, boostType: boostType || "none", roomId }),
+      body: JSON.stringify({ selectedOption, venueId, boostType: boostType || "none" }),
     }),
 
-  getMyPredictions: (matchId: string, venueId: string, roomId?: string | null) =>
-    request<any[]>(`/predictions/${matchId}/my-predictions?venueId=${venueId}${withRoomId(roomId)}`),
+  getMyPredictions: (matchId: string, venueId: string) =>
+    request<any[]>(`/predictions/${matchId}/my-predictions?venueId=${venueId}`),
 
-  getMyStory: (matchId: string, venueId: string, roomId?: string | null) =>
+  getMyStory: (matchId: string, venueId: string) =>
     request<{
       summary: { right: number; wrong: number; totalPredictions: number; accuracy: number; totalPoints: number; rank?: number };
       toneLine: string;
       beats: Array<{ type: string; title: string; detail: string; data?: any }>;
-    }>(`/matches/${matchId}/my-story?venueId=${venueId}${withRoomId(roomId)}`),
+    }>(`/matches/${matchId}/my-story?venueId=${venueId}`),
 
   // Past matches the logged-in user participated in (completed only). Paginated.
   getMyPastMatches: (page: number = 1, pageSize: number = 10) =>
@@ -184,23 +180,17 @@ export const api = {
     request<{ players: any[]; count: number }>(`/admin/venue/players/${matchId}`),
 
   // Rooms
-  createRoom: (matchId: string, name: string, isPublic?: boolean, maxPlayers?: number, isSeasonRoom?: boolean) =>
+  createRoom: (matchId: string, name: string, isPublic?: boolean, maxPlayers?: number) =>
     request<{ room: any; shareLink: string; venueId: string }>("/rooms", {
       method: "POST",
-      body: JSON.stringify({ matchId, name, isPublic, maxPlayers, isSeasonRoom }),
+      body: JSON.stringify({ matchId, name, isPublic, maxPlayers }),
     }),
 
   getMyRooms: () => request<{ rooms: any[] }>("/rooms/my"),
 
   getPublicRooms: () => request<{ rooms: any[] }>("/rooms/public"),
 
-  getRoom: (roomId: string) => request<{ room: any; venueId: string; currentSeasonMatch?: any | null }>(`/rooms/${roomId}`),
-
-  enterRoomMatch: (roomId: string, matchId: string) =>
-    request<{ roomId: string; matchId: string; venueId: string }>(`/rooms/${roomId}/enter-match`, {
-      method: "POST",
-      body: JSON.stringify({ matchId }),
-    }),
+  getRoom: (roomId: string) => request<{ room: any; venueId: string }>(`/rooms/${roomId}`),
 
   joinRoomByCode: (code: string) =>
     request<{ room: any; venueId: string }>("/rooms/join", {
@@ -220,9 +210,6 @@ export const api = {
   getRoomLeaderboard: (roomId: string) =>
     request<{ leaderboard: any[] }>(`/rooms/${roomId}/leaderboard`),
 
-  getRoomSeasonLeaderboard: (roomId: string) =>
-    request<{ leaderboard: any[] }>(`/rooms/${roomId}/leaderboard/season`),
-
   getRoomRoundLeaderboard: (roomId: string, round: number) =>
     request<{ round: number; leaderboard: any[] }>(`/rooms/${roomId}/leaderboard/round/${round}`),
 
@@ -240,7 +227,7 @@ export const api = {
     }),
 
   // Punter Card
-  getPunterCard: (matchId: string, venueId?: string, roomId?: string | null) =>
+  getPunterCard: (matchId: string, venueId?: string) =>
     request<{
       matchId: string;
       match: {
@@ -267,17 +254,16 @@ export const api = {
         } | null;
       }>;
       allAnswered: boolean;
-    }>(`/punter-card/${matchId}${venueId ? `?venueId=${venueId}${roomId ? `&roomId=${encodeURIComponent(roomId)}` : ""}` : roomId ? `?roomId=${encodeURIComponent(roomId)}` : ""}`),
+    }>(`/punter-card/${matchId}${venueId ? `?venueId=${venueId}` : ""}`),
 
   submitPunterCard: (
     matchId: string,
     venueId: string,
-    answers: { predictionId: string; selectedOption: string }[],
-    roomId?: string | null
+    answers: { predictionId: string; selectedOption: string }[]
   ) =>
     request<{ saved: number }>(`/punter-card/${matchId}/answer`, {
       method: "POST",
-      body: JSON.stringify({ venueId, answers, roomId }),
+      body: JSON.stringify({ venueId, answers }),
     }),
 
   getMyPunterCards: () =>

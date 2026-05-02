@@ -37,7 +37,7 @@ export default function LiveGame({ matchId, venueId, match }: LiveGameProps) {
   const loadPredictions = useCallback(async () => {
     if (!venueId) return;
     try {
-      const preds = await api.getPredictions(matchId, venueId, undefined, localStorage.getItem("jaffa_room_id"));
+      const preds = await api.getPredictions(matchId, venueId);
       const open = preds.filter(
         (p: any) =>
           p.status === "open" &&
@@ -99,7 +99,7 @@ export default function LiveGame({ matchId, venueId, match }: LiveGameProps) {
       activeBoost?.predId === predId ? activeBoost.type : undefined;
 
     try {
-      await api.submitPrediction(predId, selected, venueId, boostType, localStorage.getItem("jaffa_room_id"));
+      await api.submitPrediction(predId, selected, venueId, boostType);
 
       if (boostType === "boost") dispatch({ type: "USE_BOOST" });
       if (boostType === "all_in") dispatch({ type: "USE_ALL_IN" });
@@ -122,7 +122,7 @@ export default function LiveGame({ matchId, venueId, match }: LiveGameProps) {
 
       // Refresh participant state
       try {
-        const matchState = await api.getMatchState(matchId, venueId, localStorage.getItem("jaffa_room_id"));
+        const matchState = await api.getMatchState(matchId, venueId);
         if (matchState.participant) {
           dispatch({
             type: "UPDATE_PARTICIPANT",

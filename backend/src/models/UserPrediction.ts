@@ -9,7 +9,6 @@ interface UserPredictionAttributes {
   predictionId: string;
   matchId: string;
   venueId: string;
-  roomId?: string | null;
   selectedOption: string;
   boostType: BoostType;
   pointsEarned: number;
@@ -29,7 +28,6 @@ class UserPrediction extends Model<UserPredictionAttributes, UserPredictionCreat
   public predictionId!: string;
   public matchId!: string;
   public venueId!: string;
-  public roomId!: string | null;
   public selectedOption!: string;
   public boostType!: BoostType;
   public pointsEarned!: number;
@@ -67,11 +65,6 @@ UserPrediction.init(
       allowNull: false,
       references: { model: "venues", key: "id" },
     },
-    roomId: {
-      type: DataTypes.UUID,
-      allowNull: true,
-      references: { model: "rooms", key: "id" },
-    },
     selectedOption: {
       type: DataTypes.STRING(50),
       allowNull: false,
@@ -102,8 +95,8 @@ UserPrediction.init(
     tableName: "user_predictions",
     timestamps: true,
     indexes: [
-      { fields: ["userId", "predictionId", "venueId", "roomId"] },
-      { fields: ["matchId", "venueId", "roomId", "userId"] },
+      { unique: true, fields: ["userId", "predictionId"] }, // one answer per prediction per user
+      { fields: ["matchId", "venueId", "userId"] },
       { fields: ["predictionId"] },
     ],
   }

@@ -42,10 +42,6 @@ export default function PunterCardPage() {
     searchParams?.get("venueId") ||
     (typeof window !== "undefined" ? localStorage.getItem("jaffa_venue_id") || undefined : undefined) ||
     GLOBAL_VENUE_ID;
-  const roomId =
-    searchParams?.get("roomId") ||
-    (typeof window !== "undefined" ? localStorage.getItem("jaffa_room_id") || undefined : undefined) ||
-    undefined;
 
   const [loading, setLoading] = useState(true);
   const [match, setMatch] = useState<any>(null);
@@ -70,7 +66,7 @@ export default function PunterCardPage() {
     }
     (async () => {
       try {
-        const res = await api.getPunterCard(matchId, venueId, roomId);
+        const res = await api.getPunterCard(matchId, venueId);
         setMatch(res.match);
         setQuestions(res.questions);
         setAllAnswered(res.allAnswered);
@@ -140,10 +136,10 @@ export default function PunterCardPage() {
     // and auto-open the share modal exactly on the completing Lock In.
     const wasAllAnswered = allAnswered;
     try {
-      const res = await api.submitPunterCard(matchId, venueId, pendingSelections, roomId);
+      const res = await api.submitPunterCard(matchId, venueId, pendingSelections);
       toast.success(`Locked in ${res.saved} pick${res.saved === 1 ? "" : "s"}`);
       // Refresh
-      const refreshed = await api.getPunterCard(matchId, venueId, roomId);
+      const refreshed = await api.getPunterCard(matchId, venueId);
       setQuestions(refreshed.questions);
       setAllAnswered(refreshed.allAnswered);
       if (refreshed.allAnswered && !wasAllAnswered) {
@@ -423,16 +419,13 @@ export default function PunterCardPage() {
           const answered = !!q.userAnswer;
           const locked = answered;
           const resolved = q.status === "resolved" && q.correctOption;
-          const voided = isVoidedQuestion(q);
 
           // Status pill computed once per card. Mirrors the four-state vibe
           // from the reference: PENDING (orange) / LOCKED (blue) / +PTS
           // (emerald) / MISSED (rose). Drives both the pill at the top of
           // the card and indirectly the user's at-a-glance progress sense.
           const pill = resolved
-            ? voided
-              ? { label: "VOIDED",                           bg: "rgba(255,255,255,0.08)", border: "rgba(255,255,255,0.20)", text: "rgba(255,255,255,0.62)" }
-              : q.userAnswer?.isCorrect
+            ? q.userAnswer?.isCorrect
               ? { label: `+${q.userAnswer.pointsEarned} PTS`, bg: "rgba(16,185,129,0.18)", border: "rgba(16,185,129,0.55)", text: "#34d399" }
               : { label: "MISSED",                           bg: "rgba(244,63,94,0.18)",  border: "rgba(244,63,94,0.55)",  text: "#fb7185" }
             : answered
@@ -488,9 +481,9 @@ export default function PunterCardPage() {
                 <div className={`px-3 pb-4 ${isPool ? "grid grid-cols-2 gap-2" : "space-y-2"}`}>
                   {q.options.map((opt) => {
                     const selected = selections[q.id] === opt.key;
-                    const isCorrect = resolved && isCorrectOptionKey(q, opt.key);
+                    const isCorrect = resolved && q.correctOption === opt.key;
                     const isWrong =
-                      resolved && !voided && q.userAnswer?.selectedOption === opt.key && !q.userAnswer.isCorrect;
+                      resolved && q.userAnswer?.selectedOption === opt.key && !q.userAnswer.isCorrect;
 
                     let bg: string, border: string, glow: string;
                     if (isCorrect) {
@@ -610,29 +603,6 @@ export default function PunterCardPage() {
 const ALL_CORRECT_OPTION = "__all__";
 const VOID_OPTION = "__void__";
 
-function correctOptionKeys(q: Question): string[] {
-  return (q.correctOption || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-function isVoidedQuestion(q: Question): boolean {
-  return q.status === "voided" || q.correctOption === VOID_OPTION;
-}
-
-function isCorrectOptionKey(q: Question, key: string): boolean {
-  if (isVoidedQuestion(q)) return false;
-  return correctOptionKeys(q).includes(key);
-}
-
-function correctOptionLabels(q: Question): string[] {
-  return correctOptionKeys(q)
-    .filter((key) => key !== VOID_OPTION)
-    .map((key) => q.options.find((o) => o.key === key)?.label)
-    .filter(Boolean) as string[];
-}
-
 type ShareCardMode = "picks" | "results";
 
 // Per-question render state used by the post-match results mode. Derived
@@ -675,13 +645,25 @@ const ShareCard = forwardRef<HTMLDivElement, {
       // any stray case where correctOption was stored as the sentinel.
       let result: ResultState | null = null;
       if (isResults) {
-        const isVoided = isVoidedQuestion(q);
+        const isVoided = q.status === "voided" || q.correctOption === VOID_OPTION;
         if (isVoided) {
           result = { kind: "voided" };
         } else if (q.userAnswer?.isCorrect === true) {
           result = { kind: "correct", points: q.userAnswer.pointsEarned ?? 0 };
         } else if (q.userAnswer?.isCorrect === false) {
-          result = { kind: "wrong", correctLabels: correctOptionLabels(q) };
+          // correctOption may be a comma-joined list of keys when multiple
+          // tied (top batter ties). Look each one up in this question's
+          // options array; ALL_CORRECT_OPTION resolves to the labelled
+          // sentinel ("Tie", "Neither bats", etc.) which is already in the
+          // options list at generation time.
+          const correctKeys = (q.correctOption || "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+          const correctLabels = correctKeys
+            .map((k) => q.options.find((o) => o.key === k)?.label)
+            .filter(Boolean) as string[];
+          result = { kind: "wrong", correctLabels };
         } else {
           result = { kind: "pending" };
         }

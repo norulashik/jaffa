@@ -3,7 +3,6 @@ import { Op } from "sequelize";
 import { Prediction, UserPrediction, Match, Venue } from "../models";
 import { authenticateUser, AuthRequest } from "../middleware/auth";
 import { ensurePunterCard } from "../services/punterCard";
-import { scopedRoomId } from "../utils/roomScope";
 
 const router = Router();
 
@@ -15,7 +14,6 @@ router.get("/:matchId", authenticateUser, async (req: AuthRequest, res: Response
     const matchId = req.params.matchId as string;
     const venueId = req.query.venueId as string | undefined;
     const userId = req.userId!;
-    const roomId = scopedRoomId(req.query.roomId);
 
     const match = await Match.findByPk(matchId);
     if (!match) {
@@ -38,10 +36,10 @@ router.get("/:matchId", authenticateUser, async (req: AuthRequest, res: Response
 
     const userAnswers = venueId
       ? await UserPrediction.findAll({
-          where: { userId, matchId, venueId, roomId, predictionId: { [Op.in]: cards.map((c) => c.id) } },
+          where: { userId, matchId, venueId, predictionId: { [Op.in]: cards.map((c) => c.id) } },
         })
       : await UserPrediction.findAll({
-          where: { userId, matchId, roomId, predictionId: { [Op.in]: cards.map((c) => c.id) } },
+          where: { userId, matchId, predictionId: { [Op.in]: cards.map((c) => c.id) } },
         });
 
     const answeredMap = new Map(userAnswers.map((a) => [a.predictionId, a]));
@@ -87,13 +85,11 @@ router.get("/:matchId", authenticateUser, async (req: AuthRequest, res: Response
 router.post("/:matchId/answer", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const matchId = req.params.matchId as string;
-    const { venueId, answers, roomId: rawRoomId } = req.body as {
+    const { venueId, answers } = req.body as {
       venueId: string;
-      roomId?: string | null;
       answers: { predictionId: string; selectedOption: string }[];
     };
     const userId = req.userId!;
-    const roomId = scopedRoomId(rawRoomId);
 
     if (!venueId || !Array.isArray(answers) || answers.length === 0) {
       res.status(400).json({ error: "venueId and non-empty answers[] required" });
@@ -132,17 +128,16 @@ router.post("/:matchId/answer", authenticateUser, async (req: AuthRequest, res: 
 
       // Upsert — updating is allowed until the match starts
       const existing = await UserPrediction.findOne({
-        where: { userId, predictionId: pred.id, venueId, roomId },
+        where: { userId, predictionId: pred.id },
       });
       if (existing) {
-        await existing.update({ selectedOption: ans.selectedOption, venueId, roomId });
+        await existing.update({ selectedOption: ans.selectedOption, venueId });
       } else {
         await UserPrediction.create({
           userId,
           predictionId: pred.id,
           matchId,
           venueId,
-          roomId,
           selectedOption: ans.selectedOption,
           boostType: "none",
         });

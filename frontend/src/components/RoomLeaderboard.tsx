@@ -5,11 +5,9 @@ import { motion } from "framer-motion";
 import { api } from "@/lib/api";
 import { useGame } from "@/context/GameContext";
 import { connectSocket } from "@/lib/socket";
-import { Crown } from "lucide-react";
 
 interface RoomLeaderboardProps {
   roomId: string;
-  isSeasonRoom?: boolean;
 }
 
 const ROUND_LABELS: Record<number, string> = {
@@ -21,13 +19,13 @@ const ROUND_LABELS: Record<number, string> = {
   6: "R6",
 };
 
-export default function RoomLeaderboard({ roomId, isSeasonRoom = false }: RoomLeaderboardProps) {
+export default function RoomLeaderboard({ roomId }: RoomLeaderboardProps) {
   const { state } = useGame();
   const { currentRound, userId } = state;
 
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"round" | "match" | "season">(isSeasonRoom ? "season" : "match");
+  const [activeTab, setActiveTab] = useState<"round" | "match">("match");
   const [selectedRound, setSelectedRound] = useState(currentRound || 1);
 
   useEffect(() => {
@@ -59,9 +57,6 @@ export default function RoomLeaderboard({ roomId, isSeasonRoom = false }: RoomLe
     try {
       if (activeTab === "round") {
         const result = await api.getRoomRoundLeaderboard(roomId, selectedRound);
-        setData(result.leaderboard || []);
-      } else if (activeTab === "season") {
-        const result = await api.getRoomSeasonLeaderboard(roomId);
         setData(result.leaderboard || []);
       } else {
         const result = await api.getRoomLeaderboard(roomId);
@@ -99,14 +94,6 @@ export default function RoomLeaderboard({ roomId, isSeasonRoom = false }: RoomLe
         >
           Full Match
         </button>
-        {isSeasonRoom && (
-          <button
-            onClick={() => setActiveTab("season")}
-            className={tabClass(activeTab === "season")}
-          >
-            Season Leaderboard
-          </button>
-        )}
       </div>
 
       {/* Round selector */}
@@ -149,8 +136,6 @@ export default function RoomLeaderboard({ roomId, isSeasonRoom = false }: RoomLe
               activeTab === "round"
                 ? player.roundPoints
                 : player.totalPoints;
-            const showOrangeCap = activeTab === "season" && player.capStatus === "orange";
-            const showVioletCap = activeTab === "season" && player.capStatus === "violet";
 
             return (
               <motion.div
@@ -179,8 +164,6 @@ export default function RoomLeaderboard({ roomId, isSeasonRoom = false }: RoomLe
                   <span
                     className={`player-name truncate block ${isMe ? "text-[#ff6341]" : ""}`}
                   >
-                    {showOrangeCap && <Crown className="inline-block w-3.5 h-3.5 mr-1 text-[#ff8a1e]" />}
-                    {showVioletCap && <Crown className="inline-block w-3.5 h-3.5 mr-1 text-[#8b5cf6]" />}
                     {player.displayName}
                     {isMe && " (You)"}
                   </span>
@@ -196,9 +179,7 @@ export default function RoomLeaderboard({ roomId, isSeasonRoom = false }: RoomLe
                   <div className={`stat-number text-xl ${isMe ? "text-[#ff6341]" : ""}`}>
                     {points}
                   </div>
-                  <div className="text-[10px] text-white/40 font-bold uppercase">
-                    {activeTab === "season" ? `${player.matchCount || 0} matches` : "pts"}
-                  </div>
+                  <div className="text-[10px] text-white/40 font-bold uppercase">pts</div>
                 </div>
               </motion.div>
             );

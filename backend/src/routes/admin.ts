@@ -738,7 +738,7 @@ router.post("/match/:matchId/end", authenticateOwner, async (req: any, res: Resp
     // Close rooms for this match
     try {
       const { Room } = await import("../models");
-      await Room.update({ status: "closed" }, { where: { matchId, status: ["waiting", "active"], isSeasonRoom: false } });
+      await Room.update({ status: "closed" }, { where: { matchId, status: ["waiting", "active"] } });
     } catch (err) {
       console.error("Room close error:", err);
     }

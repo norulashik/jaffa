@@ -25,7 +25,6 @@ interface RoomData {
   code: string;
   hostUserId: string;
   matchId: string;
-  isSeasonRoom?: boolean;
   isPublic: boolean;
   maxPlayers: number;
   status: string;
@@ -48,16 +47,6 @@ interface RoomData {
   };
 }
 
-interface MatchSummary {
-  id: string;
-  team1: string;
-  team2: string;
-  team1Short?: string;
-  team2Short?: string;
-  status: string;
-  startTime?: string;
-}
-
 export default function RoomLobby() {
   const router = useRouter();
   const params = useParams();
@@ -68,17 +57,14 @@ export default function RoomLobby() {
   const [venueId, setVenueId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [leaving, setLeaving] = useState(false);
-  const [enteringMatch, setEnteringMatch] = useState(false);
   const [activeTab, setActiveTab] = useState<"members" | "leaderboard">("members");
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
-  const [currentSeasonMatch, setCurrentSeasonMatch] = useState<MatchSummary | null>(null);
 
   const loadRoom = useCallback(async () => {
     try {
       const data = await api.getRoom(roomId);
       setRoom(data.room);
       setVenueId(data.venueId);
-      setCurrentSeasonMatch(data.currentSeasonMatch || null);
     } catch (err: any) {
       toast.error(err.message || "Failed to load room");
       router.push("/lobby");
@@ -161,33 +147,18 @@ export default function RoomLobby() {
     }
   };
 
-  const handlePlayNow = async () => {
+  const handlePlayNow = () => {
     if (!room || !venueId) return;
-    const targetMatchId = room.isSeasonRoom ? currentSeasonMatch?.id : room.matchId;
-    if (!targetMatchId) {
-      toast.error("No active IPL match is available for this season room");
-      return;
-    }
-    setEnteringMatch(true);
-    try {
-      if (room.isSeasonRoom) {
-        await api.enterRoomMatch(room.id, targetMatchId);
-      }
     dispatch({ type: "SET_VENUE", venueId });
-    dispatch({ type: "SET_MATCH", matchId: targetMatchId });
+    dispatch({ type: "SET_MATCH", matchId: room.matchId });
     dispatch({ type: "SET_ROOM", roomId: room.id, roomCode: room.code });
     localStorage.setItem("jaffa_venue_id", venueId);
-    localStorage.setItem("jaffa_match_id", targetMatchId);
+    localStorage.setItem("jaffa_match_id", room.matchId);
 
     // Join the venue match socket room for live events
-    joinVenueMatch(venueId, targetMatchId);
+    joinVenueMatch(venueId, room.matchId);
 
-      router.push(`/match/${targetMatchId}`);
-    } catch (err: any) {
-      toast.error(err.message || "Failed to enter match");
-    } finally {
-      setEnteringMatch(false);
-    }
+    router.push(`/match/${room.matchId}`);
   };
 
   const handleLeave = async () => {
@@ -217,10 +188,9 @@ export default function RoomLobby() {
   if (!room) return null;
 
   const isHost = state.userId === room.hostUserId;
-  const displayMatch = room.isSeasonRoom ? currentSeasonMatch : room.match;
-  const matchIsLive = displayMatch?.status === "live";
-  const matchIsUpcoming = displayMatch?.status === "upcoming";
-  const startDate = displayMatch?.startTime ? new Date(displayMatch.startTime) : null;
+  const matchIsLive = room.match?.status === "live";
+  const matchIsUpcoming = room.match?.status === "upcoming";
+  const startDate = room.match?.startTime ? new Date(room.match.startTime) : null;
   const canPlay = matchIsLive || (matchIsUpcoming && startDate && startDate.getTime() - Date.now() <= 45 * 60 * 1000);
 
   return (
@@ -243,7 +213,6 @@ export default function RoomLobby() {
                   {room.status === "active" ? "LIVE" : room.status.toUpperCase()}
                 </span>
                 {room.isPublic && <span className="info-pill">PUBLIC</span>}
-                {room.isSeasonRoom && <span className="info-pill">SEASON</span>}
               </div>
             </div>
             {isHost && (
@@ -254,14 +223,14 @@ export default function RoomLobby() {
           </div>
 
           {/* Match Info */}
-          {displayMatch && (
+          {room.match && (
             <div className="flex items-center justify-center gap-4 py-3" style={{ borderTop: "1px solid #333" }}>
               <span className="font-bold text-sm" style={{ fontFamily: "'Bungee', 'Impact', cursive" }}>
-                {(displayMatch.team1Short || displayMatch.team1?.slice(0, 3))?.toUpperCase()}
+                {(room.match.team1Short || room.match.team1?.slice(0, 3))?.toUpperCase()}
               </span>
               <span className="text-xs font-bold" style={{ color: "#ff6341" }}>VS</span>
               <span className="font-bold text-sm" style={{ fontFamily: "'Bungee', 'Impact', cursive" }}>
-                {(displayMatch.team2Short || displayMatch.team2?.slice(0, 3))?.toUpperCase()}
+                {(room.match.team2Short || room.match.team2?.slice(0, 3))?.toUpperCase()}
               </span>
               {startDate && !matchIsLive && (
                 <span className="text-[10px] text-[#6b7280] ml-2">
@@ -303,11 +272,10 @@ export default function RoomLobby() {
             initial={{ scale: 0.95 }}
             animate={{ scale: 1 }}
             onClick={handlePlayNow}
-            disabled={enteringMatch}
             className="w-full btn-sticker btn-orange uppercase tracking-tight py-4 text-lg font-bold"
             style={{ boxShadow: "0 4px 20px rgba(255,99,65,0.4)" }}
           >
-            {enteringMatch ? "ENTERING..." : room.isSeasonRoom ? "ENTER THIS MATCH" : "PLAY NOW"}
+            PLAY NOW
           </motion.button>
         )}
 
@@ -363,7 +331,7 @@ export default function RoomLobby() {
 
         {/* Leaderboard Tab */}
         {activeTab === "leaderboard" && (
-          <RoomLeaderboard roomId={roomId} isSeasonRoom={Boolean(room.isSeasonRoom)} />
+          <RoomLeaderboard roomId={roomId} />
         )}
 
         {/* Leave Room */}

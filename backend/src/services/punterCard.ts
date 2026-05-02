@@ -5,7 +5,7 @@ import sequelize from "../config/database";
 import { playerKey } from "./predictionEngine";
 import { ALL_CORRECT_OPTION } from "./pointsEngine";
 import { getYearWeekNumber } from "../utils/weekHelper";
-import { resolveBallName, isInLineup, addLearnedAlias, clearLearnedAliases, findFuzzyMatch } from "./playerNameMatch";
+import { resolveBallName, isInLineup, addLearnedAlias, clearLearnedAliases } from "./playerNameMatch";
 import {
   squadWithRolesForTeam,
   getPlayerRole,
@@ -758,15 +758,9 @@ export function computeCorrectFromBalls(
       if (motmId) {
         const name = nameForPlayerId(allBalls, Number(motmId));
         if (name) return playerKey(name);
-        const fixtureName = playerNameById(fixture, Number(motmId));
-        if (fixtureName) return playerKey(fixtureName);
       }
       const winners = topBatterWinners(allBalls);
-      if (winners.length === 0) {
-        const fixtureWinners = topBatterWinnersFromFixture(fixture);
-        if (fixtureWinners.length === 0) return null;
-        return playerKey(fixtureWinners[0]);
-      }
+      if (winners.length === 0) return null;
       return playerKey(winners[0]);
     }
     case "punter_top_batter": {
@@ -774,21 +768,13 @@ export function computeCorrectFromBalls(
       // as a comma-joined list of player keys; scorePunterUserAnswers grants
       // points to anyone who picked any winner.
       const winners = topBatterWinners(allBalls);
-      if (winners.length === 0) {
-        const fixtureWinners = topBatterWinnersFromFixture(fixture);
-        if (fixtureWinners.length === 0) return null;
-        return fixtureWinners.map(playerKey).join(",");
-      }
+      if (winners.length === 0) return null;
       return winners.map(playerKey).join(",");
     }
     case "punter_top_bowler": {
       // Tie-break: most wickets, then fewer runs conceded, then award all tied.
       const winners = topBowlerWinners(allBalls);
-      if (winners.length === 0) {
-        const fixtureWinners = topBowlerWinnersFromFixture(fixture);
-        if (fixtureWinners.length === 0) return null;
-        return fixtureWinners.map(playerKey).join(",");
-      }
+      if (winners.length === 0) return null;
       return winners.map(playerKey).join(",");
     }
 
@@ -807,18 +793,16 @@ export function computeCorrectFromBalls(
       const players = pred.options.filter((o) => o.key !== ALL_CORRECT_OPTION);
       if (players.length !== 2) return null;
       const p1 = players[0], p2 = players[1];
-      const p1Name = playerNameForOption(p1, pool);
-      const p2Name = playerNameForOption(p2, pool);
       const lineup = match?.team1Players || match?.team2Players
         ? [...(match?.team1Players || []), ...(match?.team2Players || [])]
         : null;
       if (lineup && lineup.length > 0) {
-        if (!isInLineup(p1Name, lineup) || !isInLineup(p2Name, lineup)) {
+        if (!isInLineup(p1.label, lineup) || !isInLineup(p2.label, lineup)) {
           return VOID_OPTION;
         }
       }
-      const r1 = runsByBatterName(allBalls, p1Name, fixture);
-      const r2 = runsByBatterName(allBalls, p2Name, fixture);
+      const r1 = runsByBatterName(allBalls, p1.label);
+      const r2 = runsByBatterName(allBalls, p2.label);
       // Once the XI check has confirmed both players are in today's
       // announced lineup, a null from runsByBatterName is no longer
       // ambiguous — it means "didn't face a ball", which is genuinely a 0.
@@ -848,18 +832,16 @@ export function computeCorrectFromBalls(
       const players = pred.options.filter((o) => o.key !== ALL_CORRECT_OPTION);
       if (players.length !== 2) return null;
       const p1 = players[0], p2 = players[1];
-      const p1Name = playerNameForOption(p1, pool);
-      const p2Name = playerNameForOption(p2, pool);
       const lineup = match?.team1Players || match?.team2Players
         ? [...(match?.team1Players || []), ...(match?.team2Players || [])]
         : null;
       if (lineup && lineup.length > 0) {
-        if (!isInLineup(p1Name, lineup) || !isInLineup(p2Name, lineup)) {
+        if (!isInLineup(p1.label, lineup) || !isInLineup(p2.label, lineup)) {
           return VOID_OPTION;
         }
       }
-      const sr1 = strikeRateForBatter(allBalls, p1Name, fixture);
-      const sr2 = strikeRateForBatter(allBalls, p2Name, fixture);
+      const sr1 = strikeRateForBatter(allBalls, p1.label);
+      const sr2 = strikeRateForBatter(allBalls, p2.label);
       // XI-confirmed both → null means "never faced a legal ball" which
       // makes the ALL_CORRECT_OPTION sentinel (literally labelled
       // "Neither bats" for this template) the right answer. Only VOID
@@ -910,18 +892,16 @@ export function computeCorrectFromBalls(
       const players = pred.options.filter((o) => o.key !== ALL_CORRECT_OPTION);
       if (players.length !== 2) return null;
       const p1 = players[0], p2 = players[1];
-      const p1Name = playerNameForOption(p1, pool);
-      const p2Name = playerNameForOption(p2, pool);
       const lineup = match?.team1Players || match?.team2Players
         ? [...(match?.team1Players || []), ...(match?.team2Players || [])]
         : null;
       if (lineup && lineup.length > 0) {
-        if (!isInLineup(p1Name, lineup) || !isInLineup(p2Name, lineup)) {
+        if (!isInLineup(p1.label, lineup) || !isInLineup(p2.label, lineup)) {
           return VOID_OPTION;
         }
       }
-      const v1 = impactIndexForPlayer(allBalls, p1Name, fixture);
-      const v2 = impactIndexForPlayer(allBalls, p2Name, fixture);
+      const v1 = impactIndexForPlayer(allBalls, p1.label);
+      const v2 = impactIndexForPlayer(allBalls, p2.label);
       // XI-confirmed both → null impact = "didn't bat / bowl / take a
       // catch" which is a genuine 0. Two zeros → ALL_CORRECT (Tied),
       // not a fabricated VOID. Only VOID when XI wasn't populated.
@@ -965,7 +945,8 @@ export function computeCorrectFromBalls(
       // Scoreboard team1 batted in:
       const t1Sb = scoreboardForTeam(allBalls, pool.team1Players);
       if (!t1Sb) return null;
-      const deathBowlingRuns = bowlerRunsConcededInRange(allBalls, t1Sb, 16, 20, pool.team2Players);
+      const t2BowlerNames = new Set(pool.team2Players.map((p) => p.name.toLowerCase()));
+      const deathBowlingRuns = bowlerRunsConcededInRange(allBalls, t1Sb, 16, 20, t2BowlerNames);
       if (topOrderRuns === 0 && deathBowlingRuns === 0) return null;
       if (deathBowlingRuns > topOrderRuns) return "team2";
       if (topOrderRuns > deathBowlingRuns) return "team1";
@@ -1014,125 +995,25 @@ export function computeCorrectFromBalls(
 // the per-ball comparison — so a "Prabhsimran Singh" squad name lands on a
 // "Prabh Simran Singh" ball entry. Returns null if the player never faced a
 // ball — distinguishes "we don't know" from "scored 0".
-function cleanOptionPlayerLabel(label: string): string {
-  return String(label || "")
-    .replace(/\s*\([^)]*\)\s*$/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function playerNameForOption(
-  option: { key: string; label: string },
-  pool?: SquadSource | null,
-): string {
-  const clean = cleanOptionPlayerLabel(option.label);
-  if (pool) {
-    const all = [...pool.team1Players, ...pool.team2Players];
-    const byKey = all.find((p) => playerKey(p.name) === option.key);
-    if (byKey) return byKey.name;
-    const fuzzy = findFuzzyMatch(clean, all.map((p) => p.name));
-    if (fuzzy) return fuzzy;
-  }
-  return clean;
-}
-
-function fixtureArray(fixture: any, key: "batting" | "bowling" | "lineup"): any[] {
-  const raw = fixture?.[key];
-  if (Array.isArray(raw)) return raw;
-  if (Array.isArray(raw?.data)) return raw.data;
-  return [];
-}
-
-function playerNameById(fixture: any, id: unknown): string | null {
-  if (id == null) return null;
-  const numeric = Number(id);
-  if (!Number.isFinite(numeric)) return null;
-  for (const p of fixtureArray(fixture, "lineup")) {
-    if (Number(p?.id) === numeric) return p.fullname || p.name || null;
-  }
-  return null;
-}
-
-function fixtureBattingRow(fixture: any, name: string): any | null {
-  const rows = fixtureArray(fixture, "batting");
-  const names = rows
-    .map((r) => playerNameById(fixture, r?.player_id))
-    .filter((n): n is string => !!n);
-  const matchedName = findFuzzyMatch(name, names);
-  if (!matchedName) return null;
-  return rows.find((r) => playerNameById(fixture, r?.player_id) === matchedName) || null;
-}
-
-function fixtureBowlingRow(fixture: any, name: string): any | null {
-  const rows = fixtureArray(fixture, "bowling");
-  const names = rows
-    .map((r) => playerNameById(fixture, r?.player_id))
-    .filter((n): n is string => !!n);
-  const matchedName = findFuzzyMatch(name, names);
-  if (!matchedName) return null;
-  return rows.find((r) => playerNameById(fixture, r?.player_id) === matchedName) || null;
-}
-
-function topBatterWinnersFromFixture(fixture: any): string[] {
-  const rows = fixtureArray(fixture, "batting")
-    .map((row) => ({
-      name: playerNameById(fixture, row?.player_id),
-      runs: Number(row?.score ?? 0),
-      balls: Number(row?.ball ?? Number.POSITIVE_INFINITY),
-    }))
-    .filter((row) => !!row.name);
-  if (rows.length === 0) return [];
-  const bestRuns = Math.max(...rows.map((row) => row.runs));
-  const runLeaders = rows.filter((row) => row.runs === bestRuns);
-  const bestBalls = Math.min(...runLeaders.map((row) => row.balls));
-  return runLeaders.filter((row) => row.balls === bestBalls).map((row) => row.name!) ;
-}
-
-function topBowlerWinnersFromFixture(fixture: any): string[] {
-  const rows = fixtureArray(fixture, "bowling")
-    .map((row) => ({
-      name: playerNameById(fixture, row?.player_id),
-      wickets: Number(row?.wickets ?? 0),
-      runs: Number(row?.runs ?? Number.POSITIVE_INFINITY),
-    }))
-    .filter((row) => !!row.name);
-  if (rows.length === 0) return [];
-  const bestWickets = Math.max(...rows.map((row) => row.wickets));
-  const wicketLeaders = rows.filter((row) => row.wickets === bestWickets);
-  const bestRuns = Math.min(...wicketLeaders.map((row) => row.runs));
-  return wicketLeaders.filter((row) => row.runs === bestRuns).map((row) => row.name!);
-}
-
-function playerMatchesAny(name: string, players: Player[]): boolean {
-  return findFuzzyMatch(name, players.map((p) => p.name)) !== null;
-}
-
-function runsByBatterName(allBalls: any[], name: string, fixture?: any): number | null {
+function runsByBatterName(allBalls: any[], name: string): number | null {
   const resolved = resolveBallName(name, allBalls, "batsman");
-  if (resolved) {
-    const target = resolved.toLowerCase().trim();
-    let total = 0;
-    let appeared = false;
-    for (const b of allBalls) {
-      const bname = b.batsman?.fullname?.toLowerCase().trim();
-      if (bname !== target) continue;
-      appeared = true;
-      total += batRunsOnBall(b);
-    }
-    if (appeared) return total;
+  if (!resolved) return null;
+  const target = resolved.toLowerCase().trim();
+  let total = 0;
+  let appeared = false;
+  for (const b of allBalls) {
+    const bname = b.batsman?.fullname?.toLowerCase().trim();
+    if (bname !== target) continue;
+    appeared = true;
+    total += batRunsOnBall(b);
   }
-  const row = fixtureBattingRow(fixture, name);
-  return row ? Number(row.score ?? 0) : null;
+  return appeared ? total : null;
 }
 
 // Same shape as runsByBatterName but sums across multiple players (used for
 // the openers + #3 collective in the top-vs-death template).
 function runsForBatterNames(allBalls: any[], names: string[]): number {
-  const set = new Set(
-    names
-      .map((n) => resolveBallName(n, allBalls, "batsman") || n)
-      .map((n) => n.toLowerCase().trim())
-  );
+  const set = new Set(names.map((n) => n.toLowerCase().trim()));
   let total = 0;
   for (const b of allBalls) {
     const bname = b.batsman?.fullname?.toLowerCase().trim();
@@ -1145,27 +1026,21 @@ function runsForBatterNames(allBalls: any[], names: string[]): number {
 // Strike rate for a single batter across both innings. Resolves squad-side
 // names to the actual Sportsmonk fullname before comparing per-ball.
 // Returns null if they never faced a legal ball.
-function strikeRateForBatter(allBalls: any[], name: string, fixture?: any): number | null {
+function strikeRateForBatter(allBalls: any[], name: string): number | null {
   const resolved = resolveBallName(name, allBalls, "batsman");
-  if (resolved) {
-    const target = resolved.toLowerCase().trim();
-    let runs = 0;
-    let legalBalls = 0;
-    for (const b of allBalls) {
-      const bname = b.batsman?.fullname?.toLowerCase().trim();
-      if (bname !== target) continue;
-      if (b.score?.ball === false) continue;
-      legalBalls += 1;
-      runs += batRunsOnBall(b);
-    }
-    if (legalBalls > 0) return (runs / legalBalls) * 100;
+  if (!resolved) return null;
+  const target = resolved.toLowerCase().trim();
+  let runs = 0;
+  let legalBalls = 0;
+  for (const b of allBalls) {
+    const bname = b.batsman?.fullname?.toLowerCase().trim();
+    if (bname !== target) continue;
+    if (b.score?.ball === false) continue;
+    legalBalls += 1;
+    runs += batRunsOnBall(b);
   }
-  const row = fixtureBattingRow(fixture, name);
-  const balls = Number(row?.ball ?? 0);
-  if (!row || balls <= 0) return null;
-  const rate = Number(row.rate);
-  if (Number.isFinite(rate) && rate > 0) return rate;
-  return (Number(row.score ?? 0) / balls) * 100;
+  if (legalBalls === 0) return null;
+  return (runs / legalBalls) * 100;
 }
 
 // Counts boundaries (4s + 6s) across both innings for any batter in `names`.
@@ -1193,14 +1068,10 @@ function boundariesByBatterNames(allBalls: any[], names: string[]): number {
 // batsman + bowler fullnames seen in the match (an all-rounder by
 // definition could appear in either pool). Returns null only if the
 // player never appeared on any ball.
-function impactIndexForPlayer(allBalls: any[], name: string, fixture?: any): number | null {
+function impactIndexForPlayer(allBalls: any[], name: string): number | null {
   const resolved = resolveBallName(name, allBalls, "any");
-  const fixtureBat = fixtureBattingRow(fixture, name);
-  const fixtureBowl = fixtureBowlingRow(fixture, name);
-  if (!resolved && !fixtureBat && !fixtureBowl) return null;
-  const target = (resolved || playerNameById(fixture, fixtureBat?.player_id) || playerNameById(fixture, fixtureBowl?.player_id) || name)
-    .toLowerCase()
-    .trim();
+  if (!resolved) return null;
+  const target = resolved.toLowerCase().trim();
   let runs = 0, wickets = 0, catches = 0;
   let appeared = false;
   for (const b of allBalls) {
@@ -1226,14 +1097,6 @@ function impactIndexForPlayer(allBalls: any[], name: string, fixture?: any): num
         catches += 1;
       }
     }
-  }
-  if (fixtureBat) {
-    appeared = true;
-    runs = Math.max(runs, Number(fixtureBat.score ?? 0));
-  }
-  if (fixtureBowl) {
-    appeared = true;
-    wickets = Math.max(wickets, Number(fixtureBowl.wickets ?? 0));
   }
   if (!appeared) return null;
   return runs + wickets + catches;
@@ -1286,10 +1149,11 @@ function firstSixOrWicketEvent(allBalls: any[]): "six" | "wicket" | null {
 // a stray substitute: the team's actual batting innings will dominate.
 export function scoreboardForTeam(allBalls: any[], teamPlayers: Player[]): "S1" | "S2" | null {
   if (!teamPlayers?.length) return null;
+  const names = new Set(teamPlayers.map((p) => p.name.toLowerCase().trim()));
   let s1 = 0, s2 = 0;
   for (const b of allBalls) {
-    const bn = b.batsman?.fullname;
-    if (!bn || !playerMatchesAny(bn, teamPlayers)) continue;
+    const bn = b.batsman?.fullname?.toLowerCase().trim();
+    if (!bn || !names.has(bn)) continue;
     if (b.scoreboard === "S1") s1 += 1;
     else if (b.scoreboard === "S2") s2 += 1;
   }
@@ -1326,7 +1190,7 @@ function bowlerRunsConcededInRange(
   scoreboard: "S1" | "S2",
   fromOver: number,
   toOver: number,
-  bowlers: Player[],
+  bowlerNamesLower: Set<string>,
 ): number {
   const fromIdx = fromOver - 1;
   const toIdx = toOver - 1;
@@ -1335,8 +1199,8 @@ function bowlerRunsConcededInRange(
     if (b.scoreboard !== scoreboard) continue;
     const ov = Math.floor(parseFloat(String(b.ball || "0")));
     if (ov < fromIdx || ov > toIdx) continue;
-    const bowlName = b.bowler?.fullname;
-    if (!bowlName || !playerMatchesAny(bowlName, bowlers)) continue;
+    const bowlName = b.bowler?.fullname?.toLowerCase().trim();
+    if (!bowlName || !bowlerNamesLower.has(bowlName)) continue;
     total += Number(b.score?.runs || 0);
   }
   return total;
@@ -1560,7 +1424,7 @@ async function scorePunterUserAnswers(
     await sequelize.transaction(async (t) => {
       await ua.update({ isCorrect, pointsEarned }, { transaction: t });
       const participant = await MatchParticipant.findOne({
-        where: { userId: ua.userId, matchId: ua.matchId, venueId: ua.venueId, roomId: ua.roomId ?? null },
+        where: { userId: ua.userId, matchId: ua.matchId, venueId: ua.venueId },
         transaction: t,
         lock: t.LOCK.UPDATE,
       });
