@@ -7,6 +7,9 @@ interface RoomAttributes {
   hostUserId: string;
   matchId: string;
   code: string;
+  isSeasonRoom: boolean;
+  seasonKey?: string | null;
+  seasonEndsAt?: Date | null;
   isPublic: boolean;
   maxPlayers: number;
   status: "waiting" | "active" | "closed";
@@ -15,7 +18,7 @@ interface RoomAttributes {
 }
 
 interface RoomCreationAttributes
-  extends Optional<RoomAttributes, "id" | "isPublic" | "maxPlayers" | "status"> {}
+  extends Optional<RoomAttributes, "id" | "isSeasonRoom" | "seasonKey" | "seasonEndsAt" | "isPublic" | "maxPlayers" | "status"> {}
 
 class Room
   extends Model<RoomAttributes, RoomCreationAttributes>
@@ -26,6 +29,9 @@ class Room
   public hostUserId!: string;
   public matchId!: string;
   public code!: string;
+  public isSeasonRoom!: boolean;
+  public seasonKey!: string | null;
+  public seasonEndsAt!: Date | null;
   public isPublic!: boolean;
   public maxPlayers!: number;
   public status!: "waiting" | "active" | "closed";
@@ -59,6 +65,18 @@ Room.init(
       allowNull: false,
       unique: true,
     },
+    isSeasonRoom: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
+    seasonKey: {
+      type: DataTypes.STRING(50),
+      allowNull: true,
+    },
+    seasonEndsAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
     isPublic: {
       type: DataTypes.BOOLEAN,
       defaultValue: false,
@@ -79,6 +97,7 @@ Room.init(
     indexes: [
       { unique: true, fields: ["code"] },
       { fields: ["matchId", "isPublic", "status"] },
+      { fields: ["isSeasonRoom", "seasonKey", "status"] },
       { fields: ["hostUserId"] },
     ],
   }

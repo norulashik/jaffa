@@ -7,6 +7,7 @@ import { generatePreMatchPredictions, getCurrentRound } from "../services/predic
 import { buildStory } from "../services/storyBuilder";
 import { parsePagination, paginationMeta } from "../utils/pagination";
 import { ROOM_VENUE_ID } from "../services/roomVenue";
+import { scopedRoomId } from "../utils/roomScope";
 
 const router = Router();
 
@@ -374,7 +375,7 @@ router.post("/:matchId/join", authenticateUser, async (req: AuthRequest, res: Re
 
     // Check if user already joined (no code needed for re-entry)
     const existing = await MatchParticipant.findOne({
-      where: { userId, matchId, venueId },
+      where: { userId, matchId, venueId, roomId: null },
     });
 
     if (existing) {
@@ -445,6 +446,7 @@ router.post("/:matchId/join", authenticateUser, async (req: AuthRequest, res: Re
       userId,
       matchId,
       venueId,
+      roomId: null,
       currentRound,
     });
 
@@ -618,6 +620,7 @@ router.get("/:matchId/state", authenticateUser, async (req: AuthRequest, res: Re
   try {
     const matchId = req.params.matchId as string;
     const venueId = req.query.venueId as string;
+    const roomId = scopedRoomId(req.query.roomId);
     const userId = req.userId!;
 
     const match = await Match.findByPk(matchId);
@@ -627,7 +630,7 @@ router.get("/:matchId/state", authenticateUser, async (req: AuthRequest, res: Re
     }
 
     const participant = await MatchParticipant.findOne({
-      where: { userId, matchId, venueId },
+      where: { userId, matchId, venueId, roomId },
     });
 
     const openPredictions = await Prediction.findAll({
@@ -637,7 +640,7 @@ router.get("/:matchId/state", authenticateUser, async (req: AuthRequest, res: Re
     });
 
     const playerCount = await MatchParticipant.count({
-      where: { matchId, venueId },
+      where: { matchId, venueId, roomId },
     });
 
     // Derive currentRound from match state if participant's round is stale, and persist it
@@ -661,6 +664,7 @@ router.get("/:matchId/my-story", authenticateUser, async (req: AuthRequest, res:
   try {
     const matchId = req.params.matchId as string;
     const venueId = req.query.venueId as string;
+    const roomId = scopedRoomId(req.query.roomId);
     const userId = req.userId!;
 
     if (!venueId) {
@@ -669,13 +673,13 @@ router.get("/:matchId/my-story", authenticateUser, async (req: AuthRequest, res:
     }
 
     const userPicks = await UserPrediction.findAll({
-      where: { userId, matchId, venueId },
+      where: { userId, matchId, venueId, roomId },
       include: [{ model: Prediction, as: "prediction" }],
       order: [["answeredAt", "ASC"]],
     });
 
     const participant = await MatchParticipant.findOne({
-      where: { userId, matchId, venueId },
+      where: { userId, matchId, venueId, roomId },
     });
 
     // For the "signature call" beat we need aggregates for the user's correct picks.

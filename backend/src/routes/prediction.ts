@@ -4,6 +4,7 @@ import { Prediction, UserPrediction, MatchParticipant, User, PredictionAggregate
 import { GLOBAL_SCOPE_ID } from "../models/PredictionAggregate";
 import { authenticateUser, AuthRequest } from "../middleware/auth";
 import sequelize from "../config/database";
+import { scopedRoomId } from "../utils/roomScope";
 
 type AggregatePayload = {
   totalAnswered: number;
@@ -13,13 +14,13 @@ type AggregatePayload = {
 
 async function buildAggregatesMap(
   predictionIds: string[],
-  venueId: string | undefined
+  scopeId: string | undefined
 ): Promise<Map<string, { global?: AggregatePayload; venue?: AggregatePayload }>> {
   const out = new Map<string, { global?: AggregatePayload; venue?: AggregatePayload }>();
   if (predictionIds.length === 0) return out;
 
   const scopeOr: any[] = [{ scope: "global", scopeId: GLOBAL_SCOPE_ID }];
-  if (venueId) scopeOr.push({ scope: "venue", scopeId: venueId });
+  if (scopeId) scopeOr.push({ scope: "venue", scopeId });
 
   const rows = await PredictionAggregate.findAll({
     where: {
@@ -53,6 +54,8 @@ router.get("/:matchId", authenticateUser, async (req: AuthRequest, res: Response
     const round = req.query.round as string | undefined;
     const status = req.query.status as string | undefined;
     const userId = req.userId!;
+    const roomId = scopedRoomId(req.query.roomId);
+    const aggregateScopeId = roomId || venueId;
 
     const where: any = { matchId };
     if (round) where.round = Number(round);
@@ -72,14 +75,14 @@ router.get("/:matchId", authenticateUser, async (req: AuthRequest, res: Response
     );
 
     const userAnswers = await UserPrediction.findAll({
-      where: { userId, matchId, venueId },
+      where: { userId, matchId, venueId, roomId },
     });
 
     const answeredMap = new Map(userAnswers.map((a) => [a.predictionId, a]));
 
     const aggregatesMap = await buildAggregatesMap(
       visible.map((p) => p.id),
-      venueId
+      aggregateScopeId
     );
 
     const result = visible.map((p) => ({
@@ -101,6 +104,7 @@ router.post("/:predictionId/answer", authenticateUser, async (req: AuthRequest, 
     const predictionId = req.params.predictionId as string;
     const { selectedOption, boostType, venueId } = req.body;
     const userId = req.userId!;
+    const roomId = scopedRoomId(req.body.roomId);
 
     const prediction = await Prediction.findByPk(predictionId);
     if (!prediction) {
@@ -132,7 +136,7 @@ router.post("/:predictionId/answer", authenticateUser, async (req: AuthRequest, 
     // Use transaction to prevent race conditions (duplicate answers, boost over-use)
     const userPrediction = await sequelize.transaction(async (t) => {
       const existing = await UserPrediction.findOne({
-        where: { userId, predictionId },
+        where: { userId, predictionId, venueId, roomId },
         transaction: t,
         lock: t.LOCK.UPDATE,
       });
@@ -142,7 +146,7 @@ router.post("/:predictionId/answer", authenticateUser, async (req: AuthRequest, 
       }
 
       const participant = await MatchParticipant.findOne({
-        where: { userId, matchId: prediction.matchId, venueId },
+        where: { userId, matchId: prediction.matchId, venueId, roomId },
         transaction: t,
         lock: t.LOCK.UPDATE,
       });
@@ -172,6 +176,7 @@ router.post("/:predictionId/answer", authenticateUser, async (req: AuthRequest, 
         predictionId,
         matchId: prediction.matchId,
         venueId,
+        roomId,
         selectedOption,
         boostType: boostType || "none",
       }, { transaction: t });
@@ -233,16 +238,18 @@ router.get("/:matchId/my-predictions", authenticateUser, async (req: AuthRequest
     const matchId = req.params.matchId as string;
     const venueId = req.query.venueId as string;
     const userId = req.userId!;
+    const roomId = scopedRoomId(req.query.roomId);
+    const aggregateScopeId = roomId || venueId;
 
     const userPredictions = await UserPrediction.findAll({
-      where: { userId, matchId, venueId },
+      where: { userId, matchId, venueId, roomId },
       include: [{ model: Prediction, as: "prediction" }],
       order: [["answeredAt", "DESC"]],
     });
 
     const aggregatesMap = await buildAggregatesMap(
       userPredictions.map((up) => up.predictionId),
-      venueId
+      aggregateScopeId
     );
 
     const result = userPredictions.map((up) => ({

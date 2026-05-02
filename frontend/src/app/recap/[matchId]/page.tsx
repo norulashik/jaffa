@@ -50,7 +50,7 @@ export default function RecapPage() {
 
     if (!matchId || !venueId) { setLoading(false); setError("No match context"); return; }
 
-    api.getMyStory(matchId, venueId)
+    api.getMyStory(matchId, venueId, localStorage.getItem("jaffa_room_id"))
       .then((s) => setStory(s))
       .catch((e) => setError(e?.message || "Failed to load recap"))
       .finally(() => setLoading(false));

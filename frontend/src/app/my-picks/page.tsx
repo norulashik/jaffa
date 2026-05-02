@@ -100,6 +100,8 @@ function MyPicksPageInner() {
     searchParams?.get("matchId") || state.matchId || readLs("jaffa_match_id");
   const venueId =
     searchParams?.get("venueId") || state.venueId || readLs("jaffa_venue_id");
+  const roomId =
+    searchParams?.get("roomId") || state.roomId || readLs("jaffa_room_id");
 
   useEffect(() => {
     const token = localStorage.getItem("jaffa_token");
@@ -120,7 +122,7 @@ function MyPicksPageInner() {
   const loadPredictions = async () => {
     if (!matchId || !venueId) return;
     try {
-      const preds = await api.getPredictions(matchId, venueId);
+      const preds = await api.getPredictions(matchId, venueId, undefined, roomId);
       setPredictions(preds || []);
     } catch {
       // silently fail
