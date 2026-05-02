@@ -12,6 +12,21 @@ import { ensureRoomMatchParticipant } from "../services/roomParticipation";
 
 const router = Router();
 
+function canonicalPastParticipantScore(a: any, b: any): any {
+  const aIsRoom = a.venueId === ROOM_VENUE_ID;
+  const bIsRoom = b.venueId === ROOM_VENUE_ID;
+  if ((a.totalPredictions || 0) !== (b.totalPredictions || 0)) {
+    return (a.totalPredictions || 0) > (b.totalPredictions || 0) ? a : b;
+  }
+  if ((a.totalPoints || 0) !== (b.totalPoints || 0)) {
+    return (a.totalPoints || 0) > (b.totalPoints || 0) ? a : b;
+  }
+  if (aIsRoom !== bIsRoom) return aIsRoom ? a : b;
+  return new Date(a.joinedAt || a.createdAt || 0).getTime() >= new Date(b.joinedAt || b.createdAt || 0).getTime()
+    ? a
+    : b;
+}
+
 // Haversine — great-circle distance between two lat/lng points, in meters.
 // Used to reject joins whose GPS is outside the venue's geofence.
 function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -261,8 +276,9 @@ router.get("/my-past", authenticateUser, async (req: AuthRequest, res: Response)
     const p = parsePagination(req, { defaultPageSize: 10, maxPageSize: 50 });
 
     // Pull this user's participant rows, include the Match only if it's completed.
-    // findAndCountAll's `distinct: true` is needed because the include can fan out.
-    const { count, rows } = await MatchParticipant.findAndCountAll({
+    // We paginate AFTER canonicalization so duplicate room/legacy rows don't
+    // crowd out older matches on later pages.
+    const rows = await MatchParticipant.findAll({
       where: { userId },
       include: [
         {
@@ -278,9 +294,6 @@ router.get("/my-past", authenticateUser, async (req: AuthRequest, res: Response)
         },
       ],
       order: [[{ model: Match, as: "match" }, "startTime", "DESC"]],
-      limit: p.limit,
-      offset: p.offset,
-      distinct: true,
     });
 
     // For room-played matches (synthetic ROOM_VENUE_ID), every room the user
@@ -313,32 +326,48 @@ router.get("/my-past", authenticateUser, async (req: AuthRequest, res: Response)
       }
     }
 
-    const matches = rows.map((r: any) => ({
-      matchId: r.matchId,
-      venueId: r.venueId,
-      venueName: r.venue?.name || null,
-      venueSlug: r.venue?.slug || null,
-      team1Short: r.match?.team1Short || null,
-      team2Short: r.match?.team2Short || null,
-      team1: r.match?.team1 || null,
-      team2: r.match?.team2 || null,
-      startTime: r.match?.startTime || null,
-      status: r.match?.status || "completed",
-      // Enough to render a summary row. The detail page fetches the full
-      // scoreData + leaderboard + rewards via existing endpoints.
-      scoreData: r.match?.scoreData || {},
-      myStats: {
-        totalPoints: r.totalPoints || 0,
-        correctPredictions: r.correctPredictions || 0,
-        totalPredictions: r.totalPredictions || 0,
-        bestStreak: r.bestStreak || 0,
-      },
-      rooms: r.venueId === ROOM_VENUE_ID
-        ? (roomsByMatchId.get(r.matchId) || [])
-        : undefined,
-    }));
+    const canonicalRows = new Map<string, any>();
+    for (const row of rows as any[]) {
+      const key = row.venueId === ROOM_VENUE_ID
+        ? `room:${row.matchId}`
+        : `venue:${row.matchId}:${row.venueId}`;
+      const existing = canonicalRows.get(key);
+      canonicalRows.set(key, existing ? canonicalPastParticipantScore(existing, row) : row);
+    }
 
-    res.json({ matches, ...paginationMeta(p, count) });
+    const allMatches = Array.from(canonicalRows.values())
+      .sort((a: any, b: any) => {
+        const aTime = new Date(a.match?.startTime || 0).getTime();
+        const bTime = new Date(b.match?.startTime || 0).getTime();
+        return bTime - aTime;
+      })
+      .map((r: any) => ({
+        matchId: r.matchId,
+        venueId: r.venueId,
+        venueName: r.venue?.name || null,
+        venueSlug: r.venue?.slug || null,
+        team1Short: r.match?.team1Short || null,
+        team2Short: r.match?.team2Short || null,
+        team1: r.match?.team1 || null,
+        team2: r.match?.team2 || null,
+        startTime: r.match?.startTime || null,
+        status: r.match?.status || "completed",
+        scoreData: r.match?.scoreData || {},
+        myStats: {
+          totalPoints: r.totalPoints || 0,
+          correctPredictions: r.correctPredictions || 0,
+          totalPredictions: r.totalPredictions || 0,
+          bestStreak: r.bestStreak || 0,
+        },
+        rooms: r.venueId === ROOM_VENUE_ID
+          ? (roomsByMatchId.get(r.matchId) || [])
+          : undefined,
+      }));
+
+    const totalCount = allMatches.length;
+    const matches = allMatches.slice(p.offset, p.offset + p.limit);
+
+    res.json({ matches, ...paginationMeta(p, totalCount) });
   } catch (error) {
     console.error("Get my past matches error:", error);
     res.status(500).json({ error: "Failed to get past matches" });

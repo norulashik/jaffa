@@ -5,6 +5,7 @@ import { authenticateUser, AuthRequest } from "../middleware/auth";
 import { ROOM_VENUE_ID } from "../services/roomVenue";
 import { getCurrentRound } from "../services/predictionEngine";
 import sequelize from "../config/database";
+import { backfillSeasonRoomParticipants } from "../services/roomParticipation";
 
 const router = Router();
 
@@ -182,6 +183,12 @@ async function buildSeasonLeaderboard(roomId: string) {
     }));
 }
 
+async function emitRoomLeaderboardUpdate(app: any, roomId: string, extra: Record<string, unknown> = {}) {
+  const io = app?.get?.("io");
+  if (!io) return;
+  io.to(`room:${roomId}`).emit("roomLeaderboardUpdate", { roomId, ...extra });
+}
+
 router.post("/", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { matchId, name, isPublic, maxPlayers, isSeasonRoom } = req.body;
@@ -233,6 +240,7 @@ router.post("/", authenticateUser, async (req: AuthRequest, res: Response): Prom
       return;
     }
 
+    let seasonBackfilled = 0;
     const room = await sequelize.transaction(async (t) => {
       const newRoom = await Room.create(
         {
@@ -249,16 +257,21 @@ router.post("/", authenticateUser, async (req: AuthRequest, res: Response): Prom
         { transaction: t }
       );
 
-      await RoomMember.create({ roomId: newRoom.id, userId }, { transaction: t });
+      const member = await RoomMember.create({ roomId: newRoom.id, userId }, { transaction: t });
 
       if (!newRoom.isSeasonRoom) {
         await createRoomParticipant(userId, newRoom.id, match, t);
+      } else {
+        seasonBackfilled = await backfillSeasonRoomParticipants(userId, newRoom.id, member.joinedAt, t);
       }
 
       return newRoom;
     });
 
     const payload = await buildRoomPayload(room.id);
+    if (room.isSeasonRoom && seasonBackfilled > 0) {
+      await emitRoomLeaderboardUpdate(req.app, room.id, { backfilled: seasonBackfilled });
+    }
     res.status(201).json({
       ...payload,
       shareLink: `/room/join?code=${room.code}`,
@@ -395,13 +408,16 @@ router.post("/join", authenticateUser, async (req: AuthRequest, res: Response): 
       return;
     }
 
+    let seasonBackfilled = 0;
     await sequelize.transaction(async (t) => {
-      await RoomMember.create({ roomId: room.id, userId }, { transaction: t });
+      const memberRow = await RoomMember.create({ roomId: room.id, userId }, { transaction: t });
       if (!room.isSeasonRoom) {
         const match = await Match.findByPk(room.matchId, { transaction: t });
         if (match) {
           await createRoomParticipant(userId, room.id, match, t);
         }
+      } else {
+        seasonBackfilled = await backfillSeasonRoomParticipants(userId, room.id, memberRow.joinedAt, t);
       }
     });
 
@@ -413,6 +429,9 @@ router.post("/join", authenticateUser, async (req: AuthRequest, res: Response): 
       avatarConfig: user?.avatarConfig,
       memberCount: memberCount + 1,
     });
+    if (room.isSeasonRoom && seasonBackfilled > 0) {
+      await emitRoomLeaderboardUpdate(req.app, room.id, { backfilled: seasonBackfilled });
+    }
 
     const payload = await buildRoomPayload(room.id);
     res.json(payload);

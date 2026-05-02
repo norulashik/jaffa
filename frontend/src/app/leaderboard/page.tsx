@@ -11,9 +11,6 @@ import { useGame } from "@/context/GameContext";
 import { api } from "@/lib/api";
 import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 
-// Mirrors backend predictionEngine.getCurrentRound. Used as a client-side
-// fallback so the Ranks page can populate context.currentRound even when
-// the user lands here before opening the match page.
 function deriveRound(currentInnings: number, currentOver: number, totalOvers: number = 20): number {
   if (!currentInnings || currentInnings === 0) return 0;
   const overs = totalOvers || 20;
@@ -36,27 +33,24 @@ function LeaderboardPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Resolution order for matchId / venueId:
-  //   1. URL query (?matchId=&venueId=) — forwarded by BottomNav when
-  //      the user taps Ranks from a match page. Most authoritative because
-  //      it's set at click time, immune to state-hydration races.
-  //   2. GameContext state — set by the match page on mount.
-  //   3. localStorage — fallback for hydration / hard reloads.
-  // Treat the strings "null"/"undefined" as missing for the LS path —
-  // legacy poison from old past-battle nav code.
   const readLs = (k: string) => {
     if (typeof window === "undefined") return null;
     const v = localStorage.getItem(k);
     return !v || v === "null" || v === "undefined" ? null : v;
   };
+
   const urlMatchId = searchParams?.get("matchId") || null;
   const urlVenueId = searchParams?.get("venueId") || null;
 
   const [matchId, setMatchId] = useState(urlMatchId || state.matchId || readLs("jaffa_match_id"));
   const [venueId, setVenueId] = useState(urlVenueId || state.venueId || readLs("jaffa_venue_id"));
-  const [roomId, setRoomId] = useState(state.roomId);
+  const [roomId, setRoomId] = useState(state.roomId || readLs("jaffa_room_id"));
   const [seasonRooms, setSeasonRooms] = useState<any[]>([]);
   const [selectedSeasonRoomId, setSelectedSeasonRoomId] = useState<string | null>(null);
+  const [resolvedRoomId, setResolvedRoomId] = useState<string | null>(null);
+  const [resolvedRoomIsSeason, setResolvedRoomIsSeason] = useState(false);
+  const [hasValidMatchContext, setHasValidMatchContext] = useState(false);
+  const [contextResolved, setContextResolved] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem("jaffa_token");
@@ -64,65 +58,104 @@ function LeaderboardPageInner() {
       router.replace(isCafeRoute() ? cafeUrl("/login") : "/login");
       return;
     }
-    // Re-derive from the same priority order on every state change so
-    // changes to GameContext (e.g. user joins a different match in
-    // another tab and the context broadcasts) flow through.
-    const next = urlMatchId || state.matchId || readLs("jaffa_match_id");
-    const nextV = urlVenueId || state.venueId || readLs("jaffa_venue_id");
-    if (next && next !== matchId) setMatchId(next);
-    if (nextV && nextV !== venueId) setVenueId(nextV);
-    if (!roomId) setRoomId(readLs("jaffa_room_id"));
-  }, [state.matchId, state.venueId, state.roomId, urlMatchId, urlVenueId, matchId, venueId, roomId, router]);
+    const nextMatchId = urlMatchId || state.matchId || readLs("jaffa_match_id");
+    const nextVenueId = urlVenueId || state.venueId || readLs("jaffa_venue_id");
+    const nextRoomId = state.roomId || readLs("jaffa_room_id");
+    setMatchId((prev) => (prev === nextMatchId ? prev : nextMatchId));
+    setVenueId((prev) => (prev === nextVenueId ? prev : nextVenueId));
+    setRoomId((prev) => (prev === nextRoomId ? prev : nextRoomId));
+  }, [state.matchId, state.venueId, state.roomId, urlMatchId, urlVenueId, router]);
 
-  // Pull match state when this page is the user's first stop, so context's
-  // currentRound is set before <Leaderboard> mounts. Without this, the round
-  // pills would default to R1 even mid-match, until the user visits the
-  // match page. We take max(server, derived) so a stale backend round still
-  // leads to the correct UI.
   useEffect(() => {
-    if (!matchId || !venueId) return;
     let cancelled = false;
-    api.getMatchState(matchId, venueId, roomId).then((ms: any) => {
-      if (cancelled || !ms?.participant) return;
-      const liveInn = ms.match?.currentInnings || ms.match?.scoreData?.currentInnings || 1;
-      const liveOver = ms.match?.currentOver || ms.match?.scoreData?.currentOver || 0;
-      const totalOvers = ms.match?.totalOvers || 20;
-      const derived = deriveRound(liveInn, liveOver, totalOvers);
-      const server = Number(ms.participant.currentRound) || 1;
-      const effective = Math.max(server, derived);
-      // Only push UP — the Leaderboard sync is also monotonic, but mirroring
-      // the rule here keeps the context honest if multiple pages disagree.
-      if (effective > (state.currentRound || 0)) {
-        dispatch({
-          type: "UPDATE_PARTICIPANT",
-          data: {
-            currentRound: effective,
-            totalPoints: ms.participant.totalPoints || 0,
-            currentStreak: ms.participant.currentStreak || 0,
-            boostsUsedThisRound: ms.participant.boostsUsedRound || 0,
-            boostsUsedRound: ms.participant.boostsUsedRound || 0,
-            allInUsed: Boolean(ms.participant.allInUsed),
-            allInUsedInnings1: Boolean(ms.participant.allInUsedInnings1),
-            allInUsedInnings2: Boolean(ms.participant.allInUsedInnings2),
-          },
-        });
-      }
-    }).catch(() => { /* silent */ });
-    return () => { cancelled = true; };
-  }, [matchId, venueId, state.currentRound, dispatch]);
 
-  useEffect(() => {
-    if (matchId || venueId || roomId) return;
-    api.getMyRooms()
-      .then((result) => {
+    const resolveLeaderboardContext = async () => {
+      setContextResolved(false);
+
+      let validatedRoomId: string | null = null;
+      let validatedRoomIsSeason = false;
+      if (roomId) {
+        try {
+          const roomResult = await api.getRoom(roomId);
+          if (cancelled) return;
+          if (roomResult?.room?.id) {
+            validatedRoomId = roomId;
+            validatedRoomIsSeason = Boolean(roomResult.room.isSeasonRoom);
+          }
+        } catch {
+          validatedRoomId = null;
+          validatedRoomIsSeason = false;
+        }
+      }
+
+      if (matchId && venueId) {
+        try {
+          const matchState: any = await api.getMatchState(matchId, venueId, validatedRoomId);
+          if (cancelled) return;
+          if (matchState?.match) {
+            setHasValidMatchContext(true);
+            setResolvedRoomId(validatedRoomId);
+            setResolvedRoomIsSeason(validatedRoomIsSeason);
+
+            if (matchState.participant) {
+              const liveInn = matchState.match?.currentInnings || matchState.match?.scoreData?.currentInnings || 1;
+              const liveOver = matchState.match?.currentOver || matchState.match?.scoreData?.currentOver || 0;
+              const totalOvers = matchState.match?.totalOvers || 20;
+              const derived = deriveRound(liveInn, liveOver, totalOvers);
+              const server = Number(matchState.participant.currentRound) || 1;
+              const effective = Math.max(server, derived);
+              if (effective > (state.currentRound || 0)) {
+                dispatch({
+                  type: "UPDATE_PARTICIPANT",
+                  data: {
+                    currentRound: effective,
+                    totalPoints: matchState.participant.totalPoints || 0,
+                    currentStreak: matchState.participant.currentStreak || 0,
+                    boostsUsedThisRound: matchState.participant.boostsUsedRound || 0,
+                    boostsUsedRound: matchState.participant.boostsUsedRound || 0,
+                    allInUsed: Boolean(matchState.participant.allInUsed),
+                    allInUsedInnings1: Boolean(matchState.participant.allInUsedInnings1),
+                    allInUsedInnings2: Boolean(matchState.participant.allInUsedInnings2),
+                  },
+                });
+              }
+            }
+
+            setContextResolved(true);
+            return;
+          }
+        } catch {
+          // Fall through to season-room fallback.
+        }
+      }
+
+      setHasValidMatchContext(false);
+      setResolvedRoomId(validatedRoomId);
+      setResolvedRoomIsSeason(validatedRoomIsSeason);
+
+      try {
+        const result = await api.getMyRooms();
+        if (cancelled) return;
         const joinedSeasonRooms = (result.rooms || []).filter((room: any) => room.isSeasonRoom);
         setSeasonRooms(joinedSeasonRooms);
-        if (joinedSeasonRooms.length > 0 && !selectedSeasonRoomId) {
-          setSelectedSeasonRoomId(joinedSeasonRooms[0].id);
+        const preferredSeasonRoomId =
+          validatedRoomId && joinedSeasonRooms.some((room: any) => room.id === validatedRoomId)
+            ? validatedRoomId
+            : joinedSeasonRooms[0]?.id || null;
+        setSelectedSeasonRoomId(preferredSeasonRoomId);
+      } catch {
+        if (!cancelled) {
+          setSeasonRooms([]);
+          setSelectedSeasonRoomId(null);
         }
-      })
-      .catch(() => {});
-  }, [matchId, venueId, roomId, selectedSeasonRoomId]);
+      } finally {
+        if (!cancelled) setContextResolved(true);
+      }
+    };
+
+    resolveLeaderboardContext();
+    return () => { cancelled = true; };
+  }, [matchId, venueId, roomId, state.currentRound, dispatch]);
 
   return (
     <div className="bg-[#0d0d0d] text-white min-h-screen">
@@ -138,13 +171,19 @@ function LeaderboardPageInner() {
           </h2>
         </section>
 
-        {matchId && roomId ? (
-          <RoomLeaderboard roomId={roomId} isSeasonRoom />
-        ) : matchId && venueId ? (
-          <Leaderboard
-            matchId={matchId}
-            venueId={venueId}
-          />
+        {!contextResolved ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center px-6">
+            <div className="game-card flex flex-col items-center py-10">
+              <Trophy size={48} className="text-[#6b7280] mb-4 animate-pulse" />
+              <p className="text-sm text-[#6b7280] max-w-[240px]">
+                Loading leaderboard...
+              </p>
+            </div>
+          </div>
+        ) : hasValidMatchContext && matchId && resolvedRoomId ? (
+          <RoomLeaderboard roomId={resolvedRoomId} isSeasonRoom={resolvedRoomIsSeason} />
+        ) : hasValidMatchContext && matchId && venueId ? (
+          <Leaderboard matchId={matchId} venueId={venueId} />
         ) : selectedSeasonRoomId ? (
           <section className="px-6 space-y-4">
             <div className="game-card">
@@ -188,9 +227,6 @@ function LeaderboardPageInner() {
   );
 }
 
-// Suspense wrapper required because LeaderboardPageInner reads
-// useSearchParams (Next 16 errors during build otherwise). Fallback
-// mirrors the page's idle background so there's no visible flash.
 export default function LeaderboardPage() {
   return (
     <Suspense fallback={<div className="bg-[#0d0d0d] text-white min-h-screen" />}>
