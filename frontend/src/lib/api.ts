@@ -313,6 +313,11 @@ export const api = {
         resolvedCount: number;
         totalCount: number;
         totalPoints: number;
+        // (venueId, roomId) tuple from the user's actual picks for this
+        // match. Profile passes these on the detail link so the detail
+        // page queries against the same scope and finds the picks.
+        venueId: string | null;
+        roomId: string | null;
       }>;
     }>("/punter-card/my/cards"),
 

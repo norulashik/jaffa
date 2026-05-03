@@ -19,6 +19,12 @@ type Card = {
   resolvedCount: number;
   totalCount: number;
   totalPoints: number;
+  // The (venueId, roomId) the user actually answered with. The detail page
+  // needs both to look up the user's picks — without them it falls back to
+  // localStorage / GLOBAL_VENUE_ID and renders every card as MISSED for any
+  // user who answered inside a season room they've since left.
+  venueId: string | null;
+  roomId: string | null;
 };
 
 export default function MyPunterCardsPage() {
@@ -73,10 +79,21 @@ export default function MyPunterCardsPage() {
             const t1 = c.team1Short || c.team1 || "T1";
             const t2 = c.team2Short || c.team2 || "T2";
             const isResolved = c.status === "completed" && c.resolvedCount > 0;
+            // Forward the scope the user actually answered with so the
+            // detail page queries against (venueId, roomId) that match the
+            // stored UserPredictions. Without these query params the
+            // detail page falls back to localStorage / GLOBAL_VENUE_ID and
+            // the user's picks invisibly disappear (every card → MISSED).
+            const qs = new URLSearchParams();
+            if (c.venueId) qs.set("venueId", c.venueId);
+            if (c.roomId) qs.set("roomId", c.roomId);
+            const detailHref = qs.toString()
+              ? `/punter-card/${c.matchId}?${qs.toString()}`
+              : `/punter-card/${c.matchId}`;
             return (
               <Link
                 key={c.matchId}
-                href={`/punter-card/${c.matchId}`}
+                href={detailHref}
                 className="block border border-slate-800 rounded-lg bg-slate-900/60 hover:bg-slate-900 p-4"
               >
                 <div className="flex items-center gap-3">

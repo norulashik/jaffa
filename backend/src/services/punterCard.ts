@@ -885,16 +885,16 @@ export function computeCorrectFromBalls(
 
     // -------- v2 head-to-head templates --------
     case "punter_star_batter_lower": {
-      // Two player options + a "Tie" sentinel. If either named player isn't
-      // in today's actual XI (announced at toss → match.team1Players /
-      // team2Players), VOID the question — the head-to-head premise is
-      // broken.
+      // Two player options + a "Tie" sentinel. Resolution rule (per product
+      // call after the Nitish-Kumar-Reddy void incident): if a named player
+      // isn't in today's actual XI, treat their score as 0 instead of
+      // voiding. The user's pick still resolves cleanly — the absent player
+      // simply "scored less" by virtue of not batting. Voiding felt like a
+      // cheap loss; a definite outcome is better even if asymmetric.
       //
       // Name resolution is fuzzy (see playerNameMatch.ts) because squad-
       // side spellings like "Prabhsimran Singh" don't always exact-match
-      // Sportsmonk's "Prabh Simran Singh". A previous bug here returned
-      // ALL_CORRECT ("Tie") whenever the lookup silently fell back to 0
-      // for both players, even when one clearly outscored the other.
+      // Sportsmonk's "Prabh Simran Singh".
       const players = pred.options.filter((o) => o.key !== ALL_CORRECT_OPTION);
       if (players.length !== 2) return null;
       const p1 = players[0], p2 = players[1];
@@ -903,20 +903,12 @@ export function computeCorrectFromBalls(
       const lineup = match?.team1Players || match?.team2Players
         ? [...(match?.team1Players || []), ...(match?.team2Players || [])]
         : null;
-      if (lineup && lineup.length > 0) {
-        if (!isInLineup(p1Name, lineup) || !isInLineup(p2Name, lineup)) {
-          return VOID_OPTION;
-        }
-      }
       const r1 = runsByBatterName(allBalls, p1Name, fixture);
       const r2 = runsByBatterName(allBalls, p2Name, fixture);
-      // Once the XI check has confirmed both players are in today's
-      // announced lineup, a null from runsByBatterName is no longer
-      // ambiguous — it means "didn't face a ball", which is genuinely a 0.
-      // The "Tied" sentinel option exists precisely for this case (e.g.
-      // both batters got out before scoring, both never came in). Only
-      // VOID when XI couldn't be checked AND we still have a null —
-      // that's the unresolvable case where we'd otherwise fabricate a tie.
+      // Once the XI is announced, a null from runsByBatterName means
+      // "didn't face a ball" — a genuine 0 — regardless of whether the
+      // player was in the XI or got dropped. Both branches collapse 0/0
+      // to the Tie sentinel which the UI labels "Tied".
       const xiConfirmed = lineup && lineup.length > 0;
       if (xiConfirmed) {
         const a = r1 ?? 0;
@@ -925,6 +917,10 @@ export function computeCorrectFromBalls(
         if (b < a) return p2.key;
         return ALL_CORRECT_OPTION;
       }
+      // Pre-toss / lineup-unknown: only VOID if we genuinely can't tell
+      // whether the null is "didn't bat" or "name didn't resolve". With no
+      // XI to lean on, fabricating a 0 risks awarding wins to people who
+      // picked a misspelt-name player.
       if (r1 == null || r2 == null) return VOID_OPTION;
       if (r1 < r2) return p1.key;
       if (r2 < r1) return p2.key;
@@ -932,10 +928,9 @@ export function computeCorrectFromBalls(
     }
     case "punter_wk_better_sr": {
       // Higher strike rate wins. SR = runs / legal balls faced * 100.
-      // Promote the same XI void check + fuzzy lookup pattern as
-      // star_batter_lower above. Previously, a name mismatch produced
-      // null+null → "Neither bats" — the exact bug that surfaced in the
-      // PBKS-vs-RR match (Prabhsimran "Neither bats" despite scoring 59).
+      // No-show rule (per product call): if a wicket-keeper isn't in the
+      // announced XI, treat their SR as null → the OTHER WK auto-wins.
+      // If both are absent → "Neither bats" tie sentinel. No more void.
       const players = pred.options.filter((o) => o.key !== ALL_CORRECT_OPTION);
       if (players.length !== 2) return null;
       const p1 = players[0], p2 = players[1];
@@ -944,18 +939,12 @@ export function computeCorrectFromBalls(
       const lineup = match?.team1Players || match?.team2Players
         ? [...(match?.team1Players || []), ...(match?.team2Players || [])]
         : null;
-      if (lineup && lineup.length > 0) {
-        if (!isInLineup(p1Name, lineup) || !isInLineup(p2Name, lineup)) {
-          return VOID_OPTION;
-        }
-      }
       const sr1 = strikeRateForBatter(allBalls, p1Name, fixture);
       const sr2 = strikeRateForBatter(allBalls, p2Name, fixture);
       // XI-confirmed both → null means "never faced a legal ball" which
-      // makes the ALL_CORRECT_OPTION sentinel (literally labelled
-      // "Neither bats" for this template) the right answer. Only VOID
-      // when XI wasn't populated and we can't tell whether a null is
-      // "didn't play" or "name didn't resolve".
+      // collapses to the "Neither bats" sentinel. Single-null → the other
+      // player wins by default. Pre-toss → only void when both lookups
+      // fail (could be misspelt name).
       const xiConfirmed = lineup && lineup.length > 0;
       if (xiConfirmed) {
         if (sr1 == null && sr2 == null) return ALL_CORRECT_OPTION;
@@ -994,10 +983,11 @@ export function computeCorrectFromBalls(
     }
     case "punter_allrounder_impact": {
       // Impact index = batting runs + wickets taken (excl run-outs) +
-      // catches taken. Same XI-void + fuzzy-resolve treatment as the other
-      // head-to-heads. If a player simply didn't bat / bowl / field a
-      // dismissal, impactIndexForPlayer returns null — that's a real "no
-      // data" signal, not a 0, so VOID rather than fake-comparing zeros.
+      // catches taken. No-show rule (per product call): if a named all-
+      // rounder isn't in the announced XI, treat their impact as 0. The
+      // present player auto-wins, two-absent collapses to Tied.
+      // Originally voided here — too punishing on the user when the
+      // bench rotates (e.g. Nitish Kumar Reddy dropped from SRH XI).
       const players = pred.options.filter((o) => o.key !== ALL_CORRECT_OPTION);
       if (players.length !== 2) return null;
       const p1 = players[0], p2 = players[1];
@@ -1006,16 +996,8 @@ export function computeCorrectFromBalls(
       const lineup = match?.team1Players || match?.team2Players
         ? [...(match?.team1Players || []), ...(match?.team2Players || [])]
         : null;
-      if (lineup && lineup.length > 0) {
-        if (!isInLineup(p1Name, lineup) || !isInLineup(p2Name, lineup)) {
-          return VOID_OPTION;
-        }
-      }
       const v1 = impactIndexForPlayer(allBalls, p1Name, fixture);
       const v2 = impactIndexForPlayer(allBalls, p2Name, fixture);
-      // XI-confirmed both → null impact = "didn't bat / bowl / take a
-      // catch" which is a genuine 0. Two zeros → ALL_CORRECT (Tied),
-      // not a fabricated VOID. Only VOID when XI wasn't populated.
       const xiConfirmed = lineup && lineup.length > 0;
       if (xiConfirmed) {
         const a = v1 ?? 0;
@@ -1024,6 +1006,8 @@ export function computeCorrectFromBalls(
         if (b > a) return p2.key;
         return ALL_CORRECT_OPTION;
       }
+      // Pre-toss: still void on null since we can't tell if the player
+      // didn't play or the name didn't resolve.
       if (v1 == null || v2 == null) return VOID_OPTION;
       if (v1 > v2) return p1.key;
       if (v2 > v1) return p2.key;

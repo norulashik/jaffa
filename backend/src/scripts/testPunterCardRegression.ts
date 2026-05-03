@@ -160,6 +160,11 @@ assert.strictEqual(
   "team scoreboard mapping should tolerate B. Sai Sudharsan vs Sai Sudharsan",
 );
 
+// Per the post-Nitish-Kumar-Reddy product call: absent players are treated
+// as 0 instead of voiding the question. For the "scores LESS" template
+// that means the absent player trivially has the lower score (0 < any
+// real total), so picks landing on the absent player win. Asymmetric but
+// the directive is "no more cheap voids".
 assert.strictEqual(
   computeCorrectFromBalls(
     {
@@ -171,9 +176,48 @@ assert.strictEqual(
     match,
     pool,
   ),
-  VOID_OPTION,
-  "head-to-head should void when a named player is not in the XI",
+  playerKey("Glenn Maxwell"),
+  "absent player counts as 0 runs and wins the 'scores less' head-to-head",
 );
+
+// Same shape but for "bigger impact": the present player should win
+// because absent → 0 impact. This is the exact NKR-vs-Cameron-Green
+// scenario from production — used to void, must now resolve to Cameron.
+assert.strictEqual(
+  computeCorrectFromBalls(
+    {
+      templateKey: "punter_allrounder_impact",
+      options: [
+        option("Glenn Maxwell", "Glenn Maxwell (runs+wkts+catches)"),
+        option("Romario Shepherd", "Romario Shepherd (runs+wkts+catches)"),
+        { key: ALL_CORRECT_OPTION, label: "Tied" },
+      ],
+    },
+    fixture,
+    screenshotBalls,
+    match,
+    pool,
+  ),
+  playerKey("Romario Shepherd"),
+  "absent all-rounder counts as 0 impact; present player auto-wins",
+);
+
+// Strike-rate variant: absent WK → null SR → other WK auto-wins.
+assert.strictEqual(
+  computeCorrectFromBalls(
+    {
+      templateKey: "punter_wk_better_sr",
+      options: [option("Glenn Maxwell"), option("Jitesh Sharma"), { key: ALL_CORRECT_OPTION, label: "Neither bats" }],
+    },
+    fixture,
+    screenshotBalls,
+    match,
+    pool,
+  ),
+  playerKey("Jitesh Sharma"),
+  "absent WK has no SR; present WK auto-wins the 'better SR' head-to-head",
+);
+void VOID_OPTION;
 
 const tieBalls = [
   ...batterBalls("S1", "Virat Kohli", [4, 6], 0),

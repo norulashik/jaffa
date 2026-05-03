@@ -36,13 +36,35 @@ router.get("/:matchId", authenticateUser, async (req: AuthRequest, res: Response
       order: [["createdAt", "ASC"]],
     });
 
-    const userAnswers = venueId
-      ? await UserPrediction.findAll({
-          where: { userId, matchId, venueId, roomId, predictionId: { [Op.in]: cards.map((c) => c.id) } },
-        })
-      : await UserPrediction.findAll({
-          where: { userId, matchId, roomId, predictionId: { [Op.in]: cards.map((c) => c.id) } },
-        });
+    // First try the strictest scope (matches the live picking flow). If the
+    // user is revisiting a past card whose scope they've since left
+    // (common: answered inside a season room, opened the card from
+    // /profile/punter-cards after leaving the room), fall back to a
+    // scope-agnostic lookup keyed only by (userId, matchId, predictionId).
+    // Without the fallback, every card renders as MISSED even though the
+    // picks are stored fine — the symptom that triggered this fix.
+    const cardIds = cards.map((c) => c.id);
+    const baseWhere = { userId, matchId, predictionId: { [Op.in]: cardIds } };
+    const scopedWhere: any = { ...baseWhere };
+    if (venueId) scopedWhere.venueId = venueId;
+    if (roomId) scopedWhere.roomId = roomId;
+
+    let userAnswers = await UserPrediction.findAll({ where: scopedWhere });
+
+    if (userAnswers.length === 0 && cardIds.length > 0) {
+      // Scope-agnostic fallback. Pick the most recent answer per
+      // predictionId so a user who picked twice across different scopes
+      // sees their latest picks.
+      const candidates = await UserPrediction.findAll({
+        where: baseWhere,
+        order: [["answeredAt", "DESC"]],
+      });
+      const dedup = new Map<string, typeof candidates[number]>();
+      for (const a of candidates) {
+        if (!dedup.has(a.predictionId)) dedup.set(a.predictionId, a);
+      }
+      userAnswers = Array.from(dedup.values());
+    }
 
     const answeredMap = new Map(userAnswers.map((a) => [a.predictionId, a]));
 
@@ -193,6 +215,16 @@ router.get("/my/cards", authenticateUser, async (_req: AuthRequest, res: Respons
       const correct = answers.filter((a) => a.isCorrect === true).length;
       const resolved = answers.filter((a) => a.isCorrect !== null && a.isCorrect !== undefined).length;
       const totalPoints = answers.reduce((s, a) => s + (a.pointsEarned || 0), 0);
+      // Capture the (venueId, roomId) tuple the user actually answered with
+      // so the profile-side link to /punter-card/<matchId> can forward it
+      // as a query string. Without this, the detail page falls back to
+      // localStorage / GLOBAL_VENUE_ID and may filter against a scope the
+      // user has since left (e.g. a season room they exited), making every
+      // card render as MISSED even though the picks are stored fine.
+      // Picks made by one user for one match almost always share a single
+      // (venueId, roomId) — pick the most recent answer (`answers` is
+      // already DESC-sorted by answeredAt above) as the canonical scope.
+      const recent = answers[0] || {};
       return {
         matchId: mid,
         team1: m?.team1 || null,
@@ -206,6 +238,8 @@ router.get("/my/cards", authenticateUser, async (_req: AuthRequest, res: Respons
         resolvedCount: resolved,
         totalCount: answers.length,
         totalPoints,
+        venueId: recent.venueId || null,
+        roomId: recent.roomId || null,
       };
     });
 
