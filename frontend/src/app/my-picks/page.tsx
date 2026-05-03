@@ -33,6 +33,13 @@ const getCategoryLabel = (pred: any, currentOver?: number) => {
 const getOptionLabel = (pred: any, key: string) =>
   pred.options?.find((o: any) => (o.key || o.label) === key)?.label || key;
 
+// Sentinel the backend writes to correctOption when a punter-card head-to-head
+// can't be resolved (named player wasn't in the actual XI, etc.). Treat
+// void-resolved picks as neutral — neither correct nor wrong, no streak hit,
+// no Answer label rendered as the literal "__void__" string.
+const VOID_OPTION = "__void__";
+const isVoid = (pred: any) => pred?.status === "resolved" && pred?.correctOption === VOID_OPTION;
+
 type ScopeAgg = { totalAnswered: number; correctCount: number; correctPct: number };
 
 const bandLabel = (pct: number): string | null => {
@@ -148,9 +155,11 @@ function MyPicksPageInner() {
     ? Math.max(...resolvedOverNumbers) + 1
     : undefined;
 
-  // Stat counts
-  const correctCount = answeredPreds.filter((p: any) => p.status === "resolved" && p.userAnswer?.selectedOption === p.correctOption).length;
-  const wrongCount = answeredPreds.filter((p: any) => p.status === "resolved" && p.userAnswer?.selectedOption !== p.correctOption).length;
+  // Stat counts. Voided punter-card picks (correctOption === "__void__") are
+  // excluded from both Correct and Wrong — the user picked, but the question
+  // couldn't be resolved fairly, so it shouldn't pad either bucket.
+  const correctCount = answeredPreds.filter((p: any) => p.status === "resolved" && !isVoid(p) && p.userAnswer?.selectedOption === p.correctOption).length;
+  const wrongCount = answeredPreds.filter((p: any) => p.status === "resolved" && !isVoid(p) && p.userAnswer?.selectedOption !== p.correctOption).length;
   const pendingCount = answeredPreds.filter((p: any) => p.status !== "resolved").length;
 
   return (
@@ -247,9 +256,10 @@ function MyPicksPageInner() {
               const filtered = allPicks.filter((pred: any) => {
                 const selectedKey = pred.userAnswer?.selectedOption;
                 const isClosed = pred.status === "resolved";
+                const voided = isVoid(pred);
                 switch (activeFilter) {
-                  case "correct": return isClosed && selectedKey && selectedKey === pred.correctOption;
-                  case "wrong": return isClosed && selectedKey && selectedKey !== pred.correctOption;
+                  case "correct": return isClosed && !voided && selectedKey && selectedKey === pred.correctOption;
+                  case "wrong":   return isClosed && !voided && selectedKey && selectedKey !== pred.correctOption;
                   case "pending": return selectedKey && !isClosed;
                   case "all": return true;
                 }
@@ -282,16 +292,25 @@ function MyPicksPageInner() {
                 const selectedKey = pred.userAnswer?.selectedOption;
                 const selectedLabel = getOptionLabel(pred, selectedKey);
                 const isClosed = pred.status === "resolved";
-                const isCorrect = isClosed ? selectedKey === pred.correctOption : undefined;
+                const voided = isVoid(pred);
+                // Treat voided picks as a third state: not correct, not wrong.
+                // Keeps streak math, percentile badges, and bucket counts honest.
+                const isCorrect = isClosed && !voided ? selectedKey === pred.correctOption : undefined;
                 const pointsEarned = pred.userAnswer?.pointsEarned || (isCorrect ? (pred.options?.find((o: any) => (o.key || o.label) === selectedKey)?.points || 10) : 0);
-                const correctAnswerLabel = isClosed && !isCorrect && pred.correctOption
+                const correctAnswerLabel = isClosed && !voided && !isCorrect && pred.correctOption
                   ? getOptionLabel(pred, pred.correctOption)
                   : null;
 
                 let statusText = "PENDING";
                 let statusColor = "#ffd60a";
                 let cardClass = "game-card";
-                if (isClosed && isCorrect === true) {
+                if (voided) {
+                  // Neutral grey "VOIDED" — no orange (wrong) or green (right)
+                  // affordances. Subtitle below the question explains why.
+                  statusText = "VOIDED";
+                  statusColor = "#9ca3af";
+                  cardClass = "game-card";
+                } else if (isClosed && isCorrect === true) {
                   statusText = `+${pointsEarned || 0} pts`;
                   statusColor = "#22c55e";
                   cardClass = "card-green";
@@ -346,6 +365,11 @@ function MyPicksPageInner() {
                       {correctAnswerLabel && (
                         <span className="text-xs text-[#6b7280]">
                           Answer: {correctAnswerLabel}
+                        </span>
+                      )}
+                      {voided && (
+                        <span className="text-xs text-[#9ca3af] italic">
+                          Question voided — couldn&apos;t be settled fairly
                         </span>
                       )}
                     </div>

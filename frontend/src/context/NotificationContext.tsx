@@ -18,33 +18,30 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { connectSocket } from "@/lib/socket";
 import { api } from "@/lib/api";
 
-// Local-storage key + namespace strategy: store the entire history under one
-// key, tagged with the matchId it came from. On hydrate we drop the items if
-// the user has switched matches, so the bell never carries old wins from a
-// different match.
+// Persist the entire notification history globally. Notifications are account-
+// scoped, not "current match" scoped: changing rooms / opening a past battle
+// should never erase the bell history or forget which win popups were already
+// shown.
 const STORAGE_KEY = "jaffa_win_history_v1";
 
-type StoredHistory = { matchId: string; items: WinNotification[] };
-
-function readStoredHistory(currentMatchId: string | null): WinNotification[] {
+function readStoredHistory(): WinNotification[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
-    const parsed: StoredHistory = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.items)) return [];
-    if (currentMatchId && parsed.matchId !== currentMatchId) return [];
-    return parsed.items;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && Array.isArray(parsed.items)) return parsed.items;
+    return [];
   } catch {
     return [];
   }
 }
 
-function writeStoredHistory(matchId: string | null, items: WinNotification[]): void {
-  if (typeof window === "undefined" || !matchId) return;
+function writeStoredHistory(items: WinNotification[]): void {
+  if (typeof window === "undefined") return;
   try {
-    const payload: StoredHistory = { matchId, items };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
   } catch {
     // Quota / SecurityError — bell still works in-memory.
   }
@@ -111,8 +108,12 @@ function writeClearedAt(at: number): void {
 
 export interface WinNotification {
   id: string;              // unique client-side id
+  notificationKey: string; // stable identity for this specific answered pick
+  userPredictionId: string;
   predictionId: string;
   matchId: string;
+  venueId?: string | null;
+  roomId?: string | null;
   question: string;
   pointsEarned: number;
   selectedLabel: string;
@@ -145,14 +146,39 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   // event.
   const queueRef = useRef<WinNotification[]>([]);
   const currentRef = useRef<WinNotification | null>(null);
-  const seenIdsRef = useRef<Set<string>>(new Set());
-  // predictionIds the user already saw a popup for and dismissed. Persisted
+  const seenKeysRef = useRef<Set<string>>(new Set());
+  // notification keys the user already saw a popup for and dismissed. Persisted
   // so live events that arrived during a disconnect get popped on the next
   // app open via backfill, but already-acked ones stay silent.
-  const poppedIdsRef = useRef<Set<string>>(new Set());
+  const poppedKeysRef = useRef<Set<string>>(new Set());
+  // Session-only guard so poll/reconnect backfill doesn't enqueue the same
+  // popup repeatedly before the user dismisses it.
+  const popupSessionKeysRef = useRef<Set<string>>(new Set());
 
   useEffect(() => { queueRef.current = queue; }, [queue]);
   useEffect(() => { currentRef.current = currentPopup; }, [currentPopup]);
+
+  const noteKey = useCallback((row: any) => {
+    if (row?.userPredictionId) return String(row.userPredictionId);
+    if (row?.id) return String(row.id);
+    const predictionId = String(row?.predictionId || row?.prediction?.id || "");
+    const matchId = String(row?.matchId || "");
+    const venueId = String(row?.venueId || "");
+    const roomId = String(row?.roomId || "");
+    return `${predictionId}:${matchId}:${venueId}:${roomId}`;
+  }, []);
+
+  const enqueuePopup = useCallback((note: WinNotification) => {
+    if (!note.notificationKey) return;
+    if (popupSessionKeysRef.current.has(note.notificationKey)) return;
+    popupSessionKeysRef.current.add(note.notificationKey);
+
+    if (currentRef.current === null) {
+      setCurrentPopup(note);
+      return;
+    }
+    setQueue((prev) => [...prev, note]);
+  }, []);
 
   // Promote next from queue → currentPopup whenever the slot frees up.
   useEffect(() => {
@@ -166,7 +192,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   // Reusable backfill: fetches the user's resolved-correct picks and reconciles
   // them with what the bell already knows. Runs on mount, on a 15 s interval,
   // and on every socket reconnect, so a missed live event still reaches the
-  // user within ~15 s. Idempotent — dedup via seenIdsRef + poppedIdsRef +
+  // user within ~15 s. Idempotent — dedup via seenKeysRef + poppedKeysRef +
   // clearedAt prevents duplicates / cleared resurrects / popup spam.
   const runBackfill = useCallback(async () => {
     if (typeof window === "undefined") return;
@@ -189,28 +215,26 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       if (r.isCorrect !== true) continue;
       if (Number(r.pointsEarned) <= 0) continue;
       if (!r.prediction?.id) continue;
-      if (seenIdsRef.current.has(r.prediction.id)) continue;
       if (clearedAt && r.answeredAt) {
         const answeredMs = new Date(r.answeredAt).getTime();
         if (answeredMs <= clearedAt) continue;
       }
 
-      seenIdsRef.current.add(r.prediction.id);
+      const notificationKey = noteKey(r);
+      const alreadyKnown = seenKeysRef.current.has(notificationKey);
+      const alreadyPopped = poppedKeysRef.current.has(notificationKey);
       const opt = r.prediction.options?.find(
         (o: any) => (o.key || o.label) === r.selectedOption
       );
       const tsRaw = r.answeredAt ? new Date(r.answeredAt).getTime() : Date.now();
-      // Backfilled wins always count as "already seen" — they go into the
-      // bell drawer but never pop in-face. The pop-on-backfill behaviour
-      // was meant to recover wins missed during a live-match disconnect,
-      // but it was also firing every time the user opened a PAST battle
-      // (LS gets the past match's id → backfill fetches every win that
-      // was ever correct → pops the queue). The user can review backfilled
-      // wins via the bell when they want; live socket events still pop.
       const note: WinNotification = {
         id: `${r.prediction.id}-bf-${tsRaw}`,
+        notificationKey,
+        userPredictionId: String(r.id || ""),
         predictionId: r.prediction.id,
         matchId: r.matchId || matchId,
+        venueId: r.venueId ?? venueId,
+        roomId: r.roomId ?? roomId,
         question: r.prediction.question || "Prediction",
         pointsEarned: Number(r.pointsEarned) || 0,
         selectedLabel: opt?.label || r.selectedOption || "",
@@ -218,23 +242,24 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         category: r.prediction.category || "",
         overNumber: r.prediction.overNumber ?? null,
         receivedAt: tsRaw,
-        seenInBell: true,
+        seenInBell: false,
       };
-      // Mark as "popped" in the dedup set so a stray live event for the
-      // same prediction (race window during innings break, etc.) doesn't
-      // double-pop. The history-only path is enough for backfill.
-      poppedIdsRef.current.add(r.prediction.id);
-      // popsBudget intentionally unused now — kept variable name for any
-      // future tweak that wants a cap on, say, sound effects.
-      void popsBudget;
-      wins.push(note);
+
+      if (!alreadyKnown) {
+        seenKeysRef.current.add(notificationKey);
+        wins.push(note);
+      }
+      if (!alreadyPopped && popsBudget > 0) {
+        enqueuePopup(note);
+        popsBudget -= 1;
+      }
     }
 
     if (wins.length === 0) return;
     setHistory((prev) =>
       sortByReceivedDesc([...prev, ...wins]).slice(0, HISTORY_LIMIT)
     );
-  }, []);
+  }, [enqueuePopup, noteKey]);
 
   // Mount-time setup, in this order:
   //   1. Hydrate from localStorage (instant — bell never visibly empties).
@@ -248,17 +273,19 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     const token = localStorage.getItem("jaffa_token");
     if (!token) return; // not signed in — nothing to do
 
-    const matchId = localStorage.getItem("jaffa_match_id");
-
-    poppedIdsRef.current = readPoppedIds();
+    poppedKeysRef.current = readPoppedIds();
     const clearedAt = readClearedAt();
 
     // (1) hydrate from localStorage
-    const stored = readStoredHistory(matchId).filter(
+    const stored = readStoredHistory().filter(
       (n) => !clearedAt || n.receivedAt > clearedAt
     );
     if (stored.length > 0) {
-      for (const n of stored) seenIdsRef.current.add(n.predictionId);
+      for (const n of stored) {
+        const key = n.notificationKey || n.userPredictionId || n.predictionId;
+        if (!key) continue;
+        seenKeysRef.current.add(key);
+      }
       setHistory(sortByReceivedDesc(stored));
     }
 
@@ -271,13 +298,17 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
     const handleWin = (data: any) => {
       if (!data || !data.predictionId) return;
-      if (seenIdsRef.current.has(data.predictionId)) return;
-      seenIdsRef.current.add(data.predictionId);
+      const notificationKey = noteKey(data);
+      if (!notificationKey) return;
 
       const note: WinNotification = {
         id: `${data.predictionId}-${Date.now()}`,
+        notificationKey,
+        userPredictionId: String(data.userPredictionId || ""),
         predictionId: data.predictionId,
         matchId: data.matchId || "",
+        venueId: data.venueId ?? null,
+        roomId: data.roomId ?? null,
         question: data.question || "Prediction",
         pointsEarned: Number(data.pointsEarned) || 0,
         selectedLabel: data.selectedLabel || "",
@@ -288,15 +319,13 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         seenInBell: false,
       };
 
-      setHistory((prev) =>
-        sortByReceivedDesc([note, ...prev]).slice(0, HISTORY_LIMIT)
-      );
-
-      if (currentRef.current === null) {
-        setCurrentPopup(note);
-      } else {
-        setQueue((prev) => [...prev, note]);
+      if (!seenKeysRef.current.has(notificationKey)) {
+        seenKeysRef.current.add(notificationKey);
+        setHistory((prev) =>
+          sortByReceivedDesc([note, ...prev]).slice(0, HISTORY_LIMIT)
+        );
       }
+      if (!poppedKeysRef.current.has(notificationKey)) enqueuePopup(note);
     };
 
     // (5) reconnect handler — backfills missed wins from the disconnect window
@@ -313,23 +342,22 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       socket.off("connect", handleReconnect);
       clearInterval(interval);
     };
-  }, [runBackfill]);
+  }, [enqueuePopup, noteKey, runBackfill]);
 
   // Persist history to localStorage on every change so reloads / cross-page
   // navs keep the bell populated.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const matchId = localStorage.getItem("jaffa_match_id");
-    writeStoredHistory(matchId, history);
+    writeStoredHistory(history);
   }, [history]);
 
   const dismissPopup = useCallback(() => {
     // Persist this win as already-popped so on next app open we don't
     // re-pop it via backfill.
     const cur = currentRef.current;
-    if (cur?.predictionId) {
-      poppedIdsRef.current.add(cur.predictionId);
-      persistPoppedIds(poppedIdsRef.current);
+    if (cur?.notificationKey) {
+      poppedKeysRef.current.add(cur.notificationKey);
+      persistPoppedIds(poppedKeysRef.current);
     }
     setCurrentPopup(null);
   }, []);
@@ -344,8 +372,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     setHistory([]);
     setQueue([]);
     setCurrentPopup(null);
-    seenIdsRef.current.clear();
-    poppedIdsRef.current.clear();
+    seenKeysRef.current.clear();
+    poppedKeysRef.current.clear();
+    popupSessionKeysRef.current.clear();
     if (typeof window !== "undefined") {
       try {
         localStorage.removeItem(STORAGE_KEY);

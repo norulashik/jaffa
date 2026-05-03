@@ -7,6 +7,7 @@ import { useGame } from "@/context/GameContext";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 import NotificationBell from "@/components/NotificationBell";
+import { ShoppingBag } from "lucide-react";
 
 export default function Header() {
   const { state } = useGame();
@@ -48,6 +49,14 @@ export default function Header() {
         {/* Right: Bell + Profile avatar */}
         <div className="flex items-center justify-end gap-2">
           <NotificationBell />
+          <button
+            type="button"
+            aria-label="Store"
+            className="border-2 border-[#ff6341] rounded-[3px] w-9 h-9 flex items-center justify-center bg-[#1a1a1a]"
+            style={{ boxShadow: "2px 2px 0 0 #ff6341" }}
+          >
+            <ShoppingBag className="w-4 h-4 text-[#ff6341]" />
+          </button>
           <button
             onClick={() => router.push(profileHref)}
             className="border-2 border-[#ff6341] rounded-[3px] overflow-hidden"

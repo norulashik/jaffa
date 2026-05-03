@@ -2,7 +2,12 @@ import { DataTypes, Model, Optional } from "sequelize";
 import sequelize from "../config/database";
 
 export type SquadRole = "bat" | "wk" | "all" | "bowl";
-export type SquadSource = "match" | "manual";
+// "match"  = derived from a completed match's ball-by-ball feed (squadSync.ts).
+// "manual" = admin/CLI-authored override.
+// "smonks" = nightly pull of the team's official squad list from Sportmonks
+//            (sportsmonkSquadSync.ts). Treated as authoritative for canonical
+//            spelling; "manual" rows are never overwritten by it.
+export type SquadSource = "match" | "manual" | "smonks";
 
 interface SquadOverrideAttributes {
   id: string;

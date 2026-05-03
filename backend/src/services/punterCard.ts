@@ -99,25 +99,44 @@ async function resolveTeamPool(
   matchXI: string[] | undefined,
   excludeMatchId: string
 ): Promise<Player[] | null> {
-  // 1. Actual XI for this match — enrich each name with a role.
+  // Frequency map across this team's last 5 completed matches. Used as a
+  // secondary signal by pickStarBatter / pickWicketKeeper / pickTopAllrounder
+  // to prefer the player who actually plays every game over a same-role
+  // teammate who sits on the bench more often. Empty (no history) when this
+  // is the season opener or a brand-new team — pickers gracefully fall back
+  // to squad order in that case.
+  const freq = short ? await lookupRecentLineupFrequency(short, excludeMatchId) : new Map<string, number>();
+
+  // 1. Actual XI for this match — enrich each name with a role + frequency.
   if (Array.isArray(matchXI) && matchXI.length >= 6) {
-    return enrichWithRoles(matchXI);
+    return attachAppearance(enrichWithRoles(matchXI), freq);
   }
 
   // 2. Hardcoded latest XI from the PDF data, merged with any SquadOverride
   // rows written by post-match squad sync. Already role-tagged.
   if (short) {
     const known = await squadWithRolesForTeam(short);
-    if (known && known.length >= 6) return known;
+    if (known && known.length >= 6) return attachAppearance(known, freq);
   }
 
   // 3. Last resort — most recent past match's lineup, role-enriched.
   if (short) {
     const recent = await lookupRecentSquad(short, excludeMatchId);
-    if (recent && recent.length >= 6) return enrichWithRoles(recent);
+    if (recent && recent.length >= 6) return attachAppearance(enrichWithRoles(recent), freq);
   }
 
   return null;
+}
+
+// Attach an appearanceCount to each player based on the frequency map. Names
+// are matched by lowercase; missing entries get 0 (treated by pickers as
+// "no signal", which keeps squad-order as the tie-break).
+function attachAppearance(players: Player[], freq: Map<string, number>): Player[] {
+  if (freq.size === 0) return players;
+  return players.map((p) => ({
+    ...p,
+    appearanceCount: freq.get(p.name.toLowerCase().trim()) ?? 0,
+  }));
 }
 
 // Heuristic role-tagger for raw `string[]` lineups (e.g. arrived via Sportsmonk
@@ -150,6 +169,40 @@ async function lookupRecentSquad(teamShort: string, excludeMatchId: string): Pro
     if (Array.isArray(arr) && arr.length >= 6) return arr;
   }
   return null;
+}
+
+// Walk this team's last 5 played matches and tally how many times each player
+// appeared in the announced XI. A player who played all 5 has count=5; a
+// rotation player who featured once has count=1; bench players never seen
+// don't appear in the map at all.
+//
+// Used by attachAppearance() to bias the head-to-head pickers toward players
+// who actually play. Without this signal, the picker grabs the first player
+// matching a role from the static squad — which is exactly how Shivam Dube
+// got picked for a head-to-head despite CSK having dropped him for the day.
+async function lookupRecentLineupFrequency(
+  teamShort: string,
+  excludeMatchId: string,
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const recents = await Match.findAll({
+    where: {
+      id: { [Op.ne]: excludeMatchId },
+      [Op.or]: [{ team1Short: teamShort }, { team2Short: teamShort }],
+    } as any,
+    order: [["startTime", "DESC"]],
+    limit: 5,
+  });
+  for (const m of recents) {
+    const arr = m.team1Short === teamShort ? m.team1Players : m.team2Players;
+    if (!Array.isArray(arr)) continue;
+    for (const name of arr) {
+      const key = String(name || "").toLowerCase().trim();
+      if (!key) continue;
+      out.set(key, (out.get(key) || 0) + 1);
+    }
+  }
+  return out;
 }
 
 // ---- Generator ----
@@ -391,25 +444,63 @@ const STAR_BATTERS: Record<string, string> = {
 function pickStarBatter(team: Player[], teamShort?: string | null): Player | null {
   // Prefer the curated marquee name when we know the team. Lets us pin a
   // wk-keyed batter (e.g. KL Rahul opens but is role="wk") or a mid-list
-  // batter (e.g. Rinku at KKR position 5) as the question subject.
+  // batter (e.g. Rinku at KKR position 5) as the question subject. Only
+  // honor the curated star if they've featured in the team's recent matches
+  // (or we have no recent-match history at all) — when a marquee is known
+  // injured/dropped, fall through to the role-based pick instead of
+  // baking a likely-void name into the question.
   if (teamShort) {
     const target = STAR_BATTERS[teamShort.toUpperCase()];
     if (target) {
       const found = team.find((p) => p.name.toLowerCase() === target.toLowerCase());
-      if (found) return found;
+      if (found && playerIsLikely(found, team)) return found;
     }
   }
-  // Fallback for non-IPL fixtures or matches whose squad doesn't include
-  // the curated star. Keep the original role-priority chain.
+  // Fallback for non-IPL fixtures, matches whose squad doesn't include the
+  // curated star, or where the curated star is benched. Sort batters by
+  // appearance frequency (regulars first) before falling back to role.
   return (
-    team.find((p) => p.role === "bat") ||
-    team.find((p) => p.role !== "bowl") ||
+    pickMostFrequent(team, (p) => p.role === "bat") ||
+    pickMostFrequent(team, (p) => p.role !== "bowl") ||
     null
   );
 }
 
 function pickWicketKeeper(team: Player[]): Player | null {
-  return team.find((p) => p.role === "wk") || null;
+  return pickMostFrequent(team, (p) => p.role === "wk");
+}
+
+// Pick the player matching `predicate` who has the highest appearanceCount.
+// Stable: ties resolve to original squad order (which encodes role-priority
+// for batters, then all-rounders, then bowlers per iplSquads.ts conventions).
+function pickMostFrequent(team: Player[], predicate: (p: Player) => boolean): Player | null {
+  let bestPlayer: Player | null = null;
+  let bestScore = -1;
+  for (const p of team) {
+    if (!predicate(p)) continue;
+    const score = p.appearanceCount ?? 0;
+    // Strict > preserves first-match-wins on ties, which honors squad order
+    // (the conventional role-priority encoding in iplSquads.ts).
+    if (score > bestScore) {
+      bestPlayer = p;
+      bestScore = score;
+    }
+  }
+  return bestPlayer;
+}
+
+// Conservative "is this player likely to play?" check used to override the
+// curated STAR_BATTERS pin. Returns true when:
+//   - we have no appearance data yet (early season — trust the static pick), OR
+//   - the player has featured in at least 1 of the team's last 5 matches, OR
+//   - no other player on the team has any recent appearances (e.g. brand-new
+//     SquadOverride rows with zero history yet).
+// Stops a question from naming a marquee who's been dropped for injury, while
+// avoiding false negatives when the frequency map is empty/sparse.
+function playerIsLikely(player: Player, team: Player[]): boolean {
+  if (player.appearanceCount && player.appearanceCount > 0) return true;
+  const anyHasFreq = team.some((p) => (p.appearanceCount ?? 0) > 0);
+  return !anyHasFreq;
 }
 
 // First two non-bowler entries in the squad. By convention these are the
@@ -430,7 +521,7 @@ function pickThreeBatter(team: Player[]): Player | null {
 }
 
 function pickTopAllrounder(team: Player[]): Player | null {
-  return team.find((p) => p.role === "all") || null;
+  return pickMostFrequent(team, (p) => p.role === "all");
 }
 
 // Player of the Match — entire 22-man combined squad (XI from each side,
@@ -1536,11 +1627,14 @@ async function scorePunterUserAnswers(
   // re-fetch (regular resolvePrediction in pointsEngine emits both
   // `leaderboardUpdate` and `myPredictionWin`; punter card had neither).
   const winners: Array<{
+    userPredictionId: string;
     userId: string;
     matchId: string;
     venueId: string;
+    roomId: string | null;
     pointsEarned: number;
     selectedOption: string;
+    selectedLabel: string;
   }> = [];
   const venueMatchPairs = new Set<string>();
 
@@ -1598,11 +1692,14 @@ async function scorePunterUserAnswers(
 
     if (isCorrect && pointsEarned > 0) {
       winners.push({
+        userPredictionId: ua.id,
         userId: ua.userId,
         matchId: ua.matchId,
         venueId: ua.venueId,
+        roomId: ua.roomId ?? null,
         pointsEarned,
         selectedOption: ua.selectedOption,
+        selectedLabel: opt?.label || ua.selectedOption,
       });
     }
     venueMatchPairs.add(`${ua.venueId}:${ua.matchId}`);
@@ -1616,8 +1713,13 @@ async function scorePunterUserAnswers(
 
   for (const w of winners) {
     io.to(`user:${w.userId}`).emit("myPredictionWin", {
+      userPredictionId: w.userPredictionId,
       predictionId,
+      matchId: w.matchId,
+      venueId: w.venueId,
+      roomId: w.roomId,
       pointsEarned: w.pointsEarned,
+      selectedLabel: w.selectedLabel,
       selectedOption: w.selectedOption,
     });
   }

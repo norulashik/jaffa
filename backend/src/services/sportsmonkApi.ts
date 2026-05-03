@@ -2,6 +2,7 @@ import { Op } from "sequelize";
 import { Match, Prediction, MatchParticipant } from "../models";
 import { generatePerOverPredictions, generateHotTake, generatePlayerHotTake, generateRivalryCalls, getCurrentRound, generatePlayerPreMatchQuestions, generatePreMatchPredictions } from "./predictionEngine";
 import { ensurePunterCard, punterOpensAt, resolvePunterCard, resolvePunterCardEarly, computeCorrectFromBalls, resolveSquadPool } from "./punterCard";
+import { maybeSyncIplSquads } from "./sportsmonkSquadSync";
 import { computeLivePlayerCorrectOption } from "./livePlayerTracker";
 import {
   ALL_CORRECT_OPTION,
@@ -89,6 +90,27 @@ interface CachedTeam {
 }
 
 const teamCache: Map<number, CachedTeam> = new Map();
+
+// Reverse lookup helper for the squad-sync service: walk the team cache and
+// surface every (teamShort, teamId) pair we've learned from prior fixture
+// fetches. Returns IPL franchises only — non-IPL teams (international tours,
+// etc.) are filtered out. Used by sportsmonkSquadSync to know which team
+// IDs to call /teams/{id}?include=squad against.
+export function getCachedIplTeamIds(): { teamShort: string; teamId: number }[] {
+  const out: { teamShort: string; teamId: number }[] = [];
+  for (const [teamId, team] of teamCache) {
+    const code = (team.code || "").toUpperCase();
+    if (IPL_TEAM_CODES.has(code)) out.push({ teamShort: code, teamId });
+  }
+  return out;
+}
+
+// Public re-export of the same env-resolved base + token used elsewhere in
+// this module. The squad-sync service builds its own URLs (different
+// endpoint shape) but needs the same auth + base.
+export function sportsmonkConfig(): { base: string; token: string; headers: Record<string, string> } {
+  return { base: getApiBase(), token: getApiToken(), headers: SPORTSMONK_HEADERS };
+}
 
 export async function fetchTeamData(teamId: number): Promise<CachedTeam> {
   if (teamCache.has(teamId)) return teamCache.get(teamId)!;
@@ -1515,6 +1537,12 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
   // predictions exist before users tap JOIN. Throttled internally.
   await autoImportTodayFixtures();
 
+  // Daily refresh of the IPL squad spelling table from Sportmonks. Fully
+  // gated inside maybeSyncIplSquads — at most 1 fetch-batch per 24 h, and
+  // only after teamCache has been warmed by a few fixture imports. Cheap
+  // no-op on every other tick.
+  await maybeSyncIplSquads();
+
   // Check both live AND upcoming matches (upcoming might have started)
   const matches = await Match.findAll({ where: { status: ["live", "upcoming"] } });
   if (matches.length === 0) return;
@@ -2125,31 +2153,15 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
           console.log(`[Sportsmonk] Locked ${openOverPreds.length} predictions for over ${currentOver} (ball detected)`);
         }
 
-        // Break-only UX: the standard team over questions for the *next* over
-        // should disappear as soon as the current over begins. That keeps the
-        // answer window limited to the innings break between overs, while live
-        // player questions (subjectType != null) continue using their own flow.
-        const nextOverNum = currentOver + 1;
-        if (nextOverNum <= (match.totalOvers || 20)) {
-          const nextOverRound = getCurrentRound(currentInnings, nextOverNum, match.totalOvers);
-          const nextOverTeamPreds = await Prediction.findAll({
-            where: {
-              matchId: match.id,
-              overNumber: nextOverNum,
-              round: nextOverRound,
-              category: "per_over",
-              status: "open",
-              subjectType: { [Op.is]: null },
-            },
-          });
-          if (nextOverTeamPreds.length > 0) {
-            for (const pred of nextOverTeamPreds) {
-              await pred.update({ status: "locked" });
-            }
-            io.to(`match:${match.id}`).emit("predictionsLocked", { matchId: match.id, overNumber: nextOverNum });
-            console.log(`[Sportsmonk] Locked ${nextOverTeamPreds.length} team over predictions for over ${nextOverNum} (current over started)`);
-          }
-        }
+        // Note: we used to also lock the *next* over's team predictions here
+        // ("disappear as soon as current over begins"), but that collapsed the
+        // answer window to a single ball — Over N+1's questions are generated
+        // at ball 3 of Over N (line ~2210 below) and were then immediately
+        // re-locked at ball 4 of Over N. The intent is the opposite: Over N+1
+        // should stay open through the rest of Over N and the natural
+        // ad-break, locking only when ball 1 of Over N+1 is actually bowled
+        // (handled by the `overNumber: currentOver` lock above on the next
+        // tick after the over rolls over).
 
         // Lock any remaining pre-match predictions if still open (fallback for edge cases)
         const openPreMatch = await Prediction.findAll({
@@ -2181,6 +2193,7 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
         // decimal is "balls bowled into the in-progress over" (0.3 = 3 balls
         // into Over 1, 1.3 = 3 balls into Over 2). We trigger on ≥ 3.
         const legalBallsInCurrentOver = Math.round((nowOvers - Math.floor(nowOvers)) * 10);
+        const nextOverNum = currentOver + 1;
         if (legalBallsInCurrentOver >= 3 && nextOverNum <= (match.totalOvers || 20)) {
           const nextOverRound = getCurrentRound(currentInnings, nextOverNum, match.totalOvers);
           const existingNextPreds = await Prediction.findAll({

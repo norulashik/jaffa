@@ -22,6 +22,12 @@ export type PlayerRole = "bat" | "wk" | "all" | "bowl";
 export interface Player {
   name: string;
   role: PlayerRole;
+  // Optional: how many of this team's last N matches the player featured in.
+  // Populated by resolveSquadPool from the team's recent lineup history.
+  // Pickers use it to prefer regulars over rotation/bench when both fit a
+  // role — stops "Shivam Dube vs X" head-to-heads from voiding when Dube
+  // gets dropped for that match.
+  appearanceCount?: number;
 }
 
 export const IPL_SQUADS_2026: Record<string, Player[]> = {

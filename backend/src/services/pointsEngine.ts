@@ -265,8 +265,11 @@ export async function resolvePrediction(
         prediction.options.find((o) => o.key === up.selectedOption)?.label ||
         up.selectedOption;
       io.to(`user:${up.userId}`).emit("myPredictionWin", {
+        userPredictionId: up.id,
         predictionId: prediction.id,
         matchId: prediction.matchId,
+        venueId: up.venueId,
+        roomId: up.roomId ?? null,
         question: prediction.question,
         pointsEarned: result.totalPoints,
         selectedLabel: optLabel,

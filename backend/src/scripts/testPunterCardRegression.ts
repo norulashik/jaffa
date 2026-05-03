@@ -1,7 +1,7 @@
 import assert from "assert";
 import { ALL_CORRECT_OPTION } from "../services/pointsEngine";
 import { playerKey } from "../services/predictionEngine";
-import { computeCorrectFromBalls, scoreboardForTeam, VOID_OPTION } from "../services/punterCard";
+import { buildPunterCardQuestions, computeCorrectFromBalls, scoreboardForTeam, VOID_OPTION } from "../services/punterCard";
 import type { Player } from "../data/iplSquads";
 
 const rcb: Player[] = [
@@ -210,5 +210,99 @@ assert.deepStrictEqual(
   new Set([playerKey("Shubman Gill"), playerKey("Virat Kohli")]),
   "top-batter exact ties should preserve comma-joined multiple winners",
 );
+
+// ── Frequency-aware picker regression ──────────────────────────────────
+// Reproduces the "Shivam Dube vs Hardik Pandya" scenario: Dube is listed
+// as CSK's all-rounder in the static squad but was dropped for today's
+// match, while another all-rounder (e.g. Jamie Overton) actually plays
+// every game. The picker should prefer the high-appearance all-rounder so
+// the head-to-head doesn't void on the user.
+{
+  const csk: Player[] = [
+    { name: "Ruturaj Gaikwad", role: "bat", appearanceCount: 5 },
+    { name: "Sanju Samson",    role: "wk",  appearanceCount: 5 },
+    { name: "Shivam Dube",     role: "all", appearanceCount: 1 }, // benched 4/5
+    { name: "Jamie Overton",   role: "all", appearanceCount: 5 }, // plays every game
+    { name: "Noor Ahmad",      role: "bowl", appearanceCount: 5 },
+  ];
+  const mi: Player[] = [
+    { name: "Suryakumar Yadav", role: "bat", appearanceCount: 5 },
+    { name: "Ryan Rickleton",   role: "wk",  appearanceCount: 5 },
+    { name: "Hardik Pandya",    role: "all", appearanceCount: 5 },
+    { name: "Jasprit Bumrah",   role: "bowl", appearanceCount: 5 },
+  ];
+
+  // Ensure the resolveSquadPool path sees a "real XI announced" so the
+  // builder doesn't try to load real squad data — pass team1Players /
+  // team2Players already populated. resolveSquadPool isn't actually called
+  // in this test (we're calling buildPunterCardQuestions directly), so the
+  // values just have to exist.
+  const matchObj = {
+    id: "test-match",
+    team1: "Chennai Super Kings", team2: "Mumbai Indians",
+    team1Short: "CSK", team2Short: "MI",
+    team1Players: csk.map((p) => p.name),
+    team2Players: mi.map((p) => p.name),
+  } as any;
+
+  const questions = buildPunterCardQuestions(matchObj, { team1Players: csk, team2Players: mi });
+  const allroundQ = questions.find((q) => q.templateKey === "punter_allrounder_impact");
+  assert.ok(allroundQ, "allrounder impact question should generate when both teams have an all-rounder");
+  assert.ok(
+    /Jamie Overton/.test(allroundQ!.question),
+    `frequency picker should pin CSK's regular all-rounder (Jamie Overton), not the benched Shivam Dube — got: ${allroundQ!.question}`,
+  );
+  assert.ok(
+    !/Shivam Dube/.test(allroundQ!.question),
+    `Shivam Dube should NOT appear in the all-rounder head-to-head when his appearanceCount is 1 vs Overton's 5`,
+  );
+}
+
+// ── Name-drift regression: lineup-membership check uses fuzzy matching ──
+// "Ryan Rickleton" (squad spelling) vs "Ryan Rickelton" (Sportmonks ball-feed
+// spelling) should resolve via the static alias table — without this, the
+// punter_wk_better_sr question voids even when both keepers actually played.
+{
+  const lineupBalls = [
+    ball("S1", 0.1, "Ryan Rickelton", 4), // note Sportmonks spelling
+    ball("S1", 0.2, "Ryan Rickelton", 6),
+    ball("S2", 0.1, "Sanju Samson", 1),
+    ball("S2", 0.2, "Sanju Samson", 0),
+  ];
+  const lineupFixture = {
+    lineup: { data: [{ id: 10, fullname: "Ryan Rickelton" }, { id: 11, fullname: "Sanju Samson" }] },
+    batting: {
+      data: [
+        { player_id: 10, score: 10, ball: 2, rate: 500 }, // SR 500
+        { player_id: 11, score: 1,  ball: 2, rate: 50 },  // SR 50
+      ],
+    },
+    bowling: { data: [] },
+  };
+  const lineupMatch = {
+    team1Players: ["Ryan Rickelton"], // Sportmonks spelling lands in DB at toss
+    team2Players: ["Sanju Samson"],
+  } as any;
+
+  const result = computeCorrectFromBalls(
+    {
+      templateKey: "punter_wk_better_sr",
+      options: [
+        option("Ryan Rickleton"),                                  // squad spelling baked into question
+        option("Sanju Samson"),
+        { key: ALL_CORRECT_OPTION, label: "Neither bats" },
+      ],
+    },
+    lineupFixture,
+    lineupBalls,
+    lineupMatch,
+    null,
+  );
+  assert.strictEqual(
+    result,
+    playerKey("Ryan Rickleton"),
+    "Rickleton/Rickelton spelling drift should resolve via the static alias and award the keeper with the higher SR — not void",
+  );
+}
 
 console.log("[PunterCardRegression] all assertions passed");
