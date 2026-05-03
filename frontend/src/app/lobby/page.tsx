@@ -5,11 +5,12 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
-import { Flame, Share2, Loader2, Users, Plus, LogIn, ChevronDown, ChevronUp } from "lucide-react";
+import { Flame, Share2, Loader2, Users, ChevronDown, ChevronUp } from "lucide-react";
 import { api } from "@/lib/api";
 import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 import { toast } from "sonner";
 import RoomCard from "@/components/RoomCard";
+import HomeDashboard from "@/components/HomeDashboard";
 import { useGame } from "@/context/GameContext";
 import { GLOBAL_VENUE_ID } from "@/lib/venue";
 
@@ -37,20 +38,10 @@ export default function HomeLiveMatches() {
   const [loading, setLoading] = useState(true);
   const [myRooms, setMyRooms] = useState<any[]>([]);
   const [roomsLoading, setRoomsLoading] = useState(false);
-  // Past matches the user participated in (completed). Used for audit-trail /
-  // screenshot support for customer queries.
-  const [pastMatches, setPastMatches] = useState<Awaited<ReturnType<typeof api.getMyPastMatches>>["matches"]>([]);
-  const [pastLoading, setPastLoading] = useState(false);
-  const [pastHasMore, setPastHasMore] = useState(false);
-  const [pastPage, setPastPage] = useState(1);
-  // Both lobby sections start collapsed — the user shouldn't have to scroll
-  // past every upcoming match to reach past battles. Headers expand on tap.
+  // Past battles moved to its own /past-battles route (linked from BottomNav).
+  // Upcoming stays here, collapsed by default — keeps the home short and
+  // dashboard-focused.
   const [upcomingExpanded, setUpcomingExpanded] = useState(false);
-  const [pastExpanded, setPastExpanded] = useState(false);
-  // Per-row expansion for past battles. Keyed by `${matchId}:${venueId}`.
-  // Only meaningful for room-played rows (where `pm.rooms` is populated) —
-  // venue rows never render the room sub-list.
-  const [expandedRooms, setExpandedRooms] = useState<Set<string>>(new Set());
 
   // Match code modal state
   const [codeModal, setCodeModal] = useState<{ match: Match; code: string; error: string; validating: boolean } | null>(null);
@@ -74,22 +65,7 @@ export default function HomeLiveMatches() {
 
     loadMatches();
     loadMyRooms();
-    loadPastMatches(1);
   }, []);
-
-  const loadPastMatches = async (page: number) => {
-    setPastLoading(true);
-    try {
-      const data = await api.getMyPastMatches(page, 10);
-      setPastMatches((prev) => (page === 1 ? data.matches : [...prev, ...data.matches]));
-      setPastHasMore(page < data.totalPages);
-      setPastPage(page);
-    } catch {
-      // Silently fail; list just stays empty.
-    } finally {
-      setPastLoading(false);
-    }
-  };
 
   const loadMatches = async () => {
     try {
@@ -209,66 +185,40 @@ export default function HomeLiveMatches() {
       <Header />
 
       <main className="pt-24 px-4 space-y-6 max-w-2xl mx-auto">
+        {/* Personal dashboard — accuracy ring + region rank + lifetime points.
+            Sits at the top so the user lands on a dossier of their own play
+            instead of a wall of room CTAs. Room creation moved into the
+            hamburger drawer's Modes section. */}
+        <HomeDashboard />
+
+        {/* My Active Rooms — only when the user has any. Keeps the
+            quick-jump-back-into-a-room flow intact even though the
+            create/join CTAs moved to the drawer. */}
+        {!hasVenue && (myRooms.length > 0 || roomsLoading) && (
+          <section className="mb-2">
+            <p className="text-[10px] text-[#6b7280] uppercase tracking-wider font-bold mb-2">
+              <Users size={12} className="inline mr-1" />
+              My Rooms
+            </p>
+            {roomsLoading ? (
+              <div className="flex justify-center py-4">
+                <Loader2 size={18} className="animate-spin text-[#6b7280]" />
+              </div>
+            ) : (
+              myRooms.map((room) => <RoomCard key={room.id} room={room} />)
+            )}
+          </section>
+        )}
+
         {/* Title Section */}
         <section className="mb-4">
           <h2
-            className="text-3xl font-bold tracking-tight uppercase text-white"
+            className="text-2xl font-bold tracking-tight uppercase text-white"
             style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
           >
             ACTIVE BATTLES
           </h2>
         </section>
-
-        {/* Play with Friends Section — global users only */}
-        {!hasVenue && (
-          <section className="mb-6">
-            <h3
-              className="text-lg font-bold text-white mb-4 pl-3 uppercase"
-              style={{
-                fontFamily: "'Bungee', 'Impact', cursive",
-                borderLeft: "4px solid #3b9eff",
-              }}
-            >
-              PLAY WITH FRIENDS
-            </h3>
-
-            <div className="flex gap-3 mb-4">
-              <button
-                onClick={() => router.push("/room/create")}
-                className="flex-1 btn-sticker uppercase tracking-tight py-3 flex items-center justify-center gap-2 text-sm font-bold"
-                style={{ background: "#3b9eff", color: "#fff", border: "2px solid #3b9eff" }}
-              >
-                <Plus size={18} /> Create Room
-              </button>
-              <button
-                onClick={() => router.push("/room/join")}
-                className="flex-1 btn-sticker uppercase tracking-tight py-3 flex items-center justify-center gap-2 text-sm font-bold"
-                style={{ background: "#1a1a1a", color: "#fff", border: "2px solid #3b9eff" }}
-              >
-                <LogIn size={18} /> Join Room
-              </button>
-            </div>
-
-            {/* My Active Rooms */}
-            {roomsLoading && (
-              <div className="flex justify-center py-4">
-                <Loader2 size={18} className="animate-spin text-[#6b7280]" />
-              </div>
-            )}
-
-            {!roomsLoading && myRooms.length > 0 && (
-              <div>
-                <p className="text-[10px] text-[#6b7280] uppercase tracking-wider font-bold mb-2">
-                  <Users size={12} className="inline mr-1" />
-                  My Rooms
-                </p>
-                {myRooms.map((room) => (
-                  <RoomCard key={room.id} room={room} />
-                ))}
-              </div>
-            )}
-          </section>
-        )}
 
         {/* Loading State */}
         {loading && (
@@ -609,200 +559,9 @@ export default function HomeLiveMatches() {
           );
         })}
 
-        {/* Past Battles — collapsible. Completed matches the user participated
-            in. Tapping a row opens the regular /match/<id> page in its
-            "BATTLE OVER" mode so MyPicks + Ranks tabs all reflect that
-            specific match (consistent with the live UX). */}
-        {(pastMatches.length > 0 || pastLoading) && (
-          <>
-            <button
-              onClick={() => setPastExpanded((v) => !v)}
-              className="w-full mt-8 mb-4 pl-3 pr-2 py-1 flex justify-between items-center"
-              style={{ borderLeft: "4px solid #6b7280" }}
-            >
-              <span
-                className="text-lg font-bold text-white uppercase"
-                style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
-              >
-                Past Battles ({pastMatches.length})
-              </span>
-              {pastExpanded ? (
-                <ChevronUp className="w-5 h-5 text-white/60" />
-              ) : (
-                <ChevronDown className="w-5 h-5 text-white/60" />
-              )}
-            </button>
-            {pastExpanded && (
-            <div className="space-y-2">
-              {pastMatches.map((pm) => {
-                const dt = pm.startTime ? new Date(pm.startTime) : null;
-                const dateStr = dt
-                  ? dt.toLocaleDateString("en-IN", { day: "numeric", month: "short" })
-                  : "";
-                const acc = pm.myStats.totalPredictions > 0
-                  ? Math.round((pm.myStats.correctPredictions / pm.myStats.totalPredictions) * 100)
-                  : 0;
-                const rowKey = pm.matchId + ":" + pm.venueId;
-                // Show the room sub-list only when the server returned rooms
-                // for this row (i.e. the participant's venueId is the
-                // synthetic ROOM_VENUE_ID and the user joined ≥1 room for
-                // this match). Non-room rows behave exactly like before.
-                const hasRooms = !!pm.rooms && pm.rooms.length > 0;
-                const isExpanded = expandedRooms.has(rowKey);
-
-                // Hydrate GameContext + localStorage so the destination
-                // /match page picks up the right (match, venue, room) tuple
-                // synchronously — same pattern as the existing single-tap
-                // flow. roomCtx is `null` for venue plays.
-                const navigateToMatch = (
-                  roomCtx: { id: string; code: string } | null,
-                ) => {
-                  try {
-                    if (pm.matchId) localStorage.setItem("jaffa_match_id", pm.matchId);
-                    if (pm.venueId) localStorage.setItem("jaffa_venue_id", pm.venueId);
-                    else localStorage.removeItem("jaffa_venue_id");
-                    if (roomCtx) {
-                      localStorage.setItem("jaffa_room_id", roomCtx.id);
-                      localStorage.setItem("jaffa_room_code", roomCtx.code);
-                    } else {
-                      localStorage.removeItem("jaffa_room_id");
-                      localStorage.removeItem("jaffa_room_code");
-                    }
-                  } catch {}
-                  if (pm.venueId) {
-                    dispatch({
-                      type: "SET_VENUE",
-                      venueId: pm.venueId,
-                      venueName: pm.venueName || "",
-                    });
-                  }
-                  if (pm.matchId) {
-                    dispatch({ type: "SET_MATCH", matchId: pm.matchId });
-                  }
-                  if (roomCtx) {
-                    dispatch({ type: "SET_ROOM", roomId: roomCtx.id, roomCode: roomCtx.code });
-                  }
-                  const qs = pm.venueId ? `?venueId=${pm.venueId}` : "";
-                  const roomQs = roomCtx ? `${qs ? "&" : "?"}roomId=${roomCtx.id}` : "";
-                  router.push(`/match/${pm.matchId}${qs}${roomQs}`);
-                };
-
-                // Shared body so the venue/no-room <button> path stays
-                // keyboard-accessible (Enter/Space) and the room <div> path
-                // can host nested buttons (HTML forbids button-in-button).
-                const headerBody = (
-                  <>
-                    <div className="flex justify-between items-start mb-2">
-                      <span
-                        className="text-sm font-bold text-white uppercase"
-                        style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
-                      >
-                        {pm.team1Short || "T1"} vs {pm.team2Short || "T2"}
-                      </span>
-                      <span className="info-pill text-[10px]">{dateStr}</span>
-                    </div>
-                    {pm.venueName && (
-                      <div className="text-[10px] text-[#6b7280] uppercase tracking-wider mb-2">
-                        {pm.venueName}
-                      </div>
-                    )}
-                    <div className="flex items-center gap-3 text-xs text-[#9ca3af]">
-                      <span>
-                        <span className="text-[#ffd60a] font-bold">{pm.myStats.totalPoints}</span> pts
-                      </span>
-                      <span>·</span>
-                      <span>
-                        {pm.myStats.correctPredictions}/{pm.myStats.totalPredictions} correct
-                      </span>
-                      <span>·</span>
-                      <span>{acc}%</span>
-                      {hasRooms ? (
-                        <button
-                          type="button"
-                          className="ml-auto flex items-center gap-1 text-[10px] uppercase tracking-wider text-[#ff6341] font-bold"
-                          onClick={() => {
-                            setExpandedRooms((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(rowKey)) next.delete(rowKey);
-                              else next.add(rowKey);
-                              return next;
-                            });
-                          }}
-                        >
-                          {pm.rooms!.length} {pm.rooms!.length === 1 ? "room" : "rooms"}
-                          {isExpanded ? (
-                            <ChevronUp className="w-3 h-3" />
-                          ) : (
-                            <ChevronDown className="w-3 h-3" />
-                          )}
-                        </button>
-                      ) : (
-                        <span className="ml-auto text-[#6b7280]">›</span>
-                      )}
-                    </div>
-                  </>
-                );
-
-                return (
-                  <div key={rowKey} className="space-y-1">
-                    {hasRooms ? (
-                      <div className="w-full game-card text-left">{headerBody}</div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => navigateToMatch(null)}
-                        className="w-full game-card text-left hover:border-[#ff6341] transition-colors"
-                      >
-                        {headerBody}
-                      </button>
-                    )}
-
-                    {hasRooms && isExpanded && (
-                      <div className="pl-3 space-y-1">
-                        {pm.rooms!.map((room) => (
-                          <button
-                            key={room.id}
-                            type="button"
-                            onClick={() => navigateToMatch({ id: room.id, code: room.code })}
-                            className="w-full text-left px-3 py-2 rounded border border-[#333] bg-[#141414] hover:border-[#ff6341] hover:bg-[#1a1a1a] transition-colors flex items-center justify-between"
-                          >
-                            <div className="flex flex-col">
-                              <span
-                                className="text-xs font-bold text-white uppercase"
-                                style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
-                              >
-                                {room.name}
-                              </span>
-                              <span className="text-[10px] text-[#6b7280] uppercase tracking-wider">
-                                Code {room.code}
-                              </span>
-                            </div>
-                            <span className="text-[#ff6341] text-sm">›</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              {pastLoading && (
-                <div className="flex justify-center py-3">
-                  <Loader2 size={18} className="animate-spin text-[#6b7280]" />
-                </div>
-              )}
-              {!pastLoading && pastHasMore && (
-                <button
-                  onClick={() => loadPastMatches(pastPage + 1)}
-                  className="w-full btn-sticker py-2 text-xs uppercase tracking-widest font-bold"
-                  style={{ background: "#1a1a1a", color: "#fff", border: "2px solid #333" }}
-                >
-                  Load more
-                </button>
-              )}
-            </div>
-            )}
-          </>
-        )}
+        {/* Past Battles moved to /past-battles (linked from BottomNav).
+            The home stays focused on the dashboard + live action; the full
+            history lives one tap away via the bottom nav. */}
       </main>
 
       {/* Match Code Modal */}

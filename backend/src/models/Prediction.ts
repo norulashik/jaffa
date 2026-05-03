@@ -1,7 +1,10 @@
 import { DataTypes, Model, Optional, Op } from "sequelize";
 import sequelize from "../config/database";
 
-export type PredictionCategory = "pre_match" | "per_over" | "hot_take" | "bold_call" | "rivalry_call" | "punter_card";
+// "kong" — admin-fired ad-hoc question, owner-authored question + options +
+// per-option points. Resolved manually via /owner/kong/:id/resolve. Rides
+// the same scoring + socket pipeline as every other category.
+export type PredictionCategory = "pre_match" | "per_over" | "hot_take" | "bold_call" | "rivalry_call" | "punter_card" | "kong";
 export type PredictionStatus = "open" | "locked" | "resolved" | "voided";
 // Live player-specific subjects. NULL for team-level / pre-match questions.
 // - batsman_innings       → how many runs will this batsman score?

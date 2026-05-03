@@ -1,14 +1,15 @@
 import { Router, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
-import { Op } from "sequelize";
+import { Op, fn, col, literal } from "sequelize";
 import { Venue, User, Match, MatchParticipant, Prediction, UserPrediction, Reward } from "../models";
 import { authenticateOwner, AuthRequest } from "../middleware/auth";
 import { fetchTodayFixtures, fetchTeamData } from "../services/sportsmonkApi";
-import { generatePreMatchPredictions } from "../services/predictionEngine";
+import { generatePreMatchPredictions, getCurrentRound } from "../services/predictionEngine";
 import { resolvePrediction } from "../services/pointsEngine";
 import { JWT_SECRET, OWNER_USER, OWNER_PASS } from "../config/secrets";
 import { parsePagination, paginationMeta } from "../utils/pagination";
+import * as simulationRunner from "../services/simulationRunner";
 
 const router = Router();
 
@@ -373,5 +374,227 @@ router.post("/predictions/:predictionId/resolve", authenticateOwner, async (req:
     res.status(500).json({ error: "Failed to resolve prediction" });
   }
 });
+
+// ── Kong Question (admin-fired ad-hoc predictions) ───────────────
+
+const KONG_DEFAULT_WINDOW_MS = 90 * 1000;
+const KONG_OPTION_LIMIT = 6;
+
+// Validate the option list passed by the admin: must be 2-6 entries, each
+// with a non-empty label and a points value in [1, 500]. Returns a cleaned
+// option array with stable opt_N keys, or throws with a 400-friendly message.
+function buildKongOptions(input: unknown): { key: string; label: string; points: number }[] {
+  if (!Array.isArray(input)) throw new Error("options must be an array");
+  if (input.length < 2 || input.length > KONG_OPTION_LIMIT) {
+    throw new Error(`options must have between 2 and ${KONG_OPTION_LIMIT} entries`);
+  }
+  return input.map((raw, i) => {
+    const label = typeof raw?.label === "string" ? raw.label.trim() : "";
+    const points = Number(raw?.points);
+    if (!label) throw new Error(`option ${i + 1} must have a non-empty label`);
+    if (!Number.isFinite(points) || points < 1 || points > 500) {
+      throw new Error(`option ${i + 1} points must be between 1 and 500`);
+    }
+    return { key: `opt_${i}`, label, points };
+  });
+}
+
+router.post("/kong/:matchId", authenticateOwner, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const matchId = req.params.matchId as string;
+    const { question, options } = req.body as { question?: string; options?: unknown };
+
+    const match = await Match.findByPk(matchId);
+    if (!match) { res.status(404).json({ error: "Match not found" }); return; }
+    if (match.status === "completed") {
+      res.status(400).json({ error: "Cannot fire Kong on a completed match" });
+      return;
+    }
+
+    const trimmedQuestion = typeof question === "string" ? question.trim() : "";
+    if (!trimmedQuestion) {
+      res.status(400).json({ error: "Question text is required" });
+      return;
+    }
+
+    let cleanedOptions: { key: string; label: string; points: number }[];
+    try {
+      cleanedOptions = buildKongOptions(options);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || "Invalid options" });
+      return;
+    }
+
+    // Tie the prediction to whichever round the match is currently in. For
+    // upcoming matches this is round 0 (pre-match); resolvePrediction reads
+    // round to credit the correct round-N points bucket.
+    const round = match.status === "live"
+      ? getCurrentRound(match.currentInnings || 1, match.currentOver || 1, match.totalOvers)
+      : 0;
+
+    const now = new Date();
+    const prediction = await Prediction.create({
+      matchId,
+      category: "kong",
+      round,
+      question: trimmedQuestion,
+      options: cleanedOptions,
+      status: "open",
+      opensAt: now,
+      expiresAt: new Date(now.getTime() + KONG_DEFAULT_WINDOW_MS),
+    } as any);
+
+    // Same socket channel every other prediction uses → user clients refetch
+    // /api/predictions and the Kong card lands in their feed within the next
+    // tick.
+    const io = req.app.get("io");
+    io.to(`match:${matchId}`).emit("newPrediction", {
+      matchId,
+      type: "kong",
+      predictionId: prediction.id,
+    });
+
+    res.status(201).json({ prediction });
+  } catch (error) {
+    console.error("Owner kong create error:", error);
+    res.status(500).json({ error: "Failed to fire Kong question" });
+  }
+});
+
+router.get("/kong/:matchId", authenticateOwner, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const matchId = req.params.matchId as string;
+
+    const predictions = await Prediction.findAll({
+      where: { matchId, category: "kong" },
+      order: [["createdAt", "DESC"]],
+    });
+
+    if (predictions.length === 0) {
+      res.json({ predictions: [] });
+      return;
+    }
+
+    // Aggregate response counts by selectedOption per Kong predictionId in a
+    // single grouped query — avoids an N+1 even with several Kongs per match.
+    const tallies = await UserPrediction.findAll({
+      where: { predictionId: { [Op.in]: predictions.map((p) => p.id) } },
+      attributes: [
+        "predictionId",
+        "selectedOption",
+        [fn("COUNT", col("id")), "count"],
+      ],
+      group: ["predictionId", "selectedOption"],
+      raw: true,
+    }) as unknown as { predictionId: string; selectedOption: string; count: string | number }[];
+
+    const tallyMap = new Map<string, Record<string, number>>();
+    for (const row of tallies) {
+      const inner = tallyMap.get(row.predictionId) || {};
+      inner[row.selectedOption] = Number(row.count);
+      tallyMap.set(row.predictionId, inner);
+    }
+
+    res.json({
+      predictions: predictions.map((p) => ({
+        ...p.toJSON(),
+        responses: tallyMap.get(p.id) || {},
+        totalResponses: Object.values(tallyMap.get(p.id) || {}).reduce((a, b) => a + b, 0),
+      })),
+    });
+  } catch (error) {
+    console.error("Owner kong list error:", error);
+    res.status(500).json({ error: "Failed to list Kong questions" });
+  }
+});
+
+router.post("/kong/:predictionId/resolve", authenticateOwner, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const predictionId = req.params.predictionId as string;
+    const { correctOption } = req.body as { correctOption?: string };
+
+    if (!correctOption || typeof correctOption !== "string") {
+      res.status(400).json({ error: "correctOption is required" });
+      return;
+    }
+
+    const prediction = await Prediction.findByPk(predictionId);
+    if (!prediction) { res.status(404).json({ error: "Prediction not found" }); return; }
+
+    // Category guard: this endpoint resolves Kong questions only. The generic
+    // /predictions/:id/resolve above handles everything else; keeping these
+    // separate prevents the admin from accidentally resolving (and re-paying)
+    // a per-over question through the Kong UI.
+    if (prediction.category !== "kong") {
+      res.status(400).json({ error: "Endpoint only resolves Kong questions" });
+      return;
+    }
+    if (prediction.status === "resolved") {
+      res.status(400).json({ error: "Already resolved" });
+      return;
+    }
+
+    const validKeys = new Set(prediction.options.map((o) => o.key));
+    if (!validKeys.has(correctOption)) {
+      res.status(400).json({ error: "correctOption must match one of the option keys" });
+      return;
+    }
+
+    const io = req.app.get("io");
+    await resolvePrediction(prediction, correctOption, io);
+
+    res.json({ resolved: true });
+  } catch (error) {
+    console.error("Owner kong resolve error:", error);
+    res.status(500).json({ error: "Failed to resolve Kong question" });
+  }
+});
+
+// ── Simulation Match Controls ────────────────────────────────────
+
+router.post("/sim/start", authenticateOwner, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const io = req.app.get("io");
+    const state = await simulationRunner.start(io);
+    res.json(state);
+  } catch (error: any) {
+    console.error("Owner sim start error:", error);
+    res.status(500).json({ error: error?.message || "Failed to start simulation" });
+  }
+});
+
+router.post("/sim/stop", authenticateOwner, async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const state = simulationRunner.stop();
+    res.json(state);
+  } catch (error: any) {
+    console.error("Owner sim stop error:", error);
+    res.status(500).json({ error: error?.message || "Failed to stop simulation" });
+  }
+});
+
+router.post("/sim/reset", authenticateOwner, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const io = req.app.get("io");
+    const state = await simulationRunner.reset(io);
+    res.json(state);
+  } catch (error: any) {
+    console.error("Owner sim reset error:", error);
+    res.status(500).json({ error: error?.message || "Failed to reset simulation" });
+  }
+});
+
+router.get("/sim/state", authenticateOwner, async (_req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const state = await simulationRunner.getState();
+    res.json(state);
+  } catch (error: any) {
+    console.error("Owner sim state error:", error);
+    res.status(500).json({ error: error?.message || "Failed to read simulation state" });
+  }
+});
+
+// Suppress an unused-import warning when sequelize literal isn't used downstream.
+void literal;
 
 export default router;

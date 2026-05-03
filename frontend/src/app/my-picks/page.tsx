@@ -27,6 +27,7 @@ const getCategoryLabel = (pred: any, currentOver?: number) => {
   if (pred.category === "rivalry_call") return "Rivalry Call";
   if (pred.category === "bold_call") return "Bold Call";
   if (pred.category === "pre_match") return "Pre-Match";
+  if (pred.category === "kong") return "Kong Question";
   return pred.category?.replace(/_/g, " ") || "Predict";
 };
 

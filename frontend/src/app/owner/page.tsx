@@ -20,7 +20,33 @@ import {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
-type Tab = "dashboard" | "venues" | "venue-detail" | "matches" | "tools";
+type Tab = "dashboard" | "venues" | "venue-detail" | "matches" | "tools" | "sim" | "kong";
+
+type SimSnapshot = {
+  status: "idle" | "running" | "cooldown";
+  matchId: string | null;
+  currentBallIndex: number;
+  totalBalls: number;
+  currentOver: number;
+  currentInnings: number;
+  innings1Score: { runs: number; wickets: number; overs: number };
+  innings2Score: { runs: number; wickets: number; overs: number };
+  cooldownEndsAt: number | null;
+};
+
+type KongOptionDraft = { label: string; points: string };
+
+type KongPrediction = {
+  id: string;
+  matchId: string;
+  question: string;
+  status: "open" | "locked" | "resolved" | "voided";
+  correctOption?: string | null;
+  options: { key: string; label: string; points: number }[];
+  responses: Record<string, number>;
+  totalResponses: number;
+  createdAt: string;
+};
 
 /* ══════════════════════════════════════════════════════════════
    HELPER COMPONENTS
@@ -106,6 +132,21 @@ export default function OwnerPortal() {
   const [resolveOption, setResolveOption] = useState("");
   const [resolveResult, setResolveResult] = useState<any>(null);
 
+  /* ── Sim ─────────────────────────────────────────────────── */
+  const [simSnapshot, setSimSnapshot] = useState<SimSnapshot | null>(null);
+  const [simBusy, setSimBusy] = useState(false);
+
+  /* ── Kong ────────────────────────────────────────────────── */
+  const [kongMatchId, setKongMatchId] = useState("");
+  const [kongQuestion, setKongQuestion] = useState("");
+  const [kongOptions, setKongOptions] = useState<KongOptionDraft[]>([
+    { label: "", points: "50" },
+    { label: "", points: "30" },
+  ]);
+  const [kongList, setKongList] = useState<KongPrediction[]>([]);
+  const [kongFiring, setKongFiring] = useState(false);
+  const [kongResolvingId, setKongResolvingId] = useState<string | null>(null);
+
   /* ── ownerFetch helper ───────────────────────────────────── */
   const ownerFetch = useCallback(
     async (path: string, options: RequestInit = {}) => {
@@ -158,20 +199,124 @@ export default function OwnerPortal() {
     } catch {}
   }, [ownerFetch]);
 
+  /* ── Sim loaders/actions ──────────────────────────────────── */
+  const loadSimState = useCallback(async () => {
+    try {
+      const res = await ownerFetch("/owner/sim/state");
+      if (res.ok) setSimSnapshot(await res.json());
+    } catch {}
+  }, [ownerFetch]);
+
+  const simAction = async (action: "start" | "stop" | "reset") => {
+    setSimBusy(true);
+    try {
+      const res = await ownerFetch(`/owner/sim/${action}`, { method: "POST" });
+      if (res.ok) {
+        setSimSnapshot(await res.json());
+        toast.success(`Sim ${action} ok`);
+        loadMatches();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || `Sim ${action} failed`);
+      }
+    } catch (err: any) {
+      toast.error(err?.message || `Sim ${action} failed`);
+    } finally {
+      setSimBusy(false);
+    }
+  };
+
+  /* ── Kong loaders/actions ─────────────────────────────────── */
+  const loadKong = useCallback(async (mid: string) => {
+    if (!mid) { setKongList([]); return; }
+    try {
+      const res = await ownerFetch(`/owner/kong/${mid}`);
+      if (res.ok) {
+        const data = await res.json();
+        setKongList(data.predictions || []);
+      }
+    } catch {}
+  }, [ownerFetch]);
+
+  const fireKong = async () => {
+    if (!kongMatchId) { toast.error("Pick a match"); return; }
+    if (!kongQuestion.trim()) { toast.error("Question required"); return; }
+    const cleaned = kongOptions
+      .map((o) => ({ label: o.label.trim(), points: Number(o.points) }))
+      .filter((o) => o.label.length > 0);
+    if (cleaned.length < 2) { toast.error("Need ≥2 options"); return; }
+    if (cleaned.some((o) => !Number.isFinite(o.points) || o.points < 1 || o.points > 500)) {
+      toast.error("Each option's points must be 1–500");
+      return;
+    }
+    setKongFiring(true);
+    try {
+      const res = await ownerFetch(`/owner/kong/${kongMatchId}`, {
+        method: "POST",
+        body: JSON.stringify({ question: kongQuestion.trim(), options: cleaned }),
+      });
+      if (res.ok) {
+        toast.success("Kong fired");
+        setKongQuestion("");
+        setKongOptions([{ label: "", points: "50" }, { label: "", points: "30" }]);
+        loadKong(kongMatchId);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to fire Kong");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to fire Kong");
+    } finally {
+      setKongFiring(false);
+    }
+  };
+
+  const resolveKong = async (predictionId: string, optionKey: string) => {
+    setKongResolvingId(predictionId);
+    try {
+      const res = await ownerFetch(`/owner/kong/${predictionId}/resolve`, {
+        method: "POST",
+        body: JSON.stringify({ correctOption: optionKey }),
+      });
+      if (res.ok) {
+        toast.success("Resolved — points awarded");
+        loadKong(kongMatchId);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Resolve failed");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Resolve failed");
+    } finally {
+      setKongResolvingId(null);
+    }
+  };
+
   /* ── Auto-refresh every 15s ──────────────────────────────── */
   useEffect(() => {
     if (isLoggedIn && token) {
       loadStats();
       loadVenues();
       loadMatches();
+      loadSimState();
       const interval = setInterval(() => {
         loadStats();
         loadVenues();
         loadMatches();
+        loadSimState();
       }, 15000);
       return () => clearInterval(interval);
     }
-  }, [isLoggedIn, token, loadStats, loadVenues, loadMatches]);
+  }, [isLoggedIn, token, loadStats, loadVenues, loadMatches, loadSimState]);
+
+  /* Reload Kong list when admin switches selected match in Kong tab. */
+  useEffect(() => {
+    if (isLoggedIn && token && kongMatchId) {
+      loadKong(kongMatchId);
+      const interval = setInterval(() => loadKong(kongMatchId), 8000);
+      return () => clearInterval(interval);
+    }
+  }, [isLoggedIn, token, kongMatchId, loadKong]);
 
   /* ── Venue filter/search triggers reload ─────────────────── */
   useEffect(() => {
@@ -475,6 +620,8 @@ export default function OwnerPortal() {
             { value: "dashboard", icon: <IoStatsChart />, label: "Dashboard" },
             { value: "venues", icon: <IoStorefront />, label: "Venues" },
             { value: "matches", icon: <IoTrophy />, label: "Matches" },
+            { value: "sim", icon: <IoRefresh />, label: "Sim" },
+            { value: "kong", icon: <IoEye />, label: "Kong" },
             { value: "tools", icon: <IoSettings />, label: "Tools" },
           ].map((t) => (
             <TabsTrigger
@@ -1151,6 +1298,305 @@ export default function OwnerPortal() {
                   </div>
                 )}
               </div>
+            </motion.div>
+          </TabsContent>
+
+          {/* ════════════════════════════════════════════════
+             SIM TAB — owner-portal sandbox match
+             ════════════════════════════════════════════════ */}
+          <TabsContent value="sim">
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-6"
+            >
+              <div className="game-card p-6 space-y-4">
+                <div>
+                  <h3 className="text-lg text-white" style={{ fontFamily: "Bungee" }}>
+                    Simulation Match
+                  </h3>
+                  <p className="text-[#9ca3af] text-xs font-bold mt-1">
+                    Hidden from regular users. ~5 min/over, restarts 10 min after each completion.
+                  </p>
+                </div>
+
+                {simSnapshot ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-3">
+                      <span className="info-pill">STATUS</span>
+                      <span
+                        className="font-black uppercase text-sm"
+                        style={{
+                          color: simSnapshot.status === "running" ? "#22c55e"
+                            : simSnapshot.status === "cooldown" ? "#ffd60a"
+                            : "#9ca3af",
+                        }}
+                      >
+                        {simSnapshot.status}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <div className="card-blue p-3">
+                        <div className="text-[#3b9eff]/70 uppercase font-bold mb-1">Inn 1 (SIM1)</div>
+                        <div className="text-white font-black text-base">
+                          {simSnapshot.innings1Score.runs}/{simSnapshot.innings1Score.wickets}
+                          <span className="text-[#9ca3af] text-xs font-bold ml-2">
+                            ({simSnapshot.innings1Score.overs} ov)
+                          </span>
+                        </div>
+                      </div>
+                      <div className="card-yellow p-3">
+                        <div className="text-[#ffd60a]/70 uppercase font-bold mb-1">Inn 2 (SIM2)</div>
+                        <div className="text-white font-black text-base">
+                          {simSnapshot.innings2Score.runs}/{simSnapshot.innings2Score.wickets}
+                          <span className="text-[#9ca3af] text-xs font-bold ml-2">
+                            ({simSnapshot.innings2Score.overs} ov)
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-[#9ca3af] text-xs font-bold">
+                      Ball {simSnapshot.currentBallIndex} / {simSnapshot.totalBalls}
+                      {simSnapshot.cooldownEndsAt && simSnapshot.status === "cooldown" ? (
+                        <> · cooldown ends {new Date(simSnapshot.cooldownEndsAt).toLocaleTimeString("en-IN")}</>
+                      ) : null}
+                    </div>
+                    {simSnapshot.matchId && (
+                      <p className="text-[#6b7280] text-[10px] font-mono break-all">
+                        matchId: {simSnapshot.matchId}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-[#9ca3af] text-xs">Loading…</p>
+                )}
+
+                <div className="flex flex-wrap gap-3 pt-2">
+                  <button
+                    onClick={() => simAction("start")}
+                    disabled={simBusy || simSnapshot?.status === "running"}
+                    className="btn-sticker btn-green px-5 py-2 text-xs"
+                  >
+                    {simBusy ? "…" : "Start"}
+                  </button>
+                  <button
+                    onClick={() => simAction("stop")}
+                    disabled={simBusy || simSnapshot?.status === "idle"}
+                    className="btn-sticker btn-orange px-5 py-2 text-xs"
+                  >
+                    {simBusy ? "…" : "Stop"}
+                  </button>
+                  <button
+                    onClick={() => simAction("reset")}
+                    disabled={simBusy}
+                    className="btn-sticker btn-blue px-5 py-2 text-xs"
+                  >
+                    {simBusy ? "…" : "Reset & Replay"}
+                  </button>
+                  {simSnapshot?.matchId && (
+                    <a
+                      href={`/match/${simSnapshot.matchId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn-secondary px-5 py-2 text-xs"
+                    >
+                      Open as Player ↗
+                    </a>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </TabsContent>
+
+          {/* ════════════════════════════════════════════════
+             KONG TAB — admin-fired ad-hoc questions
+             ════════════════════════════════════════════════ */}
+          <TabsContent value="kong">
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-6"
+            >
+              <div className="game-card p-6 space-y-4">
+                <div>
+                  <h3 className="text-lg text-white" style={{ fontFamily: "Bungee" }}>
+                    Fire The Kong Question
+                  </h3>
+                  <p className="text-[#9ca3af] text-xs font-bold mt-1">
+                    Manually broadcast a custom question to a live or upcoming match. Resolve it later — points + leaderboards update automatically.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-[#9ca3af] mb-1.5 text-xs font-black uppercase tracking-wider">
+                    Match
+                  </label>
+                  <select
+                    value={kongMatchId}
+                    onChange={(e) => setKongMatchId(e.target.value)}
+                    className="w-full px-3 py-3 nb-input"
+                    style={nbInputStyle}
+                  >
+                    <option value="">Pick a match…</option>
+                    {(Array.isArray(matches) ? matches : [])
+                      .filter((m: any) => m.status !== "completed")
+                      .map((m: any) => (
+                        <option key={m.id} value={m.id}>
+                          {m.team1Short || m.team1} vs {m.team2Short || m.team2} ({m.status})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[#9ca3af] mb-1.5 text-xs font-black uppercase tracking-wider">
+                    Question
+                  </label>
+                  <input
+                    type="text"
+                    value={kongQuestion}
+                    onChange={(e) => setKongQuestion(e.target.value)}
+                    placeholder="e.g. Will the next over have a six?"
+                    className="w-full px-4 py-3 nb-input"
+                    style={nbInputStyle}
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-[#9ca3af] text-xs font-black uppercase tracking-wider">
+                      Options ({kongOptions.length}/6)
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => kongOptions.length < 6 && setKongOptions([...kongOptions, { label: "", points: "30" }])}
+                        disabled={kongOptions.length >= 6}
+                        className="btn-secondary px-2 py-1 text-[10px]"
+                      >
+                        + Add
+                      </button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    {kongOptions.map((opt, i) => (
+                      <div key={i} className="flex gap-2">
+                        <input
+                          type="text"
+                          value={opt.label}
+                          onChange={(e) => {
+                            const next = [...kongOptions];
+                            next[i] = { ...next[i], label: e.target.value };
+                            setKongOptions(next);
+                          }}
+                          placeholder={`Option ${i + 1}`}
+                          className="flex-1 px-3 py-2 nb-input text-sm"
+                          style={nbInputStyle}
+                        />
+                        <input
+                          type="number"
+                          value={opt.points}
+                          onChange={(e) => {
+                            const next = [...kongOptions];
+                            next[i] = { ...next[i], points: e.target.value };
+                            setKongOptions(next);
+                          }}
+                          min={1}
+                          max={500}
+                          className="w-20 px-3 py-2 nb-input text-sm text-center"
+                          style={nbInputStyle}
+                        />
+                        <button
+                          type="button"
+                          disabled={kongOptions.length <= 2}
+                          onClick={() => setKongOptions(kongOptions.filter((_, idx) => idx !== i))}
+                          className="btn-gray px-2 text-xs"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  onClick={fireKong}
+                  disabled={kongFiring || !kongMatchId}
+                  className="btn-sticker btn-orange px-6 py-3 text-sm w-full"
+                >
+                  {kongFiring ? "Firing…" : "🦍 FIRE KONG QUESTION"}
+                </button>
+              </div>
+
+              {/* Fired Kongs list */}
+              {kongMatchId && (
+                <div className="space-y-3">
+                  <h3 className="text-base text-white" style={{ fontFamily: "Bungee" }}>
+                    Fired Kong Questions ({kongList.length})
+                  </h3>
+                  {kongList.length === 0 && (
+                    <div className="game-card p-4 text-center text-[#9ca3af] text-xs">
+                      None yet for this match.
+                    </div>
+                  )}
+                  {kongList.map((k) => (
+                    <div key={k.id} className="game-card p-4 space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-white font-bold text-sm flex-1">{k.question}</p>
+                        <span
+                          className="text-[10px] font-black uppercase px-2 py-1 rounded"
+                          style={{
+                            background: k.status === "resolved" ? "rgba(34,197,94,0.18)"
+                              : k.status === "open" ? "rgba(251,146,60,0.18)"
+                              : "rgba(156,163,175,0.18)",
+                            color: k.status === "resolved" ? "#22c55e"
+                              : k.status === "open" ? "#fb923c"
+                              : "#9ca3af",
+                          }}
+                        >
+                          {k.status}
+                        </span>
+                      </div>
+                      <div className="space-y-1">
+                        {k.options.map((opt) => {
+                          const count = k.responses[opt.key] || 0;
+                          const isCorrect = k.correctOption === opt.key;
+                          const canResolve = k.status === "open";
+                          return (
+                            <div
+                              key={opt.key}
+                              className="flex items-center justify-between gap-2 px-3 py-2"
+                              style={{
+                                background: isCorrect ? "rgba(34,197,94,0.12)" : "#0d0d0d",
+                                border: `1px solid ${isCorrect ? "#22c55e" : "#2a2a2a"}`,
+                                borderRadius: 4,
+                              }}
+                            >
+                              <div className="flex-1 text-xs">
+                                <span className="text-white font-bold">{opt.label}</span>
+                                <span className="text-[#9ca3af] ml-2">{opt.points}pts</span>
+                              </div>
+                              <span className="text-[#9ca3af] text-[11px]">{count} vote{count === 1 ? "" : "s"}</span>
+                              {canResolve && (
+                                <button
+                                  onClick={() => resolveKong(k.id, opt.key)}
+                                  disabled={kongResolvingId === k.id}
+                                  className="btn-sticker btn-green px-3 py-1 text-[10px]"
+                                >
+                                  {kongResolvingId === k.id ? "…" : "Resolve"}
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="text-[#6b7280] text-[10px]">
+                        {k.totalResponses} total response{k.totalResponses === 1 ? "" : "s"} · created {new Date(k.createdAt).toLocaleTimeString("en-IN")}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </motion.div>
           </TabsContent>
 

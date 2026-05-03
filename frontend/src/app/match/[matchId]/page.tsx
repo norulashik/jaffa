@@ -966,6 +966,11 @@ export default function MatchDashboard() {
           // come first — they feel most relevant and time-sensitive. Then per-over team
           // questions, then hot-takes / bold-calls / rivalry.
           const predictionRank = (p: any): number => {
+            // Admin-fired Kong questions trump everything — they're time-boxed
+            // (default 90 s window) and the admin chose this exact moment to
+            // surface them. If we let them sit behind per-over cards a user
+            // could miss the window entirely.
+            if (p.category === "kong") return -1;
             // Batsman-centric live questions (at crease + first-six bonus) on top.
             if (p.subjectType === "batsman_innings") return 0;
             if (p.subjectType === "batsman_sixes")   return 0;
@@ -1014,6 +1019,7 @@ export default function MatchDashboard() {
               return `Over ${n}`;
             }
             if (pred.category === "hot_take") return "Hot Take";
+            if (pred.category === "kong") return "🦍 The Kong Question";
             return pred.category?.replace(/_/g, " ") || "Predict";
           };
 

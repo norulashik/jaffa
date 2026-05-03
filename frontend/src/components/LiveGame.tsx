@@ -240,7 +240,9 @@ export default function LiveGame({ matchId, venueId, match }: LiveGameProps) {
                         <span
                           className="info-pill text-[#ff6341]"
                         >
-                          {pred.category === "hot_take"
+                          {pred.category === "kong"
+                            ? "🦍 THE KONG QUESTION"
+                            : pred.category === "hot_take"
                             ? "HOT TAKE"
                             : pred.category === "rivalry_call"
                             ? "RIVALRY CALL"

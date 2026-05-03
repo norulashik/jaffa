@@ -62,7 +62,19 @@ export const api = {
     }),
 
   getUserStats: () =>
-    request<{ matchesPlayed: number; totalCorrect: number; totalPredictions: number; accuracy: number; lifetimePoints: number; city: string | null; state: string | null }>("/auth/stats"),
+    request<{
+      matchesPlayed: number;
+      totalCorrect: number;
+      totalPredictions: number;
+      accuracy: number;
+      lifetimePoints: number;
+      city: string | null;
+      state: string | null;
+      cityRank: number | null;
+      cityTotal: number;
+      stateRank: number | null;
+      stateTotal: number;
+    }>("/auth/stats"),
 
   // Venues
   getVenue: (venueId: string) =>

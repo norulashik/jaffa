@@ -7,12 +7,14 @@ import { useGame } from "@/context/GameContext";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 import NotificationBell from "@/components/NotificationBell";
-import { ShoppingBag } from "lucide-react";
+import HamburgerMenu from "@/components/HamburgerMenu";
+import { ShoppingBag, Menu } from "lucide-react";
 
 export default function Header() {
   const { state } = useGame();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -29,8 +31,18 @@ export default function Header() {
     >
       {/* 3-column layout: left controls | centered logo | right controls */}
       <div className="grid grid-cols-3 items-center px-3 py-2 relative">
-        {/* Left: spacer for grid balance */}
-        <div />
+        {/* Left: hamburger drawer trigger */}
+        <div className="flex items-center justify-start">
+          <button
+            type="button"
+            aria-label="Open menu"
+            onClick={() => setMenuOpen(true)}
+            className="border-2 border-[#ff6341] rounded-[3px] w-9 h-9 flex items-center justify-center bg-[#1a1a1a]"
+            style={{ boxShadow: "2px 2px 0 0 #ff6341" }}
+          >
+            <Menu className="w-4 h-4 text-[#ff6341]" />
+          </button>
+        </div>
 
         {/* Center: Logo — absolutely positioned so it doesn't push header height */}
         <div className="flex justify-center">
@@ -70,6 +82,8 @@ export default function Header() {
           </button>
         </div>
       </div>
+
+      <HamburgerMenu open={menuOpen} onClose={() => setMenuOpen(false)} />
     </header>
   );
 }

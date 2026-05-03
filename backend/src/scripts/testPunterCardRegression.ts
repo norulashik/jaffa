@@ -1,8 +1,8 @@
 import assert from "assert";
+import type { Player } from "../data/iplSquads";
 import { ALL_CORRECT_OPTION } from "../services/pointsEngine";
 import { playerKey } from "../services/predictionEngine";
 import { buildPunterCardQuestions, computeCorrectFromBalls, scoreboardForTeam, VOID_OPTION } from "../services/punterCard";
-import type { Player } from "../data/iplSquads";
 
 const rcb: Player[] = [
   { name: "Virat Kohli", role: "bat" },

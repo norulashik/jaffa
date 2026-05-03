@@ -245,6 +245,27 @@ export default function ProfilePage() {
             <ChevronRight size={20} className="text-[#6b7280]" />
           </motion.button>
 
+          {/* Weekly Points moved off the bottom nav (where it lived as
+              "Week Pts") into this profile row, mirroring the My Punter Cards
+              treatment above. Keeps the nav focused on navigation and
+              surfaces the weekly count as a glanceable badge here. */}
+          <motion.button
+            whileTap={{ scale: 0.98 }}
+            onClick={() => router.push("/redeem")}
+            className="w-full game-card flex items-center justify-between cursor-pointer text-left"
+          >
+            <div className="flex items-center gap-4">
+              <GiCrownCoin className="text-[#ffd60a] text-2xl" />
+              <div>
+                <span className="font-bold uppercase text-sm" style={{ fontFamily: "'Bungee', 'Impact', cursive" }}>
+                  Weekly Points
+                </span>
+                <p className="text-[10px] text-[#6b7280]">This week&apos;s tally + redeemable rewards</p>
+              </div>
+            </div>
+            <ChevronRight size={20} className="text-[#6b7280]" />
+          </motion.button>
+
           <motion.button
             whileTap={{ scale: 0.98 }}
             onClick={() => setShowCustomizer(true)}

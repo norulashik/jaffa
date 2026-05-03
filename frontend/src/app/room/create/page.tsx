@@ -46,6 +46,17 @@ function CreateRoomContent() {
     // Pre-select match from query param
     const matchIdParam = searchParams.get("matchId");
     if (matchIdParam) setSelectedMatch(matchIdParam);
+    // Hamburger Mode entries pass ?mode= to preset the toggles. Keeps the
+    // user out of fiddling with the season/public switches when they
+    // arrived via a specific named mode.
+    const modeParam = searchParams.get("mode");
+    if (modeParam === "season") {
+      setIsSeasonRoom(true);
+      setIsPublic(false);
+    } else if (modeParam === "friendly") {
+      setIsSeasonRoom(false);
+      setIsPublic(false);
+    }
   }, []);
 
   const loadMatches = async () => {

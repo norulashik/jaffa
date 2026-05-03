@@ -3,15 +3,19 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { GiCastle, GiPodiumWinner, GiCrownCoin } from "react-icons/gi";
-import { GiAlarmClock } from "react-icons/gi";
+import { GiCastle, GiPodiumWinner, GiSwordWound, GiAlarmClock } from "react-icons/gi";
 import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 import { useGame } from "@/context/GameContext";
 
+// Tab IDs are stable; labels were renamed in the UX redesign
+// ("Week Pts" → "Past Battles") and the destination changed from /redeem to
+// /past-battles. The weekly-points readout moved into the profile page so
+// the bottom nav can stay focused on navigation rather than mixing in a
+// status badge.
 const navItems = [
   { key: "home", href: "/lobby", icon: GiCastle, label: "Home" },
   { key: "leaderboard", href: "/leaderboard", icon: GiPodiumWinner, label: "Ranks" },
-  { key: "redeem", href: "/redeem", icon: GiCrownCoin, label: "Week Pts" },
+  { key: "past-battles", href: "/past-battles", icon: GiSwordWound, label: "Past Battles" },
   { key: "my-picks", href: "/my-picks", icon: GiAlarmClock, label: "My Picks" },
 ];
 
@@ -40,9 +44,9 @@ export default function BottomNav() {
       <div className="flex items-center justify-around px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         {navItems.map((item) => {
           // HOME single-tap progression:
-          //   - on Ranks / My Picks / Week Pts with an active match  → /match/<id>
-          //   - on /match/<activeMatchId>                            → /lobby
-          //   - no active match                                      → /lobby
+          //   - on Ranks / My Picks / Past Battles with an active match → /match/<id>
+          //   - on /match/<activeMatchId>                               → /lobby
+          //   - no active match                                         → /lobby
           // Replaces the previous "Home always = /match/<id>, double-tap = /lobby"
           // which left users tapping Home from the match page with no
           // visible result. The progression matches the user's mental
@@ -96,14 +100,6 @@ export default function BottomNav() {
             >
               <div className="relative">
                 <Icon className="text-2xl" />
-                {item.key === "redeem" && (
-                  <span
-                    className="absolute -top-1.5 -right-3 bg-[#ff6341] text-black text-[8px] font-black px-1 rounded-[2px] leading-tight"
-                    style={{ border: "1px solid #000" }}
-                  >
-                    {state.weeklyPoints}
-                  </span>
-                )}
               </div>
               <span className="text-[10px] font-black uppercase tracking-wider">
                 {item.label}
