@@ -15,11 +15,10 @@
 //   6. Profile / Settings / Logout
 
 import { useEffect, useState, type ReactNode } from "react";
-import Link from "next/link";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Menu,
   X,
   ChevronDown,
   ShoppingBag,
@@ -87,6 +86,10 @@ export default function HamburgerMenu({ open, onClose }: Props) {
   const { state, dispatch } = useGame();
   const router = useRouter();
   const [modesOpen, setModesOpen] = useState(true); // start expanded — most-tapped action
+  // Defer portal mounting until after hydration so SSR markup matches the
+  // client and document.body is available.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   // Lock body scroll while the drawer is open. Restores on close so the
   // home page underneath doesn't stay frozen if the drawer is torn down.
@@ -129,7 +132,14 @@ export default function HamburgerMenu({ open, onClose }: Props) {
     router.replace("/login");
   };
 
-  return (
+  // Portal target. Rendering inside <Header> traps the drawer in the
+  // header's sticky-z-50 stacking context, so its z-[70] gets capped at
+  // 50 from the outside and the BottomNav (also z-50) overlaps it.
+  // Portaling to <body> moves the drawer to the root stacking context
+  // where z-[70] really does sit above the BottomNav.
+  if (!mounted) return null;
+
+  const tree = (
     <AnimatePresence>
       {open && (
         <>
@@ -318,6 +328,8 @@ export default function HamburgerMenu({ open, onClose }: Props) {
       )}
     </AnimatePresence>
   );
+
+  return createPortal(tree, document.body);
 }
 
 function DrawerRow({

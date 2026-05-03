@@ -195,7 +195,14 @@ export default function OwnerPortal() {
   const loadMatches = useCallback(async () => {
     try {
       const res = await ownerFetch("/owner/matches");
-      if (res.ok) setMatches(await res.json());
+      if (!res.ok) return;
+      const data = await res.json();
+      // /owner/matches returns {matches, page, pageSize, totalCount, totalPages}.
+      // Storing the whole object as state crashed the Matches tab with
+      // "K.map is not a function" since the consumer expects an array.
+      // Tolerate either shape so a future endpoint refactor doesn't reintroduce
+      // the regression.
+      setMatches(Array.isArray(data) ? data : Array.isArray(data?.matches) ? data.matches : []);
     } catch {}
   }, [ownerFetch]);
 
@@ -336,7 +343,12 @@ export default function OwnerPortal() {
       ]);
       if (detailRes.ok) setVenueDetail(await detailRes.json());
       if (matchesRes.ok) setVenueMatches(await matchesRes.json());
-      if (lbRes.ok) setVenueLeaderboard(await lbRes.json());
+      if (lbRes.ok) {
+        const data = await lbRes.json();
+        // /owner/venues/:id/leaderboard returns {leaderboard, page, pageSize, …}.
+        // Same paginated-wrap mistake as /owner/matches; extract the array.
+        setVenueLeaderboard(Array.isArray(data) ? data : Array.isArray(data?.leaderboard) ? data.leaderboard : []);
+      }
       if (rewardsRes.ok) setVenueRewards(await rewardsRes.json());
     } catch {}
   };
@@ -1195,13 +1207,20 @@ export default function OwnerPortal() {
               animate={{ opacity: 1, y: 0 }}
               className="space-y-5"
             >
+              {/* Belt-and-suspenders: even with loadMatches now extracting
+                  the array correctly, a future API regression or a hot
+                  network blip shouldn't be able to white-screen the page. */}
+              {(() => {
+                const safeMatches = Array.isArray(matches) ? matches : [];
+                return (
+                  <>
               {/* Header with refresh */}
               <div className="flex items-center justify-between">
                 <h3
                   className="text-lg text-white"
                   style={{ fontFamily: "Bungee" }}
                 >
-                  All Matches ({matches.length})
+                  All Matches ({safeMatches.length})
                 </h3>
                 <button
                   onClick={loadMatches}
@@ -1212,7 +1231,7 @@ export default function OwnerPortal() {
               </div>
 
               {/* Match list */}
-              {matches.length === 0 && (
+              {safeMatches.length === 0 && (
                 <div className="game-card p-8 text-center">
                   <IoTrophy className="text-[#9ca3af] text-4xl mx-auto mb-3" />
                   <p className="text-[#9ca3af] font-bold uppercase text-sm">
@@ -1221,7 +1240,7 @@ export default function OwnerPortal() {
                 </div>
               )}
 
-              {matches.map((m: any, idx: number) => (
+              {safeMatches.map((m: any, idx: number) => (
                 <motion.div
                   key={m.id}
                   custom={idx}
@@ -1248,6 +1267,9 @@ export default function OwnerPortal() {
                   <MatchStatusBadge status={m.status} />
                 </motion.div>
               ))}
+                  </>
+                );
+              })()}
 
               {/* Sportsmonk Import Section */}
               <div
