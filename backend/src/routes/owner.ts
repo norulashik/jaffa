@@ -9,7 +9,7 @@ import { generatePreMatchPredictions, getCurrentRound } from "../services/predic
 import { resolvePrediction } from "../services/pointsEngine";
 import { JWT_SECRET, OWNER_USER, OWNER_PASS } from "../config/secrets";
 import { parsePagination, paginationMeta } from "../utils/pagination";
-import * as simulationRunner from "../services/simulationRunner";
+import { reResolvePrediction } from "../services/pointsEngine";
 
 const router = Router();
 
@@ -550,47 +550,98 @@ router.post("/kong/:predictionId/resolve", authenticateOwner, async (req: AuthRe
   }
 });
 
-// ── Simulation Match Controls ────────────────────────────────────
+// ── Punter Card Admin (match-wise list + per-question override) ──
 
-router.post("/sim/start", authenticateOwner, async (req: AuthRequest, res: Response): Promise<void> => {
+router.get("/punter-cards/:matchId", authenticateOwner, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
+    const matchId = req.params.matchId as string;
+
+    const predictions = await Prediction.findAll({
+      where: { matchId, category: "punter_card" },
+      order: [["createdAt", "ASC"]],
+    });
+
+    if (predictions.length === 0) {
+      res.json({ predictions: [] });
+      return;
+    }
+
+    // Single grouped query for per-option vote tallies — same shape the Kong
+    // list endpoint uses; avoids an N+1 across 10 punter card questions.
+    const tallies = await UserPrediction.findAll({
+      where: { predictionId: { [Op.in]: predictions.map((p) => p.id) } },
+      attributes: [
+        "predictionId",
+        "selectedOption",
+        [fn("COUNT", col("id")), "count"],
+      ],
+      group: ["predictionId", "selectedOption"],
+      raw: true,
+    }) as unknown as { predictionId: string; selectedOption: string; count: string | number }[];
+
+    const tallyMap = new Map<string, Record<string, number>>();
+    for (const row of tallies) {
+      const inner = tallyMap.get(row.predictionId) || {};
+      inner[row.selectedOption] = Number(row.count);
+      tallyMap.set(row.predictionId, inner);
+    }
+
+    res.json({
+      predictions: predictions.map((p) => ({
+        ...p.toJSON(),
+        responses: tallyMap.get(p.id) || {},
+        totalResponses: Object.values(tallyMap.get(p.id) || {}).reduce((a, b) => a + b, 0),
+      })),
+    });
+  } catch (error) {
+    console.error("Owner punter-cards list error:", error);
+    res.status(500).json({ error: "Failed to list punter cards" });
+  }
+});
+
+router.post("/punter-cards/:predictionId/override", authenticateOwner, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const predictionId = req.params.predictionId as string;
+    const { correctOption } = req.body as { correctOption?: string };
+
+    if (!correctOption || typeof correctOption !== "string") {
+      res.status(400).json({ error: "correctOption is required" });
+      return;
+    }
+
+    const prediction = await Prediction.findByPk(predictionId);
+    if (!prediction) { res.status(404).json({ error: "Prediction not found" }); return; }
+
+    // Category guard: this endpoint mutates punter card answers only. Other
+    // prediction types (per_over, hot_take, …) shouldn't be overridable from
+    // a UI advertising "Punter Card Admin".
+    if (prediction.category !== "punter_card") {
+      res.status(400).json({ error: "Endpoint only overrides punter card questions" });
+      return;
+    }
+
+    const validKeys = new Set(prediction.options.map((o) => o.key));
+    if (!validKeys.has(correctOption)) {
+      res.status(400).json({ error: "correctOption must match one of the option keys" });
+      return;
+    }
+
     const io = req.app.get("io");
-    const state = await simulationRunner.start(io);
-    res.json(state);
-  } catch (error: any) {
-    console.error("Owner sim start error:", error);
-    res.status(500).json({ error: error?.message || "Failed to start simulation" });
-  }
-});
 
-router.post("/sim/stop", authenticateOwner, async (_req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const state = simulationRunner.stop();
-    res.json(state);
+    // First-time resolution vs override: resolvePrediction throws on
+    // already-resolved predictions, so branch by status. reResolvePrediction
+    // (used by the Sportmonks live poll when the upstream answer changes
+    // mid-match) handles the re-score + leaderboard refresh end-to-end.
+    if (prediction.status === "resolved") {
+      const changed = await reResolvePrediction(prediction, correctOption, io);
+      res.json({ changed });
+    } else {
+      await resolvePrediction(prediction, correctOption, io);
+      res.json({ changed: true });
+    }
   } catch (error: any) {
-    console.error("Owner sim stop error:", error);
-    res.status(500).json({ error: error?.message || "Failed to stop simulation" });
-  }
-});
-
-router.post("/sim/reset", authenticateOwner, async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const io = req.app.get("io");
-    const state = await simulationRunner.reset(io);
-    res.json(state);
-  } catch (error: any) {
-    console.error("Owner sim reset error:", error);
-    res.status(500).json({ error: error?.message || "Failed to reset simulation" });
-  }
-});
-
-router.get("/sim/state", authenticateOwner, async (_req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const state = await simulationRunner.getState();
-    res.json(state);
-  } catch (error: any) {
-    console.error("Owner sim state error:", error);
-    res.status(500).json({ error: error?.message || "Failed to read simulation state" });
+    console.error("Owner punter-cards override error:", error);
+    res.status(500).json({ error: error?.message || "Failed to override punter card answer" });
   }
 });
 

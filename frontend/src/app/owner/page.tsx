@@ -20,21 +20,19 @@ import {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
-type Tab = "dashboard" | "venues" | "venue-detail" | "matches" | "tools" | "sim" | "kong";
-
-type SimSnapshot = {
-  status: "idle" | "running" | "cooldown";
-  matchId: string | null;
-  currentBallIndex: number;
-  totalBalls: number;
-  currentOver: number;
-  currentInnings: number;
-  innings1Score: { runs: number; wickets: number; overs: number };
-  innings2Score: { runs: number; wickets: number; overs: number };
-  cooldownEndsAt: number | null;
-};
+type Tab = "dashboard" | "venues" | "venue-detail" | "matches" | "tools" | "kong";
 
 type KongOptionDraft = { label: string; points: string };
+
+type PunterCardRow = {
+  id: string;
+  question: string;
+  status: "open" | "locked" | "resolved" | "voided";
+  correctOption: string | null;
+  options: { key: string; label: string; points: number }[];
+  responses: Record<string, number>;
+  totalResponses: number;
+};
 
 type KongPrediction = {
   id: string;
@@ -128,13 +126,12 @@ export default function OwnerPortal() {
   /* ── Tools ───────────────────────────────────────────────── */
   const [pollResult, setPollResult] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
-  const [resolvePredId, setResolvePredId] = useState("");
-  const [resolveOption, setResolveOption] = useState("");
-  const [resolveResult, setResolveResult] = useState<any>(null);
 
-  /* ── Sim ─────────────────────────────────────────────────── */
-  const [simSnapshot, setSimSnapshot] = useState<SimSnapshot | null>(null);
-  const [simBusy, setSimBusy] = useState(false);
+  /* ── Punter Card Admin ────────────────────────────────────── */
+  const [pcMatchId, setPcMatchId] = useState("");
+  const [pcList, setPcList] = useState<PunterCardRow[]>([]);
+  const [pcLoading, setPcLoading] = useState(false);
+  const [pcOverridingId, setPcOverridingId] = useState<string | null>(null);
 
   /* ── Kong ────────────────────────────────────────────────── */
   const [kongMatchId, setKongMatchId] = useState("");
@@ -206,33 +203,6 @@ export default function OwnerPortal() {
     } catch {}
   }, [ownerFetch]);
 
-  /* ── Sim loaders/actions ──────────────────────────────────── */
-  const loadSimState = useCallback(async () => {
-    try {
-      const res = await ownerFetch("/owner/sim/state");
-      if (res.ok) setSimSnapshot(await res.json());
-    } catch {}
-  }, [ownerFetch]);
-
-  const simAction = async (action: "start" | "stop" | "reset") => {
-    setSimBusy(true);
-    try {
-      const res = await ownerFetch(`/owner/sim/${action}`, { method: "POST" });
-      if (res.ok) {
-        setSimSnapshot(await res.json());
-        toast.success(`Sim ${action} ok`);
-        loadMatches();
-      } else {
-        const data = await res.json().catch(() => ({}));
-        toast.error(data.error || `Sim ${action} failed`);
-      }
-    } catch (err: any) {
-      toast.error(err?.message || `Sim ${action} failed`);
-    } finally {
-      setSimBusy(false);
-    }
-  };
-
   /* ── Kong loaders/actions ─────────────────────────────────── */
   const loadKong = useCallback(async (mid: string) => {
     if (!mid) { setKongList([]); return; }
@@ -299,22 +269,67 @@ export default function OwnerPortal() {
     }
   };
 
+  /* ── Punter Card admin loaders/actions ────────────────────── */
+  const loadPunterCards = useCallback(async (mid: string) => {
+    if (!mid) { setPcList([]); return; }
+    setPcLoading(true);
+    try {
+      const res = await ownerFetch(`/owner/punter-cards/${mid}`);
+      if (res.ok) {
+        const data = await res.json();
+        setPcList(data.predictions || []);
+      } else {
+        setPcList([]);
+      }
+    } catch {
+      setPcList([]);
+    } finally {
+      setPcLoading(false);
+    }
+  }, [ownerFetch]);
+
+  const overridePunterCard = async (predictionId: string, optionKey: string) => {
+    setPcOverridingId(predictionId);
+    try {
+      const res = await ownerFetch(`/owner/punter-cards/${predictionId}/override`, {
+        method: "POST",
+        body: JSON.stringify({ correctOption: optionKey }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        // reResolvePrediction returns changed=false when the new answer
+        // matches the existing one. Skip the noisy "leaderboards refreshed"
+        // toast in that case so the admin understands nothing actually moved.
+        if (data.changed === false) {
+          toast("No change — option already marked correct");
+        } else {
+          toast.success("Updated — leaderboards refreshed");
+        }
+        loadPunterCards(pcMatchId);
+      } else {
+        toast.error(data.error || "Override failed");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Override failed");
+    } finally {
+      setPcOverridingId(null);
+    }
+  };
+
   /* ── Auto-refresh every 15s ──────────────────────────────── */
   useEffect(() => {
     if (isLoggedIn && token) {
       loadStats();
       loadVenues();
       loadMatches();
-      loadSimState();
       const interval = setInterval(() => {
         loadStats();
         loadVenues();
         loadMatches();
-        loadSimState();
       }, 15000);
       return () => clearInterval(interval);
     }
-  }, [isLoggedIn, token, loadStats, loadVenues, loadMatches, loadSimState]);
+  }, [isLoggedIn, token, loadStats, loadVenues, loadMatches]);
 
   /* Reload Kong list when admin switches selected match in Kong tab. */
   useEffect(() => {
@@ -324,6 +339,15 @@ export default function OwnerPortal() {
       return () => clearInterval(interval);
     }
   }, [isLoggedIn, token, kongMatchId, loadKong]);
+
+  /* Reload punter card list when admin switches selected match in Tools tab. */
+  useEffect(() => {
+    if (isLoggedIn && token && pcMatchId) {
+      loadPunterCards(pcMatchId);
+      const interval = setInterval(() => loadPunterCards(pcMatchId), 8000);
+      return () => clearInterval(interval);
+    }
+  }, [isLoggedIn, token, pcMatchId, loadPunterCards]);
 
   /* ── Venue filter/search triggers reload ─────────────────── */
   useEffect(() => {
@@ -472,34 +496,6 @@ export default function OwnerPortal() {
     setPolling(false);
   };
 
-  const handleResolve = async () => {
-    setResolveResult(null);
-    try {
-      const res = await ownerFetch(
-        `/owner/predictions/${resolvePredId}/resolve`,
-        {
-          method: "POST",
-          body: JSON.stringify({ correctOption: resolveOption }),
-        }
-      );
-      const data = await res.json();
-      setResolveResult({
-        success: res.ok,
-        message: data.message || data.error,
-      });
-      if (res.ok) {
-        toast.success(data.message || "Prediction resolved");
-        setResolvePredId("");
-        setResolveOption("");
-      } else {
-        toast.error(data.error || "Resolution failed");
-      }
-    } catch (err: any) {
-      setResolveResult({ success: false, message: err.message });
-      toast.error(err.message);
-    }
-  };
-
   /* nb-input inline style helper */
   const nbInputStyle: React.CSSProperties = {
     background: "#0d0d0d",
@@ -632,7 +628,6 @@ export default function OwnerPortal() {
             { value: "dashboard", icon: <IoStatsChart />, label: "Dashboard" },
             { value: "venues", icon: <IoStorefront />, label: "Venues" },
             { value: "matches", icon: <IoTrophy />, label: "Matches" },
-            { value: "sim", icon: <IoRefresh />, label: "Sim" },
             { value: "kong", icon: <IoEye />, label: "Kong" },
             { value: "tools", icon: <IoSettings />, label: "Tools" },
           ].map((t) => (
@@ -1324,113 +1319,6 @@ export default function OwnerPortal() {
           </TabsContent>
 
           {/* ════════════════════════════════════════════════
-             SIM TAB — owner-portal sandbox match
-             ════════════════════════════════════════════════ */}
-          <TabsContent value="sim">
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="space-y-6"
-            >
-              <div className="game-card p-6 space-y-4">
-                <div>
-                  <h3 className="text-lg text-white" style={{ fontFamily: "Bungee" }}>
-                    Simulation Match
-                  </h3>
-                  <p className="text-[#9ca3af] text-xs font-bold mt-1">
-                    Hidden from regular users. ~5 min/over, restarts 10 min after each completion.
-                  </p>
-                </div>
-
-                {simSnapshot ? (
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-3">
-                      <span className="info-pill">STATUS</span>
-                      <span
-                        className="font-black uppercase text-sm"
-                        style={{
-                          color: simSnapshot.status === "running" ? "#22c55e"
-                            : simSnapshot.status === "cooldown" ? "#ffd60a"
-                            : "#9ca3af",
-                        }}
-                      >
-                        {simSnapshot.status}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3 text-xs">
-                      <div className="card-blue p-3">
-                        <div className="text-[#3b9eff]/70 uppercase font-bold mb-1">Inn 1 (SIM1)</div>
-                        <div className="text-white font-black text-base">
-                          {simSnapshot.innings1Score.runs}/{simSnapshot.innings1Score.wickets}
-                          <span className="text-[#9ca3af] text-xs font-bold ml-2">
-                            ({simSnapshot.innings1Score.overs} ov)
-                          </span>
-                        </div>
-                      </div>
-                      <div className="card-yellow p-3">
-                        <div className="text-[#ffd60a]/70 uppercase font-bold mb-1">Inn 2 (SIM2)</div>
-                        <div className="text-white font-black text-base">
-                          {simSnapshot.innings2Score.runs}/{simSnapshot.innings2Score.wickets}
-                          <span className="text-[#9ca3af] text-xs font-bold ml-2">
-                            ({simSnapshot.innings2Score.overs} ov)
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="text-[#9ca3af] text-xs font-bold">
-                      Ball {simSnapshot.currentBallIndex} / {simSnapshot.totalBalls}
-                      {simSnapshot.cooldownEndsAt && simSnapshot.status === "cooldown" ? (
-                        <> · cooldown ends {new Date(simSnapshot.cooldownEndsAt).toLocaleTimeString("en-IN")}</>
-                      ) : null}
-                    </div>
-                    {simSnapshot.matchId && (
-                      <p className="text-[#6b7280] text-[10px] font-mono break-all">
-                        matchId: {simSnapshot.matchId}
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-[#9ca3af] text-xs">Loading…</p>
-                )}
-
-                <div className="flex flex-wrap gap-3 pt-2">
-                  <button
-                    onClick={() => simAction("start")}
-                    disabled={simBusy || simSnapshot?.status === "running"}
-                    className="btn-sticker btn-green px-5 py-2 text-xs"
-                  >
-                    {simBusy ? "…" : "Start"}
-                  </button>
-                  <button
-                    onClick={() => simAction("stop")}
-                    disabled={simBusy || simSnapshot?.status === "idle"}
-                    className="btn-sticker btn-orange px-5 py-2 text-xs"
-                  >
-                    {simBusy ? "…" : "Stop"}
-                  </button>
-                  <button
-                    onClick={() => simAction("reset")}
-                    disabled={simBusy}
-                    className="btn-sticker btn-blue px-5 py-2 text-xs"
-                  >
-                    {simBusy ? "…" : "Reset & Replay"}
-                  </button>
-                  {simSnapshot?.matchId && (
-                    <a
-                      href={`/match/${simSnapshot.matchId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="btn-secondary px-5 py-2 text-xs"
-                    >
-                      Open as Player ↗
-                    </a>
-                  )}
-                </div>
-              </div>
-            </motion.div>
-          </TabsContent>
-
-          {/* ════════════════════════════════════════════════
              KONG TAB — admin-fired ad-hoc questions
              ════════════════════════════════════════════════ */}
           <TabsContent value="kong">
@@ -1664,74 +1552,131 @@ export default function OwnerPortal() {
                 )}
               </div>
 
-              {/* Resolve Prediction */}
-              <div className="game-card p-6">
-                <h3
-                  className="text-lg text-white mb-2"
-                  style={{ fontFamily: "Bungee" }}
-                >
-                  Resolve Prediction
-                </h3>
-                <p className="text-[#9ca3af] text-xs font-bold mb-4">
-                  Manually resolve a prediction by ID.
-                </p>
-                <div className="space-y-3 mb-4">
-                  <div>
-                    <label className="block text-[#9ca3af] mb-1.5 text-xs font-black uppercase tracking-wider">
-                      Prediction ID
-                    </label>
-                    <input
-                      type="text"
-                      value={resolvePredId}
-                      onChange={(e) => setResolvePredId(e.target.value)}
-                      placeholder="Enter prediction ID"
-                      className="w-full px-4 py-3 nb-input"
-                      style={nbInputStyle}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[#9ca3af] mb-1.5 text-xs font-black uppercase tracking-wider">
-                      Correct Option
-                    </label>
-                    <input
-                      type="text"
-                      value={resolveOption}
-                      onChange={(e) => setResolveOption(e.target.value)}
-                      placeholder="e.g. option_a"
-                      className="w-full px-4 py-3 nb-input"
-                      style={nbInputStyle}
-                    />
-                  </div>
+              {/* Punter Card Admin — match-wise list with per-question
+                  override. Replaces the typed-by-ID "Resolve Prediction"
+                  card. Calls /owner/punter-cards/:matchId for the list and
+                  /owner/punter-cards/:predictionId/override for each
+                  change. The override endpoint routes through
+                  reResolvePrediction (same path the live Sportmonks poll
+                  uses), so user points + leaderboards refresh end-to-end. */}
+              <div className="game-card p-6 space-y-4">
+                <div>
+                  <h3 className="text-lg text-white" style={{ fontFamily: "Bungee" }}>
+                    Punter Card Admin
+                  </h3>
+                  <p className="text-[#9ca3af] text-xs font-bold mt-1">
+                    Pick a match → review every punter card answer → override anything wrong. Updates propagate to user points + leaderboards immediately.
+                  </p>
                 </div>
-                <button
-                  onClick={handleResolve}
-                  disabled={!resolvePredId || !resolveOption}
-                  className="btn-sticker btn-orange px-6 py-2.5 text-sm"
-                >
-                  Resolve
-                </button>
-                {resolveResult && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="mt-4"
+
+                <div>
+                  <label className="block text-[#9ca3af] mb-1.5 text-xs font-black uppercase tracking-wider">
+                    Match
+                  </label>
+                  <select
+                    value={pcMatchId}
+                    onChange={(e) => setPcMatchId(e.target.value)}
+                    className="w-full px-3 py-3 nb-input"
+                    style={nbInputStyle}
                   >
-                    <div
-                      className={
-                        resolveResult.success ? "card-green p-3" : "card-orange p-3"
-                      }
-                    >
-                      <p
-                        className={`text-xs font-bold ${
-                          resolveResult.success
-                            ? "text-[#22c55e]"
-                            : "text-[#ff6341]"
-                        }`}
-                      >
-                        {resolveResult.message}
-                      </p>
-                    </div>
-                  </motion.div>
+                    <option value="">Pick a match…</option>
+                    {(Array.isArray(matches) ? matches : [])
+                      // Most-relevant first: completed matches usually need
+                      // the override; live next; upcoming hidden (no
+                      // resolved cards to fix yet).
+                      .filter((m: any) => m.status !== "upcoming")
+                      .sort((a: any, b: any) => {
+                        const order: Record<string, number> = { completed: 0, live: 1 };
+                        return (order[a.status] ?? 9) - (order[b.status] ?? 9);
+                      })
+                      .map((m: any) => (
+                        <option key={m.id} value={m.id}>
+                          {m.team1Short || m.team1} vs {m.team2Short || m.team2} ({m.status})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                {!pcMatchId && (
+                  <p className="text-[#6b7280] text-xs">
+                    Pick a match above to see its 10 punter card questions and current answers.
+                  </p>
+                )}
+
+                {pcMatchId && pcLoading && pcList.length === 0 && (
+                  <p className="text-[#9ca3af] text-xs">Loading punter cards…</p>
+                )}
+
+                {pcMatchId && !pcLoading && pcList.length === 0 && (
+                  <p className="text-[#6b7280] text-xs">
+                    No punter card found for this match.
+                  </p>
+                )}
+
+                {pcList.length > 0 && (
+                  <div className="space-y-3">
+                    {pcList.map((p) => (
+                      <div key={p.id} className="game-card p-4 space-y-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-white font-bold text-sm flex-1">{p.question}</p>
+                          <span
+                            className="text-[10px] font-black uppercase px-2 py-1 rounded"
+                            style={{
+                              background: p.status === "resolved" ? "rgba(34,197,94,0.18)"
+                                : p.status === "voided" ? "rgba(156,163,175,0.18)"
+                                : p.status === "open" ? "rgba(251,146,60,0.18)"
+                                : "rgba(59,158,255,0.18)",
+                              color: p.status === "resolved" ? "#22c55e"
+                                : p.status === "voided" ? "#9ca3af"
+                                : p.status === "open" ? "#fb923c"
+                                : "#3b9eff",
+                            }}
+                          >
+                            {p.status}
+                          </span>
+                        </div>
+                        <div className="space-y-1">
+                          {p.options.map((opt) => {
+                            const count = p.responses[opt.key] || 0;
+                            const isCurrent = p.correctOption === opt.key;
+                            return (
+                              <div
+                                key={opt.key}
+                                className="flex items-center justify-between gap-2 px-3 py-2"
+                                style={{
+                                  background: isCurrent ? "rgba(34,197,94,0.12)" : "#0d0d0d",
+                                  border: `1px solid ${isCurrent ? "#22c55e" : "#2a2a2a"}`,
+                                  borderRadius: 4,
+                                }}
+                              >
+                                <div className="flex-1 text-xs">
+                                  <span className="text-white font-bold">{opt.label}</span>
+                                  <span className="text-[#9ca3af] ml-2">{opt.points}pts</span>
+                                </div>
+                                <span className="text-[#9ca3af] text-[11px]">{count} vote{count === 1 ? "" : "s"}</span>
+                                {isCurrent ? (
+                                  <span className="text-[10px] font-black uppercase tracking-wider text-[#22c55e]">
+                                    ✓ Current
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={() => overridePunterCard(p.id, opt.key)}
+                                    disabled={pcOverridingId === p.id}
+                                    className="btn-sticker btn-orange px-3 py-1 text-[10px]"
+                                  >
+                                    {pcOverridingId === p.id ? "…" : "Set as correct"}
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="text-[#6b7280] text-[10px]">
+                          {p.totalResponses} total response{p.totalResponses === 1 ? "" : "s"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             </motion.div>

@@ -25,7 +25,6 @@ import {
   Sparkles,
   Settings as SettingsIcon,
   LogOut,
-  User as UserIcon,
   Trophy,
   Calendar,
   Users,
@@ -302,14 +301,11 @@ export default function HamburgerMenu({ open, onClose }: Props) {
               />
             </div>
 
-            {/* Bottom: divider then Profile / Settings / Logout */}
+            {/* Bottom: divider then Settings / Logout. Profile entry was
+                removed — the user chip at the top of the drawer already
+                links to /profile, so a second row was redundant. */}
             <div className="border-t border-[#2a2a2a]" />
             <div className="py-2">
-              <DrawerRow
-                icon={<UserIcon className="w-4 h-4" />}
-                label="Profile"
-                onClick={() => go("/profile")}
-              />
               <DrawerRow
                 icon={<SettingsIcon className="w-4 h-4" />}
                 label="Settings"

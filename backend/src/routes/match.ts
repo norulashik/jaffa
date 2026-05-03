@@ -77,14 +77,7 @@ async function buildMatchesPayload(): Promise<unknown> {
     where: { status: ["upcoming", "live"] },
     order: [["startTime", "ASC"]],
   });
-  // Hide simulation matches (externalId starting with "sim:") from the
-  // regular lobby — those exist solely for the owner portal's sandbox flow
-  // and would otherwise let regular users join a fake match. Filter in JS
-  // since the column is nullable and Sequelize's typed where-clauses don't
-  // express "null OR not-like" cleanly.
-  const dbMatches = dbMatchesAll
-    .filter((m) => !m.externalId || !m.externalId.startsWith("sim:"))
-    .filter(isIplDbMatch);
+  const dbMatches = dbMatchesAll.filter(isIplDbMatch);
 
   // 2. Fetch live + upcoming from Sportsmonk
   const [liveFixtures, upcomingFixtures] = await Promise.all([
