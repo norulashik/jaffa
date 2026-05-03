@@ -16,6 +16,8 @@ import {
   IoRefresh,
   IoEye,
   IoPeople,
+  IoChevronDown,
+  IoChevronUp,
 } from "react-icons/io5";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
@@ -132,6 +134,10 @@ export default function OwnerPortal() {
   const [pcList, setPcList] = useState<PunterCardRow[]>([]);
   const [pcLoading, setPcLoading] = useState(false);
   const [pcOverridingId, setPcOverridingId] = useState<string | null>(null);
+  // Accordion state: which question is currently expanded. Single-open
+  // pattern keeps the page short; admin opens one card at a time. Empty
+  // string = nothing open.
+  const [pcExpandedId, setPcExpandedId] = useState<string>("");
 
   /* ── Kong ────────────────────────────────────────────────── */
   const [kongMatchId, setKongMatchId] = useState("");
@@ -289,6 +295,11 @@ export default function OwnerPortal() {
   }, [ownerFetch]);
 
   const overridePunterCard = async (predictionId: string, optionKey: string) => {
+    // Immediate feedback toast — without it the click felt unresponsive
+    // (the network round-trip + score recomputation can take 1-2 s on a
+    // big match, and the only visible change in the meantime was the
+    // button's `disabled` flicker, which admins missed).
+    const pendingId = toast.loading("Updating answer…");
     setPcOverridingId(predictionId);
     try {
       const res = await ownerFetch(`/owner/punter-cards/${predictionId}/override`, {
@@ -301,16 +312,16 @@ export default function OwnerPortal() {
         // matches the existing one. Skip the noisy "leaderboards refreshed"
         // toast in that case so the admin understands nothing actually moved.
         if (data.changed === false) {
-          toast("No change — option already marked correct");
+          toast("No change — option already marked correct", { id: pendingId });
         } else {
-          toast.success("Updated — leaderboards refreshed");
+          toast.success("Updated — leaderboards refreshed", { id: pendingId });
         }
         loadPunterCards(pcMatchId);
       } else {
-        toast.error(data.error || "Override failed");
+        toast.error(data.error || "Override failed", { id: pendingId });
       }
     } catch (err: any) {
-      toast.error(err?.message || "Override failed");
+      toast.error(err?.message || "Override failed", { id: pendingId });
     } finally {
       setPcOverridingId(null);
     }
@@ -1614,68 +1625,113 @@ export default function OwnerPortal() {
                 )}
 
                 {pcList.length > 0 && (
-                  <div className="space-y-3">
-                    {pcList.map((p) => (
-                      <div key={p.id} className="game-card p-4 space-y-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="text-white font-bold text-sm flex-1">{p.question}</p>
-                          <span
-                            className="text-[10px] font-black uppercase px-2 py-1 rounded"
-                            style={{
-                              background: p.status === "resolved" ? "rgba(34,197,94,0.18)"
-                                : p.status === "voided" ? "rgba(156,163,175,0.18)"
-                                : p.status === "open" ? "rgba(251,146,60,0.18)"
-                                : "rgba(59,158,255,0.18)",
-                              color: p.status === "resolved" ? "#22c55e"
-                                : p.status === "voided" ? "#9ca3af"
-                                : p.status === "open" ? "#fb923c"
-                                : "#3b9eff",
-                            }}
+                  <div className="space-y-2">
+                    {pcList.map((p) => {
+                      // Voided punter card questions are stored as
+                      // status="resolved", correctOption="__void__". For the
+                      // admin UI it's clearer to flip the badge to "VOIDED"
+                      // (gray) so they can spot which questions need a real
+                      // answer at a glance.
+                      const isVoided = p.correctOption === "__void__";
+                      const displayStatus = isVoided ? "voided" : p.status;
+                      const expanded = pcExpandedId === p.id;
+                      const currentLabel = !isVoided && p.correctOption
+                        ? p.options.find((o) => o.key === p.correctOption)?.label || null
+                        : null;
+                      return (
+                        <div key={p.id} className="game-card p-0 overflow-hidden">
+                          {/* Always-visible row — click to expand. Buttons
+                              for each option only render when expanded so
+                              the page stays scannable for matches with
+                              10+ questions. */}
+                          <button
+                            type="button"
+                            onClick={() => setPcExpandedId(expanded ? "" : p.id)}
+                            className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-[#1a1a1a] transition-colors"
                           >
-                            {p.status}
-                          </span>
-                        </div>
-                        <div className="space-y-1">
-                          {p.options.map((opt) => {
-                            const count = p.responses[opt.key] || 0;
-                            const isCurrent = p.correctOption === opt.key;
-                            return (
-                              <div
-                                key={opt.key}
-                                className="flex items-center justify-between gap-2 px-3 py-2"
-                                style={{
-                                  background: isCurrent ? "rgba(34,197,94,0.12)" : "#0d0d0d",
-                                  border: `1px solid ${isCurrent ? "#22c55e" : "#2a2a2a"}`,
-                                  borderRadius: 4,
-                                }}
-                              >
-                                <div className="flex-1 text-xs">
-                                  <span className="text-white font-bold">{opt.label}</span>
-                                  <span className="text-[#9ca3af] ml-2">{opt.points}pts</span>
-                                </div>
-                                <span className="text-[#9ca3af] text-[11px]">{count} vote{count === 1 ? "" : "s"}</span>
-                                {isCurrent ? (
-                                  <span className="text-[10px] font-black uppercase tracking-wider text-[#22c55e]">
-                                    ✓ Current
-                                  </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-white font-bold text-sm">{p.question}</p>
+                              <p className="text-[10px] mt-1">
+                                {currentLabel ? (
+                                  <>
+                                    <span className="text-[#22c55e] font-bold">Correct: {currentLabel}</span>
+                                    <span className="text-[#6b7280] ml-2">· {p.totalResponses} response{p.totalResponses === 1 ? "" : "s"}</span>
+                                  </>
+                                ) : isVoided ? (
+                                  <span className="text-[#9ca3af]">No answer recorded · {p.totalResponses} response{p.totalResponses === 1 ? "" : "s"}</span>
                                 ) : (
-                                  <button
-                                    onClick={() => overridePunterCard(p.id, opt.key)}
-                                    disabled={pcOverridingId === p.id}
-                                    className="btn-sticker btn-orange px-3 py-1 text-[10px]"
-                                  >
-                                    {pcOverridingId === p.id ? "…" : "Set as correct"}
-                                  </button>
+                                  <span className="text-[#6b7280]">Awaiting resolution · {p.totalResponses} response{p.totalResponses === 1 ? "" : "s"}</span>
                                 )}
-                              </div>
-                            );
-                          })}
+                              </p>
+                            </div>
+                            <span
+                              className="text-[10px] font-black uppercase px-2 py-1 rounded shrink-0"
+                              style={{
+                                background: displayStatus === "resolved" ? "rgba(34,197,94,0.18)"
+                                  : displayStatus === "voided" ? "rgba(156,163,175,0.18)"
+                                  : displayStatus === "open" ? "rgba(251,146,60,0.18)"
+                                  : "rgba(59,158,255,0.18)",
+                                color: displayStatus === "resolved" ? "#22c55e"
+                                  : displayStatus === "voided" ? "#9ca3af"
+                                  : displayStatus === "open" ? "#fb923c"
+                                  : "#3b9eff",
+                              }}
+                            >
+                              {displayStatus}
+                            </span>
+                            {expanded ? (
+                              <IoChevronUp className="text-[#9ca3af] text-base shrink-0" />
+                            ) : (
+                              <IoChevronDown className="text-[#9ca3af] text-base shrink-0" />
+                            )}
+                          </button>
+
+                          {expanded && (
+                            <div className="px-4 pb-4 pt-1 space-y-1.5 border-t border-[#2a2a2a]">
+                              {p.options.map((opt) => {
+                                const count = p.responses[opt.key] || 0;
+                                const isCurrent = !isVoided && p.correctOption === opt.key;
+                                const busy = pcOverridingId === p.id;
+                                return (
+                                  <div
+                                    key={opt.key}
+                                    className="flex items-center justify-between gap-2 px-3 py-2"
+                                    style={{
+                                      background: isCurrent ? "rgba(34,197,94,0.12)" : "#0d0d0d",
+                                      border: `1px solid ${isCurrent ? "#22c55e" : "#2a2a2a"}`,
+                                      borderRadius: 4,
+                                    }}
+                                  >
+                                    <div className="flex-1 text-xs">
+                                      <span className="text-white font-bold">{opt.label}</span>
+                                      <span className="text-[#9ca3af] ml-2">{opt.points}pts</span>
+                                    </div>
+                                    <span className="text-[#9ca3af] text-[11px]">{count} vote{count === 1 ? "" : "s"}</span>
+                                    {isCurrent ? (
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-[#22c55e]">
+                                        ✓ Current
+                                      </span>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          overridePunterCard(p.id, opt.key);
+                                        }}
+                                        disabled={busy}
+                                        className="btn-sticker btn-orange px-3 py-1 text-[10px] disabled:opacity-50"
+                                      >
+                                        {busy ? "…" : "Set as correct"}
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
-                        <div className="text-[#6b7280] text-[10px]">
-                          {p.totalResponses} total response{p.totalResponses === 1 ? "" : "s"}
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
