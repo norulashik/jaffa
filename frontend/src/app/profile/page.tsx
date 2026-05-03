@@ -26,6 +26,7 @@ export default function ProfilePage() {
     lifetimePoints: number;
     city: string | null;
     state: string | null;
+    bananas: number;
   } | null>(null);
 
   useEffect(() => {
@@ -174,34 +175,51 @@ export default function ProfilePage() {
           </section>
         )}
 
-        {/* Lifetime Points + Location */}
+        {/* Lifetime Points · Bananas · Location */}
         {stats && (
           <section className="space-y-3 mb-8">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="game-card text-center py-4">
+            <div className="grid grid-cols-3 gap-2">
+              <div className="game-card text-center py-4 px-2">
                 <div className="flex items-center justify-center gap-1.5 mb-1">
                   <GiCrownCoin className="text-xl text-[#ff6341]" />
                 </div>
                 <div
-                  className="text-3xl font-extrabold text-[#ff6341]"
+                  className="text-2xl font-extrabold text-[#ff6341]"
                   style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
                 >
                   {stats.lifetimePoints}
                 </div>
-                <div className="text-xs text-[#6b7280] uppercase tracking-widest font-bold mt-1">
-                  Lifetime Points
+                <div className="text-[10px] text-[#6b7280] uppercase tracking-widest font-bold mt-1">
+                  Lifetime
                 </div>
               </div>
-              <div className="game-card text-center py-4 flex flex-col items-center justify-center">
-                <MapPin size={18} className="text-[#3b9eff] mb-1" />
+              {/* Bananas — soft-currency from 5v5 wins. 5 per role-vs-role
+                  win + 10 to each member of the overall winning team.
+                  Lives between Lifetime and Location per the redesign. */}
+              <div className="game-card text-center py-4 px-2" style={{ borderColor: "#ffd60a", boxShadow: "4px 4px 0 0 #ffd60a" }}>
+                <div className="flex items-center justify-center gap-1.5 mb-1">
+                  <span className="text-xl leading-none">🍌</span>
+                </div>
                 <div
-                  className="text-sm font-bold text-white"
+                  className="text-2xl font-extrabold text-[#ffd60a]"
+                  style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
+                >
+                  {stats.bananas ?? 0}
+                </div>
+                <div className="text-[10px] text-[#6b7280] uppercase tracking-widest font-bold mt-1">
+                  Bananas
+                </div>
+              </div>
+              <div className="game-card text-center py-4 px-2 flex flex-col items-center justify-center">
+                <MapPin size={16} className="text-[#3b9eff] mb-1" />
+                <div
+                  className="text-xs font-bold text-white truncate w-full"
                   style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
                 >
                   {stats.city || "—"}
                 </div>
-                <div className="text-[10px] text-[#6b7280] uppercase tracking-widest font-bold mt-0.5">
-                  {stats.state || "Location not set"}
+                <div className="text-[9px] text-[#6b7280] uppercase tracking-widest font-bold mt-0.5 truncate w-full">
+                  {stats.state || "Set location"}
                 </div>
               </div>
             </div>

@@ -13,6 +13,8 @@ import RoomMember from "./RoomMember";
 import WeeklyRedemption from "./WeeklyRedemption";
 import PredictionAggregate from "./PredictionAggregate";
 import SquadOverride from "./SquadOverride";
+import FiveVsFiveRoom from "./FiveVsFiveRoom";
+import FiveVsFiveSlot from "./FiveVsFiveSlot";
 
 // Associations
 
@@ -76,6 +78,19 @@ RoomMember.belongsTo(User, { foreignKey: "userId", as: "user" });
 User.hasMany(WeeklyRedemption, { foreignKey: "userId", as: "weeklyRedemptions" });
 WeeklyRedemption.belongsTo(User, { foreignKey: "userId", as: "user" });
 
+// 5v5 associations
+Match.hasMany(FiveVsFiveRoom, { foreignKey: "matchId", as: "fiveVsFiveRooms" });
+FiveVsFiveRoom.belongsTo(Match, { foreignKey: "matchId", as: "match" });
+
+User.hasMany(FiveVsFiveRoom, { foreignKey: "hostUserId", as: "hostedFiveVsFiveRooms" });
+FiveVsFiveRoom.belongsTo(User, { foreignKey: "hostUserId", as: "host" });
+
+FiveVsFiveRoom.hasMany(FiveVsFiveSlot, { foreignKey: "roomId", as: "slots" });
+FiveVsFiveSlot.belongsTo(FiveVsFiveRoom, { foreignKey: "roomId", as: "room" });
+
+User.hasMany(FiveVsFiveSlot, { foreignKey: "userId", as: "fiveVsFiveSlots" });
+FiveVsFiveSlot.belongsTo(User, { foreignKey: "userId", as: "user" });
+
 export {
   sequelize,
   User,
@@ -92,4 +107,6 @@ export {
   WeeklyRedemption,
   PredictionAggregate,
   SquadOverride,
+  FiveVsFiveRoom,
+  FiveVsFiveSlot,
 };

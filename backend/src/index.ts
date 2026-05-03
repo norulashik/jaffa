@@ -26,6 +26,7 @@ import roomRoutes from "./routes/room";
 import weeklyRewardsRoutes from "./routes/weeklyRewards";
 import globalLeaderboardRoutes from "./routes/globalLeaderboard";
 import punterCardRoutes from "./routes/punterCard";
+import fiveVsFiveRoutes from "./routes/fiveVsFive";
 import { setupSocketHandlers } from "./socket/handlers";
 import { pollSportsmonkUpdates } from "./services/sportsmonkApi";
 import { pollLivePlayers } from "./services/livePlayerTracker";
@@ -86,6 +87,7 @@ app.use("/api/rooms", roomRoutes);
 app.use("/api/weekly-rewards", weeklyRewardsRoutes);
 app.use("/api/global-leaderboard", globalLeaderboardRoutes);
 app.use("/api/punter-card", punterCardRoutes);
+app.use("/api/5v5", fiveVsFiveRoutes);
 
 // Health check
 app.get("/api/health", (_req, res) => {

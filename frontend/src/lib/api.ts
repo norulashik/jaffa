@@ -74,6 +74,7 @@ export const api = {
       cityTotal: number;
       stateRank: number | null;
       stateTotal: number;
+      bananas: number;
     }>("/auth/stats"),
 
   // Venues

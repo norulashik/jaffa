@@ -69,10 +69,9 @@ const MODE_OPTIONS: ModeOption[] = [
   {
     key: "5v5",
     label: "5v5",
-    description: "Squad-vs-squad knockouts.",
+    description: "10 players, 2 teams, 5 roles. Win bananas.",
     icon: <Swords className="w-4 h-4" />,
-    href: null,
-    badge: "Coming Soon",
+    href: "/5v5",
   },
 ];
 

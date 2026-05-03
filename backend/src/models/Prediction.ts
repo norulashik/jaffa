@@ -4,7 +4,10 @@ import sequelize from "../config/database";
 // "kong" — admin-fired ad-hoc question, owner-authored question + options +
 // per-option points. Resolved manually via /owner/kong/:id/resolve. Rides
 // the same scoring + socket pipeline as every other category.
-export type PredictionCategory = "pre_match" | "per_over" | "hot_take" | "bold_call" | "rivalry_call" | "punter_card" | "kong";
+// "5v5"  — role-bucketed pre-match prediction for the 5v5 mode. Match-scoped
+// (same 30 questions per match across all 5v5 rooms); UserPrediction.roomId
+// scopes which 5v5 room the answer belongs to. Resolved by fiveVsFive.ts.
+export type PredictionCategory = "pre_match" | "per_over" | "hot_take" | "bold_call" | "rivalry_call" | "punter_card" | "kong" | "5v5";
 export type PredictionStatus = "open" | "locked" | "resolved" | "voided";
 // Live player-specific subjects. NULL for team-level / pre-match questions.
 // - batsman_innings       → how many runs will this batsman score?

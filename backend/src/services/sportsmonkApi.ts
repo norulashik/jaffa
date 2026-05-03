@@ -2,6 +2,7 @@ import { Op } from "sequelize";
 import { Match, Prediction, MatchParticipant } from "../models";
 import { generatePerOverPredictions, generateHotTake, generatePlayerHotTake, generateRivalryCalls, getCurrentRound, generatePlayerPreMatchQuestions, generatePreMatchPredictions } from "./predictionEngine";
 import { ensurePunterCard, punterOpensAt, resolvePunterCard, resolvePunterCardEarly, computeCorrectFromBalls, resolveSquadPool } from "./punterCard";
+import { ensure5v5Card, resolve5v5Match, voidUnfilled5v5Rooms } from "./fiveVsFive";
 import { maybeSyncIplSquads } from "./sportsmonkSquadSync";
 import { computeLivePlayerCorrectOption } from "./livePlayerTracker";
 import {
@@ -1173,6 +1174,15 @@ async function finalizeMatch(
     console.error("[PunterCard] resolve error:", err);
   }
 
+  // Resolve 5v5 rooms for this match — settles each room (per-role + total
+  // banana awards), or voids it if <10 slots filled at match start. Same
+  // ball-by-ball + fixture inputs as the punter-card resolver.
+  try {
+    await resolve5v5Match(match.id, fullFixture || fixture, allBalls, io);
+  } catch (err) {
+    console.error("[5v5] resolve error:", err);
+  }
+
   // Reconcile the static squad against the actual playing XI (incl. impact
   // sub) so the next match's punter card generator pulls from the freshest
   // player set. Errors are logged but don't block match-end — the squad
@@ -1557,6 +1567,8 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
     // Punter Card midnight trigger — opens at start-of-match-day, expires at match start.
     // ensurePunterCard is idempotent; it no-ops once the full card exists and
     // only backfills the 3 player-pool questions once lineup data becomes available.
+    // The 5v5 question pool is generated alongside it on the same window
+    // since both feed off the squad pool and share the same midnight gate.
     if (match.status === "upcoming" && match.startTime) {
       const opensAt = punterOpensAt(match).getTime();
       const startAt = new Date(match.startTime).getTime();
@@ -1569,6 +1581,24 @@ async function _pollSportsmonkUpdatesInner(io: SocketIOServer): Promise<void> {
         } catch (err) {
           console.error("[PunterCard] ensure error:", err);
         }
+        try {
+          const res = await ensure5v5Card(match);
+          if (res.created > 0) {
+            console.log(`[5v5] Generated ${res.created} questions for ${match.team1Short} vs ${match.team2Short}`);
+          }
+        } catch (err) {
+          console.error("[5v5] ensure error:", err);
+        }
+      }
+    }
+
+    // Auto-void any 5v5 rooms whose match has started but didn't fill 10
+    // slots in time. Idempotent (skips already-completed/voided rooms).
+    if (match.startTime && Date.now() >= new Date(match.startTime).getTime()) {
+      try {
+        await voidUnfilled5v5Rooms(match.id, io);
+      } catch (err) {
+        console.error("[5v5] void-unfilled error:", err);
       }
     }
 

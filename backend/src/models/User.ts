@@ -11,11 +11,15 @@ interface UserAttributes {
   lifetimePoints: number;
   city: string | null;
   state: string | null;
+  // Soft-currency awarded by 5v5 wins. 5 per role-vs-role win + 10 to each
+  // member of the overall winning team. Stored on User so it persists across
+  // matches; surfaced on the profile page between Lifetime + Location.
+  bananas: number;
   createdAt?: Date;
   updatedAt?: Date;
 }
 
-interface UserCreationAttributes extends Optional<UserAttributes, "id" | "avatarConfig" | "weeklyPoints" | "weekNumber" | "lifetimePoints" | "city" | "state"> {}
+interface UserCreationAttributes extends Optional<UserAttributes, "id" | "avatarConfig" | "weeklyPoints" | "weekNumber" | "lifetimePoints" | "city" | "state" | "bananas"> {}
 
 class User extends Model<UserAttributes, UserCreationAttributes> implements UserAttributes {
   public id!: string;
@@ -27,6 +31,7 @@ class User extends Model<UserAttributes, UserCreationAttributes> implements User
   public lifetimePoints!: number;
   public city!: string | null;
   public state!: string | null;
+  public bananas!: number;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
 }
@@ -73,6 +78,10 @@ User.init(
       type: DataTypes.STRING(100),
       allowNull: true,
       defaultValue: null,
+    },
+    bananas: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0,
     },
   },
   {

@@ -10,6 +10,7 @@ import { resolvePrediction } from "../services/pointsEngine";
 import { JWT_SECRET, OWNER_USER, OWNER_PASS } from "../config/secrets";
 import { parsePagination, paginationMeta } from "../utils/pagination";
 import { reResolvePrediction } from "../services/pointsEngine";
+import { reResolvePunterCardAnswer } from "../services/punterCard";
 
 const router = Router();
 
@@ -628,17 +629,25 @@ router.post("/punter-cards/:predictionId/override", authenticateOwner, async (re
 
     const io = req.app.get("io");
 
-    // First-time resolution vs override: resolvePrediction throws on
-    // already-resolved predictions, so branch by status. reResolvePrediction
-    // (used by the Sportmonks live poll when the upstream answer changes
-    // mid-match) handles the re-score + leaderboard refresh end-to-end.
+    // First-time resolution vs override:
+    //   - resolvePrediction throws on already-resolved predictions, so we
+    //     can't reuse it for overrides.
+    //   - For punter cards specifically, reResolvePrediction (which routes
+    //     through recomputeParticipantScores) doesn't work either: it walks
+    //     UserPredictions via MatchParticipant scope and skips users who
+    //     answered the punter card before joining the live match, AND it
+    //     doesn't update User.weeklyPoints / lifetimePoints. The dedicated
+    //     reResolvePunterCardAnswer helper handles both gaps with proper
+    //     delta math.
     if (prediction.status === "resolved") {
-      const changed = await reResolvePrediction(prediction, correctOption, io);
+      const changed = await reResolvePunterCardAnswer(prediction, correctOption, io);
       res.json({ changed });
     } else {
       await resolvePrediction(prediction, correctOption, io);
       res.json({ changed: true });
     }
+    // Suppress unused-import warning when the generic helper isn't reached.
+    void reResolvePrediction;
   } catch (error: any) {
     console.error("Owner punter-cards override error:", error);
     res.status(500).json({ error: error?.message || "Failed to override punter card answer" });

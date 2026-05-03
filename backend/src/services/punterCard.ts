@@ -466,14 +466,14 @@ function pickStarBatter(team: Player[], teamShort?: string | null): Player | nul
   );
 }
 
-function pickWicketKeeper(team: Player[]): Player | null {
+export function pickWicketKeeper(team: Player[]): Player | null {
   return pickMostFrequent(team, (p) => p.role === "wk");
 }
 
 // Pick the player matching `predicate` who has the highest appearanceCount.
 // Stable: ties resolve to original squad order (which encodes role-priority
 // for batters, then all-rounders, then bowlers per iplSquads.ts conventions).
-function pickMostFrequent(team: Player[], predicate: (p: Player) => boolean): Player | null {
+export function pickMostFrequent(team: Player[], predicate: (p: Player) => boolean): Player | null {
   let bestPlayer: Player | null = null;
   let bestScore = -1;
   for (const p of team) {
@@ -506,7 +506,7 @@ function playerIsLikely(player: Player, team: Player[]): boolean {
 // First two non-bowler entries in the squad. By convention these are the
 // pair we'd expect to open (a batter or a wk-keeper), since iplSquads.ts
 // keeps the playing-XI in batting order at the front.
-function pickOpeners(team: Player[]): [Player, Player] | null {
+export function pickOpeners(team: Player[]): [Player, Player] | null {
   const nonBowl = team.filter((p) => p.role !== "bowl");
   if (nonBowl.length < 2) return null;
   return [nonBowl[0], nonBowl[1]];
@@ -515,12 +515,12 @@ function pickOpeners(team: Player[]): [Player, Player] | null {
 // The number-3 batter for the "top order" definition in
 // `punter_top_vs_death`. Defined as the third non-bowler in the squad,
 // which mirrors how openers are picked.
-function pickThreeBatter(team: Player[]): Player | null {
+export function pickThreeBatter(team: Player[]): Player | null {
   const nonBowl = team.filter((p) => p.role !== "bowl");
   return nonBowl[2] || null;
 }
 
-function pickTopAllrounder(team: Player[]): Player | null {
+export function pickTopAllrounder(team: Player[]): Player | null {
   return pickMostFrequent(team, (p) => p.role === "all");
 }
 
@@ -1182,7 +1182,7 @@ function playerMatchesAny(name: string, players: Player[]): boolean {
   return findFuzzyMatch(name, players.map((p) => p.name)) !== null;
 }
 
-function runsByBatterName(allBalls: any[], name: string, fixture?: any): number | null {
+export function runsByBatterName(allBalls: any[], name: string, fixture?: any): number | null {
   const resolved = resolveBallName(name, allBalls, "batsman");
   if (resolved) {
     const target = resolved.toLowerCase().trim();
@@ -1220,7 +1220,7 @@ function runsForBatterNames(allBalls: any[], names: string[]): number {
 // Strike rate for a single batter across both innings. Resolves squad-side
 // names to the actual Sportsmonk fullname before comparing per-ball.
 // Returns null if they never faced a legal ball.
-function strikeRateForBatter(allBalls: any[], name: string, fixture?: any): number | null {
+export function strikeRateForBatter(allBalls: any[], name: string, fixture?: any): number | null {
   const resolved = resolveBallName(name, allBalls, "batsman");
   if (resolved) {
     const target = resolved.toLowerCase().trim();
@@ -1247,7 +1247,7 @@ function strikeRateForBatter(allBalls: any[], name: string, fixture?: any): numb
 // Prefers Sportsmonk's `score.four`/`score.six` flags; falls back to the
 // runs-on-ball check (matches the same `isFour`/`isSix` semantics used
 // elsewhere in the resolver pipeline).
-function boundariesByBatterNames(allBalls: any[], names: string[]): number {
+export function boundariesByBatterNames(allBalls: any[], names: string[]): number {
   const set = new Set(names.map((n) => n.toLowerCase().trim()));
   let count = 0;
   for (const b of allBalls) {
@@ -1261,6 +1261,152 @@ function boundariesByBatterNames(allBalls: any[], names: string[]): number {
     if (r === 4 || r === 6) count += 1;
   }
   return count;
+}
+
+// ── 5v5 helpers ────────────────────────────────────────────────────
+// Same flavor of math as the punter-card helpers above; live here so the
+// 5v5 resolver can import them alongside `runsByBatterName` & friends.
+
+// Sixes-only variant of boundariesByBatterNames. Used by the 5v5 Architect
+// wildcard ("middle order to hit 5+ sixes combined").
+export function sixesByBatterNames(allBalls: any[], names: string[]): number {
+  const set = new Set(names.map((n) => n.toLowerCase().trim()));
+  let count = 0;
+  for (const b of allBalls) {
+    const bname = b.batsman?.fullname?.toLowerCase().trim();
+    if (!bname || !set.has(bname)) continue;
+    if (b.score?.six || batRunsOnBall(b) === 6) count += 1;
+  }
+  return count;
+}
+
+// Total wickets taken by a single bowler. Excludes run-outs (non-bowler-
+// credited dismissals) — same convention as impactIndexForPlayer above.
+export function wicketsByBowlerName(allBalls: any[], name: string, fixture?: any): number | null {
+  const resolved = resolveBallName(name, allBalls, "bowler");
+  if (resolved) {
+    const target = resolved.toLowerCase().trim();
+    let wickets = 0;
+    let appeared = false;
+    for (const b of allBalls) {
+      const bname = b.bowler?.fullname?.toLowerCase().trim();
+      if (bname !== target) continue;
+      appeared = true;
+      if (b.score?.is_wicket || b.batsmanout_id) {
+        const dismissalName = (b.score?.name || "").toLowerCase();
+        if (!dismissalName.includes("run out")) wickets += 1;
+      }
+    }
+    if (appeared) return wickets;
+  }
+  const row = fixtureBowlingRow(fixture, name);
+  return row ? Number(row.wickets ?? 0) : null;
+}
+
+// Economy for a single bowler = runs conceded ÷ overs bowled. Returns null
+// if the bowler never bowled a legal ball (avoids divide-by-zero noise on
+// "did not bowl" cases — caller should treat null as "no data").
+export function economyForBowler(allBalls: any[], name: string, fixture?: any): number | null {
+  const resolved = resolveBallName(name, allBalls, "bowler");
+  if (resolved) {
+    const target = resolved.toLowerCase().trim();
+    let runs = 0;
+    let legalBalls = 0;
+    for (const b of allBalls) {
+      const bname = b.bowler?.fullname?.toLowerCase().trim();
+      if (bname !== target) continue;
+      // Total runs conceded includes extras off this bowler's delivery
+      // (wides, no-balls — byes/leg-byes are NOT counted against the
+      // bowler per cricket convention; we approximate by summing
+      // score.runs which Sportsmonk already adjusts).
+      runs += Number(b.score?.runs || 0);
+      if (b.score?.ball !== false) legalBalls += 1;
+    }
+    if (legalBalls > 0) return (runs / legalBalls) * 6;
+  }
+  const row = fixtureBowlingRow(fixture, name);
+  if (!row) return null;
+  const overs = Number(row.overs ?? 0);
+  if (overs <= 0) return null;
+  return Number(row.runs ?? 0) / overs;
+}
+
+// Catches + stumpings credited to a wicket-keeper. Sportsmonk's
+// `catchstump.fullname` field is the credited fielder; `score.name` carries
+// the dismissal kind ("caught", "stumped", "caught behind", etc.). We match
+// on either the fielder name OR the bowler attribution for caught-behind
+// cases handled inconsistently across feeds.
+export function dismissalsByKeeperName(allBalls: any[], name: string, fixture?: any): number | null {
+  const resolved = resolveBallName(name, allBalls, "any");
+  const target = (resolved || name).toLowerCase().trim();
+  let count = 0;
+  let appeared = false;
+  for (const b of allBalls) {
+    const fielder = b.catchstump?.fullname?.toLowerCase().trim();
+    const bat = b.batsman?.fullname?.toLowerCase().trim();
+    if (bat === target) appeared = true;
+    if (fielder !== target) continue;
+    appeared = true;
+    const dismissalName = (b.score?.name || "").toLowerCase();
+    if (
+      dismissalName.includes("caught") ||
+      dismissalName.includes("stump") ||
+      dismissalName === "catch out"
+    ) {
+      count += 1;
+    }
+  }
+  if (appeared) return count;
+  // Fixture-side fallback: if the keeper batted (we know they're in the XI)
+  // but no dismissals were credited, return 0 not null.
+  return fixtureBattingRow(fixture, name) ? 0 : null;
+}
+
+// Runs scored by either of two named openers WHILE THEY WERE BOTH AT THE
+// CREASE. Approximated as: scan their innings's ball stream and stop at the
+// first ball whose batsman.fullname is neither opener (i.e. a new batter
+// has come in after the first dismissal). Counts striker-faced runs only.
+export function partnershipRunsForOpeners(
+  allBalls: any[],
+  scoreboard: "S1" | "S2",
+  openerNames: string[],
+): number {
+  const set = new Set(
+    openerNames
+      .map((n) => resolveBallName(n, allBalls, "batsman") || n)
+      .map((n) => n.toLowerCase().trim()),
+  );
+  let total = 0;
+  for (const b of allBalls) {
+    if (b.scoreboard !== scoreboard) continue;
+    const bname = b.batsman?.fullname?.toLowerCase().trim();
+    if (!bname) continue;
+    // First ball with a non-opener at the crease = partnership has ended.
+    if (!set.has(bname)) break;
+    total += batRunsOnBall(b);
+  }
+  return total;
+}
+
+// Total team runs (all batters, all extras) inside an over range. Wraps
+// the same iteration shape as bowlerRunsConcededInRange but on the batting
+// side. `fromOver`/`toOver` are 1-indexed inclusive (over 16-20 = death).
+export function runsInOverRange(
+  allBalls: any[],
+  scoreboard: "S1" | "S2",
+  fromOver: number,
+  toOver: number,
+): number {
+  const fromIdx = fromOver - 1;
+  const toIdx = toOver - 1;
+  let total = 0;
+  for (const b of allBalls) {
+    if (b.scoreboard !== scoreboard) continue;
+    const ov = Math.floor(parseFloat(String(b.ball || "0")));
+    if (ov < fromIdx || ov > toIdx) continue;
+    total += Number(b.score?.runs || 0);
+  }
+  return total;
 }
 
 // Impact index = total batting runs + wickets taken (excl. run-outs) +
@@ -1442,7 +1588,7 @@ function dotsPerBoundary(allBalls: any[], scoreboard: "S1" | "S2"): number | nul
 // ---- Ball-level helpers ----
 
 // Sum of batsman runs from a single ball (extras stripped out).
-function batRunsOnBall(b: any): number {
+export function batRunsOnBall(b: any): number {
   const s = b?.score || {};
   const extras = Number(s.bye || 0) + Number(s.leg_bye || 0) + Number(s.noball_runs || 0);
   return Math.max(0, Number(s.runs || 0) - extras);
@@ -1590,6 +1736,141 @@ function nameForPlayerId(allBalls: any[], id: number): string | null {
     if (b.batsmanout_id === id && b.catchstump?.fullname) return b.catchstump.fullname;
   }
   return null;
+}
+
+// Re-score every UserPrediction for a punter card after the admin overrides
+// the correct answer. Differs from scorePunterUserAnswers in three crucial
+// ways:
+//   1. NO idempotency guard — we *want* to re-evaluate every row, including
+//      ones already scored (those are exactly the ones whose isCorrect /
+//      pointsEarned must flip).
+//   2. Delta math against the previously-stored points — adds new pts,
+//      subtracts old pts. Without this an override that flips a wrong
+//      answer to right would double-pay because the user's old (correct)
+//      pts would still be sitting in MatchParticipant.totalPoints.
+//   3. Walks UserPredictions directly (not via MatchParticipant). Punter
+//      cards can be answered before the user enters the live match, so a
+//      participant row may not exist yet — recomputeParticipantScores
+//      misses those answers entirely.
+//
+// Mirrors scorePunterUserAnswers's User.weeklyPoints / lifetimePoints +
+// MatchParticipant.totalPoints + correctPredictions updates so the leaderboard
+// the bottom-nav weekly badge, and the My Punter Cards summary all reflect
+// the override.
+export async function reResolvePunterCardAnswer(
+  prediction: Prediction,
+  newCorrectOption: string,
+  io: SocketIOServer,
+): Promise<boolean> {
+  if (prediction.correctOption === newCorrectOption) return false;
+
+  const oldCorrectOption = prediction.correctOption;
+  console.log(
+    `[ReResolvePunterCard] ${prediction.id}: "${prediction.question}" "${oldCorrectOption}" → "${newCorrectOption}"`,
+  );
+
+  await prediction.update({ correctOption: newCorrectOption });
+
+  // correctOption may be a comma-joined list of keys when multiple players
+  // tied (mirrors scorePunterUserAnswers). Both old and new sets are
+  // computed so we can detect "stayed correct"/"stayed wrong"/"flipped".
+  const newCorrectSet = new Set(newCorrectOption.split(",").map((k) => k.trim()).filter(Boolean));
+  const oldCorrectSet = oldCorrectOption
+    ? new Set(oldCorrectOption.split(",").map((k) => k.trim()).filter(Boolean))
+    : new Set<string>();
+
+  const userAnswers = await UserPrediction.findAll({ where: { predictionId: prediction.id } });
+  const venueMatchPairs = new Set<string>();
+  let anyChanged = false;
+
+  for (const ua of userAnswers) {
+    const opt = prediction.options.find((o) => o.key === ua.selectedOption);
+    const optPoints = opt?.points || 0;
+
+    const oldIsCorrect = oldCorrectSet.has(ua.selectedOption);
+    const newIsCorrect = newCorrectSet.has(ua.selectedOption);
+    // The previously-stored pts; if the row never went through scoring
+    // (no MatchParticipant existed at first-resolve time), pointsEarned is
+    // 0 and we shouldn't subtract anything.
+    const oldPointsEarned = ua.pointsEarned || 0;
+    const newPointsEarned = newIsCorrect ? optPoints : 0;
+    const pointsDelta = newPointsEarned - oldPointsEarned;
+    const correctDelta = (newIsCorrect ? 1 : 0) - (oldIsCorrect ? 1 : 0);
+
+    // Only touch the DB if something actually changes for this user. Saves
+    // a transaction per row in the common "stayed wrong" / "stayed right"
+    // case during a re-fire of the same answer (admin re-clicking the same
+    // option already-marked-correct).
+    if (
+      ua.isCorrect === newIsCorrect &&
+      ua.pointsEarned === newPointsEarned
+    ) {
+      continue;
+    }
+    anyChanged = true;
+
+    await sequelize.transaction(async (t) => {
+      await ua.update({ isCorrect: newIsCorrect, pointsEarned: newPointsEarned }, { transaction: t });
+
+      const participant = await MatchParticipant.findOne({
+        where: { userId: ua.userId, matchId: ua.matchId, venueId: ua.venueId, roomId: ua.roomId ?? null },
+        transaction: t,
+        lock: t.LOCK.UPDATE,
+      });
+      if (participant) {
+        // totalPredictions doesn't change — the user already had this
+        // answer counted. Only totalPoints + correctPredictions move on
+        // override.
+        await participant.update(
+          {
+            totalPoints: Math.max(0, participant.totalPoints + pointsDelta),
+            correctPredictions: Math.max(0, participant.correctPredictions + correctDelta),
+          } as any,
+          { transaction: t },
+        );
+      }
+
+      // Mirror scorePunterUserAnswers — keep User.weeklyPoints +
+      // lifetimePoints in sync so the bottom-nav badge and the lifetime
+      // total on /profile reflect the override. Clamp at 0 so a points
+      // *removal* never drops the user negative.
+      if (pointsDelta !== 0) {
+        const user = await User.findByPk(ua.userId, { transaction: t, lock: t.LOCK.UPDATE });
+        if (user) {
+          const currentWeek = getYearWeekNumber();
+          const baselineWeekly = user.weekNumber !== currentWeek ? 0 : user.weeklyPoints;
+          await user.update(
+            {
+              weeklyPoints: Math.max(0, baselineWeekly + pointsDelta),
+              weekNumber: currentWeek,
+              lifetimePoints: Math.max(0, (user.lifetimePoints || 0) + pointsDelta),
+            },
+            { transaction: t },
+          );
+        }
+      }
+    });
+
+    venueMatchPairs.add(`${ua.venueId}:${ua.matchId}`);
+  }
+
+  if (!anyChanged) return false;
+
+  // Per-venue leaderboard refresh + a generic predictionResolved socket so
+  // any client currently viewing the punter card detail page re-fetches and
+  // sees the new badge. Same channel pattern as resolvePrediction.
+  for (const pair of venueMatchPairs) {
+    const [venueId, matchId] = pair.split(":");
+    io.to(`venue:${venueId}:${matchId}`).emit("leaderboardUpdate", { matchId });
+    io.to(`venue:${venueId}:${matchId}`).emit("predictionResolved", {
+      matchId,
+      predictionId: prediction.id,
+      correctOption: newCorrectOption,
+      reResolved: true,
+    });
+  }
+
+  return true;
 }
 
 async function scorePunterUserAnswers(
