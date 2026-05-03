@@ -1183,6 +1183,17 @@ async function finalizeMatch(
     console.error("[5v5] resolve error:", err);
   }
 
+  // Expire any match-bound Bananergy powerups (Gorilla Guard, Berserk,
+  // Mayhem) so they don't leak into the next match. Silverback (permanent)
+  // is excluded by the helper. Idempotent.
+  try {
+    const { expireActivePowerupsForMatch } = await import("./powerups");
+    const expired = await expireActivePowerupsForMatch(match.id);
+    if (expired > 0) console.log(`[Powerups] Expired ${expired} active powerups for match ${match.id}`);
+  } catch (err) {
+    console.error("[Powerups] expire error:", err);
+  }
+
   // Reconcile the static squad against the actual playing XI (incl. impact
   // sub) so the next match's punter card generator pulls from the freshest
   // player set. Errors are logged but don't block match-end — the squad

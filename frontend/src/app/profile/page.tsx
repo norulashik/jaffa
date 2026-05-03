@@ -193,19 +193,24 @@ export default function ProfilePage() {
                   Lifetime
                 </div>
               </div>
-              {/* Bananas — soft-currency from 5v5 wins. 5 per role-vs-role
-                  win + 10 to each member of the overall winning team.
-                  Lives between Lifetime and Location per the redesign. */}
+              {/* Bananas — soft-currency from 5v5 wins, prediction-correct
+                  banana awards, streak bonuses, etc. Wrapped in a key-flip
+                  motion so the number snaps when it changes (e.g. after a
+                  Store purchase / banana-earning event). */}
               <div className="game-card text-center py-4 px-2" style={{ borderColor: "#ffd60a", boxShadow: "4px 4px 0 0 #ffd60a" }}>
                 <div className="flex items-center justify-center gap-1.5 mb-1">
                   <span className="text-xl leading-none">🍌</span>
                 </div>
-                <div
+                <motion.div
+                  key={stats.bananas ?? 0}
+                  initial={{ scale: 0.6, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: "spring", stiffness: 380, damping: 22 }}
                   className="text-2xl font-extrabold text-[#ffd60a]"
                   style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
                 >
                   {stats.bananas ?? 0}
-                </div>
+                </motion.div>
                 <div className="text-[10px] text-[#6b7280] uppercase tracking-widest font-bold mt-1">
                   Bananas
                 </div>

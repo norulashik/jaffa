@@ -64,6 +64,7 @@ export default function Header() {
           <button
             type="button"
             aria-label="Store"
+            onClick={() => router.push("/store")}
             className="border-2 border-[#ff6341] rounded-[3px] w-9 h-9 flex items-center justify-center bg-[#1a1a1a]"
             style={{ boxShadow: "2px 2px 0 0 #ff6341" }}
           >

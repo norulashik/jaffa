@@ -1849,6 +1849,17 @@ export async function reResolvePunterCardAnswer(
           );
         }
       }
+
+      // Bananergy override sync: if this override flipped the user from
+      // wrong→correct, credit +2 bananas. Wrong→wrong stays at 0. The
+      // ledger dedup index on (userId, "punter_card_correct", refId)
+      // prevents a second credit if the user was already correct before.
+      // Going from correct→wrong does NOT debit bananas (designed simpler;
+      // could refund in v2 if abused).
+      if (newIsCorrect && !oldIsCorrect) {
+        const { awardBananas } = await import("./powerups");
+        await awardBananas(ua.userId, 2, "punter_card_correct", ua.id, "user_prediction", t);
+      }
     });
 
     venueMatchPairs.add(`${ua.venueId}:${ua.matchId}`);
@@ -1952,6 +1963,10 @@ async function scorePunterUserAnswers(
             { transaction: t },
           );
         }
+        // Bananergy: +2 bananas per correct punter card pick. Lazy-import
+        // to avoid circular load with the powerups service.
+        const { awardBananas } = await import("./powerups");
+        await awardBananas(ua.userId, 2, "punter_card_correct", ua.id, "user_prediction", t);
       }
     });
 

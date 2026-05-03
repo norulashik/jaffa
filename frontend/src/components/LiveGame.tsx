@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import Leaderboard from "./Leaderboard";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { powerupsApi, type InventoryRow } from "@/lib/storeApi";
 
 interface LiveGameProps {
   matchId: string;
@@ -29,6 +30,45 @@ export default function LiveGame({ matchId, venueId, match }: LiveGameProps) {
   const [submitting, setSubmitting] = useState<string | null>(null);
   const [answeredIds, setAnsweredIds] = useState<Set<string>>(new Set());
   const localAnsweredRef = useRef<Set<string>>(new Set());
+
+  // ── Bananergy state ─────────────────────────────────────────────
+  // active powerups (incl. passive Silverback) for THIS match.
+  const [activePowerups, setActivePowerups] = useState<InventoryRow[]>([]);
+  // For Monke Mayhem player-Q multi-pick: per-prediction Set<string> of keys.
+  // Cap enforced at 2; replaces the single `selectedOptions` for the
+  // affected card.
+  const [mayhemPicks, setMayhemPicks] = useState<Record<string, Set<string>>>({});
+  // Tank reveal results, populated on use-tank success per predictionId.
+  const [revealedAggregates, setRevealedAggregates] = useState<
+    Record<string, { responses: Record<string, number>; totalResponses: number; chargesRemaining: number }>
+  >({});
+  const [tankBusy, setTankBusy] = useState<string | null>(null);
+
+  // Active powerups poll — once on mount + every 15s. The match page also
+  // mounts MatchPowerupTray which calls the same endpoint; this duplicates
+  // the call so LiveGame can render Tank/Mayhem affordances WITHOUT a prop
+  // drilldown from the match page.
+  useEffect(() => {
+    if (!matchId) return;
+    let cancelled = false;
+    const fetchActive = async () => {
+      try {
+        const r = await powerupsApi.active(matchId);
+        if (!cancelled) setActivePowerups(r.powerups || []);
+      } catch { /* silent */ }
+    };
+    fetchActive();
+    const interval = setInterval(fetchActive, 15_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [matchId]);
+
+  const mayhemActive = activePowerups.some(
+    (p) => p.powerupKey === "monke_mayhem" && p.status === "active",
+  );
+  const tankPowerup = activePowerups.find(
+    (p) => p.powerupKey === "chimp_tank" && (p.chargesRemaining ?? 0) > 0,
+  );
+  const tankCharges = tankPowerup?.chargesRemaining ?? 0;
 
   const boostsRemaining = 1 - (state.boostsUsedThisRound || 0);
   const allInAvailable = !state.allInUsed;
@@ -64,12 +104,52 @@ export default function LiveGame({ matchId, venueId, match }: LiveGameProps) {
     return () => clearInterval(interval);
   }, [loadPredictions]);
 
-  // Handle option selection
-  const handleSelect = (predId: string, optionKey: string) => {
-    setSelectedOptions((prev) => ({
-      ...prev,
-      [predId]: prev[predId] === optionKey ? "" : optionKey,
-    }));
+  // Returns true if the user has Mayhem active AND this prediction is a
+  // player Q (subjectType non-null). When true, the card is in 2-pick mode.
+  const isMayhemEligible = (pred: any): boolean => mayhemActive && !!pred.subjectType;
+
+  // Handle option selection — single-toggle in normal mode, set-of-up-to-2
+  // in Mayhem mode for player Qs.
+  const handleSelect = (pred: any, optionKey: string) => {
+    const predId = pred.id;
+    if (isMayhemEligible(pred)) {
+      setMayhemPicks((prev) => {
+        const set = new Set(prev[predId] || []);
+        if (set.has(optionKey)) set.delete(optionKey);
+        else if (set.size < 2) set.add(optionKey);
+        else {
+          // Already 2 picked — replace the EARLIER pick with the new one
+          // (last-tap-wins). Friendlier than blocking silently.
+          const first = set.values().next().value;
+          if (first) set.delete(first);
+          set.add(optionKey);
+        }
+        return { ...prev, [predId]: set };
+      });
+    } else {
+      setSelectedOptions((prev) => ({
+        ...prev,
+        [predId]: prev[predId] === optionKey ? "" : optionKey,
+      }));
+    }
+  };
+
+  // Tank reveal — consume 1 charge, render % bars under the option list.
+  const handleUseTank = async (predId: string) => {
+    setTankBusy(predId);
+    try {
+      const r = await powerupsApi.useChimpTank(predId);
+      setRevealedAggregates((prev) => ({ ...prev, [predId]: r }));
+      // Refresh active list so the chargesRemaining counter ticks down.
+      try {
+        const p = await powerupsApi.active(matchId);
+        setActivePowerups(p.powerups || []);
+      } catch { /* silent */ }
+    } catch (err: any) {
+      toast.error(err?.message || "Tank failed");
+    } finally {
+      setTankBusy(null);
+    }
   };
 
   // Handle boost toggle
@@ -90,13 +170,24 @@ export default function LiveGame({ matchId, venueId, match }: LiveGameProps) {
   };
 
   // Submit prediction
-  const handleSubmit = async (predId: string) => {
-    const selected = selectedOptions[predId];
-    if (!selected || !venueId) return;
+  const handleSubmit = async (pred: any) => {
+    const predId = pred.id;
+    if (!venueId) return;
+
+    // Mayhem 2-pick path: comma-join the chosen keys. Backend rejects if
+    // Mayhem isn't actually active, so this is safe to send.
+    let selected = selectedOptions[predId] || "";
+    if (isMayhemEligible(pred)) {
+      const set = mayhemPicks[predId];
+      if (!set || set.size === 0) return;
+      // Single-pick is still valid in Mayhem mode (user just chose 1).
+      selected = Array.from(set).join(",");
+    }
+    if (!selected) return;
 
     setSubmitting(predId);
     const boostType =
-      activeBoost?.predId === predId ? activeBoost.type : undefined;
+      activeBoost && activeBoost.predId === predId ? activeBoost.type : undefined;
 
     try {
       await api.submitPrediction(predId, selected, venueId, boostType, localStorage.getItem("jaffa_room_id"));
@@ -113,6 +204,11 @@ export default function LiveGame({ matchId, venueId, match }: LiveGameProps) {
       setTimeout(() => {
         setPredictions((prev) => prev.filter((p) => p.id !== predId));
         setSelectedOptions((prev) => {
+          const next = { ...prev };
+          delete next[predId];
+          return next;
+        });
+        setMayhemPicks((prev) => {
           const next = { ...prev };
           delete next[predId];
           return next;
@@ -273,24 +369,46 @@ export default function LiveGame({ matchId, venueId, match }: LiveGameProps) {
                         {pred.question}
                       </h3>
 
+                      {/* Mayhem 2-pick hint banner — only on player Qs when
+                          Mayhem is active. Lets the user know "Pick 2" rules
+                          are in effect for THIS card. */}
+                      {isMayhemEligible(pred) && (
+                        <div
+                          className="-mx-4 -mt-2 mb-3 px-4 py-1.5 text-center text-[11px] font-black uppercase tracking-wider"
+                          style={{ background: "rgba(168,85,247,0.18)", color: "#a855f7", borderBottom: "1px solid #a855f7" }}
+                        >
+                          🎲 MONKE MAYHEM — PICK 2
+                        </div>
+                      )}
+
                       {/* Options */}
                       <div className="space-y-2 mb-4">
                         {pred.options.map((opt: any, optIdx: number) => {
                           const color =
                             ACCENT_COLORS[optIdx % ACCENT_COLORS.length];
-                          const isSelected = selected === opt.key;
+                          const isSelected = isMayhemEligible(pred)
+                            ? !!mayhemPicks[pred.id]?.has(opt.key)
+                            : selected === opt.key;
                           const multiplier = isAllInActive
                             ? 3
                             : isBoostActive
                             ? 2
                             : 1;
 
+                          // Tank reveal — % of users picking this option, if
+                          // the user has used Tank on THIS prediction.
+                          const aggr = revealedAggregates[pred.id];
+                          const optCount = aggr?.responses?.[opt.key] || 0;
+                          const optPct = aggr && aggr.totalResponses > 0
+                            ? Math.round((optCount / aggr.totalResponses) * 100)
+                            : null;
+
                           return (
                             <button
                               key={opt.key}
                               onClick={() =>
                                 !isAnswered &&
-                                handleSelect(pred.id, opt.key)
+                                handleSelect(pred, opt.key)
                               }
                               disabled={isAnswered}
                               className={`option-btn px-4 py-3 text-left flex items-center justify-between ${
@@ -307,8 +425,19 @@ export default function LiveGame({ matchId, venueId, match }: LiveGameProps) {
                                   : {}
                               }
                             >
-                              <span className="font-bold text-sm">
+                              <span className="font-bold text-sm flex items-center gap-2">
                                 {opt.label}
+                                {optPct !== null && (
+                                  <span
+                                    className="text-[10px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded"
+                                    style={{
+                                      background: isSelected ? "rgba(0,0,0,0.18)" : "rgba(59,158,255,0.18)",
+                                      color: isSelected ? "#000" : "#3b9eff",
+                                    }}
+                                  >
+                                    {optPct}%
+                                  </span>
+                                )}
                               </span>
                               <span
                                 className={`text-xs font-black ${
@@ -321,6 +450,30 @@ export default function LiveGame({ matchId, venueId, match }: LiveGameProps) {
                           );
                         })}
                       </div>
+
+                      {/* Tank reveal trigger — visible when user has Tank
+                          charges and hasn't already revealed this question. */}
+                      {!isAnswered && tankCharges > 0 && !revealedAggregates[pred.id] && (
+                        <button
+                          type="button"
+                          onClick={() => handleUseTank(pred.id)}
+                          disabled={tankBusy === pred.id}
+                          className="w-full mb-3 px-3 py-2 rounded-[3px] text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-1.5"
+                          style={{
+                            background: "rgba(59,158,255,0.10)",
+                            color: "#3b9eff",
+                            border: "2px solid #3b9eff",
+                            boxShadow: "2px 2px 0 0 #3b9eff",
+                          }}
+                        >
+                          🔭 {tankBusy === pred.id ? "Revealing…" : `Reveal odds (${tankCharges} left)`}
+                        </button>
+                      )}
+                      {revealedAggregates[pred.id] && (
+                        <div className="text-[10px] uppercase tracking-wider text-[#9ca3af] text-center mb-3 font-bold">
+                          🔭 Tank intel · {revealedAggregates[pred.id].totalResponses} answered so far
+                        </div>
+                      )}
 
                       {/* Boost buttons */}
                       {!hasBoost && !isAnswered && (
@@ -361,15 +514,17 @@ export default function LiveGame({ matchId, venueId, match }: LiveGameProps) {
                         </button>
                       )}
 
-                      {/* Submit button */}
-                      {selected && !isAnswered && (
+                      {/* Submit button — Mayhem mode requires ≥1 pick (2 ideal) */}
+                      {((isMayhemEligible(pred) && (mayhemPicks[pred.id]?.size || 0) > 0) || (!isMayhemEligible(pred) && selected)) && !isAnswered && (
                         <button
-                          onClick={() => handleSubmit(pred.id)}
+                          onClick={() => handleSubmit(pred)}
                           disabled={submitting === pred.id}
                           className="btn-sticker btn-green w-full py-3 text-sm gap-2"
                         >
                           {submitting === pred.id
                             ? "LOCKING..."
+                            : isMayhemEligible(pred)
+                            ? `LOCK IN (${mayhemPicks[pred.id]?.size || 0}/2)`
                             : "LOCK IN PREDICTION"}
                         </button>
                       )}

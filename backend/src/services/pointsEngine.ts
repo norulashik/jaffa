@@ -44,16 +44,16 @@ function isSelectedOptionCorrect(prediction: Prediction, selectedOption: string)
   if (isAllCorrectPrediction(prediction)) return true;
   const co = prediction.correctOption;
   if (!co) return false;
-  // Punter card tie-breaks store a comma-joined list of winning keys
-  // (e.g. two batters tied on runs+balls). Anyone who picked any winner
-  // counts as correct; mirrors scorePunterUserAnswers in punterCard.ts.
-  if (co.includes(",")) {
-    for (const k of co.split(",")) {
-      if (k.trim() === selectedOption) return true;
-    }
-    return false;
+  // Both sides may be comma-joined: correctOption can be a tie tie-break
+  // (multiple winners per scorePunterUserAnswers), and selectedOption can
+  // be a Monke Mayhem multi-pick. Treat as set intersection — correct if
+  // any user pick matches any winning key.
+  const correctSet = new Set(co.split(",").map((s) => s.trim()).filter(Boolean));
+  const selectedSet = new Set(selectedOption.split(",").map((s) => s.trim()).filter(Boolean));
+  for (const k of selectedSet) {
+    if (correctSet.has(k)) return true;
   }
-  return co === selectedOption;
+  return false;
 }
 
 function getResolvedLabel(prediction: Prediction, correctOption: string): string {
@@ -68,10 +68,26 @@ export function calculatePoints(
   prediction: Prediction,
   selectedOption: string,
   boostType: string,
-  currentStreak: number
+  currentStreak: number,
+  // Bananergy powerup multipliers (Berserk × Silverback) stack on top of
+  // boost / all-in. Default 1 so existing callers don't change behavior.
+  // Caller computes via `pointsMultiplierForPrediction()` from powerups.ts.
+  powerupMultiplier: number = 1,
 ): PointsResult {
   const isCorrect = isSelectedOptionCorrect(prediction, selectedOption);
-  const option = prediction.options.find((o) => o.key === selectedOption);
+  // For comma-joined selectedOption (Mayhem multi-pick), basePoints comes
+  // from whichever picked key actually matched the correct answer; gives a
+  // deterministic payout when both picks happen to win a tied prediction.
+  let option = prediction.options.find((o) => o.key === selectedOption);
+  if (!option && selectedOption.includes(",")) {
+    const correctSet = new Set((prediction.correctOption || "").split(",").map((s) => s.trim()).filter(Boolean));
+    for (const key of selectedOption.split(",").map((s) => s.trim())) {
+      if (correctSet.has(key)) {
+        option = prediction.options.find((o) => o.key === key);
+        if (option) break;
+      }
+    }
+  }
   const basePoints = option?.points || 0;
 
   if (!isCorrect) {
@@ -95,11 +111,11 @@ export function calculatePoints(
   }
 
   const streakBonus = getStreakBonus(newStreak);
-  const totalPoints = Math.round(basePoints * multiplier) + streakBonus;
+  const totalPoints = Math.round(basePoints * multiplier * powerupMultiplier) + streakBonus;
 
   return {
     basePoints,
-    multiplier,
+    multiplier: multiplier * powerupMultiplier,
     streakBonus,
     totalPoints,
     isCorrect,
@@ -204,6 +220,17 @@ export async function resolvePrediction(
     // resolveRemainingPredictionsAtMatchEnd) would otherwise double-count.
     if (up.isCorrect !== null && up.isCorrect !== undefined) continue;
 
+    // Powerup multiplier (Berserk × Silverback) computed BEFORE the txn so
+    // we don't hold txn locks while waiting on those lookups. Result is
+    // safe to capture — even if the user activates a powerup mid-resolve,
+    // the prediction is still credited under the snapshot at scoring time.
+    const { pointsMultiplierForPrediction, applyStreakProtection, awardBananas } =
+      await import("./powerups");
+    const matchTotalOvers = (await import("../models")).Match
+      ? (await (await import("../models")).Match.findByPk(prediction.matchId))?.totalOvers ?? 20
+      : 20;
+    const powerupCtx = await pointsMultiplierForPrediction(up.userId, prediction, matchTotalOvers);
+
     await sequelize.transaction(async (t) => {
       const participant = await MatchParticipant.findOne({
         where: { userId: up.userId, matchId: up.matchId, venueId: up.venueId, roomId: up.roomId ?? null },
@@ -213,7 +240,13 @@ export async function resolvePrediction(
 
       if (!participant) return;
 
-      result = calculatePoints(prediction, up.selectedOption, up.boostType, participant.currentStreak);
+      result = calculatePoints(
+        prediction,
+        up.selectedOption,
+        up.boostType,
+        participant.currentStreak,
+        powerupCtx.multiplier,
+      );
 
       // Short "you missed by X" text for wrong picks. Null for correct picks.
       const feedbackText = result.isCorrect
@@ -241,8 +274,27 @@ export async function resolvePrediction(
         }
 
         await participant.update(updateData as Partial<MatchParticipant>, { transaction: t });
+
+        // ── Banana awards on correct (Bananergy economy) ──
+        // +1 for any correct prediction (player Qs / hot-takes / per-over),
+        // plus streak-step bonuses at 3/5/10. Each grant is a ledger row;
+        // dedup index on (userId, reason, refId) protects against re-runs.
+        await awardBananas(up.userId, 1, "prediction_correct", up.id, "user_prediction", t);
+        if (result.newStreak === 3)  await awardBananas(up.userId, 2,  "streak_bonus_3",  up.id, "user_prediction", t);
+        if (result.newStreak === 5)  await awardBananas(up.userId, 5,  "streak_bonus_5",  up.id, "user_prediction", t);
+        if (result.newStreak === 10) await awardBananas(up.userId, 10, "streak_bonus_10", up.id, "user_prediction", t);
       } else {
-        const updateData: Record<string, unknown> = { currentStreak: 0 };
+        // Streak protection (Gorilla Guard). If active with charges, absorb
+        // this miss → keep the streak intact, don't reset.
+        const protectedByGuard = await applyStreakProtection(
+          up.userId,
+          prediction.matchId,
+          up.id,
+          t,
+        );
+
+        const updateData: Record<string, unknown> = {};
+        if (!protectedByGuard) updateData.currentStreak = 0;
 
         if (result.totalPoints < 0) {
           const roundField = `round${prediction.round}Points` as string;
@@ -254,7 +306,9 @@ export async function resolvePrediction(
           }
         }
 
-        await participant.update(updateData as Partial<MatchParticipant>, { transaction: t });
+        if (Object.keys(updateData).length > 0) {
+          await participant.update(updateData as Partial<MatchParticipant>, { transaction: t });
+        }
       }
     });
 

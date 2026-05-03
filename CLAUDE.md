@@ -3,6 +3,19 @@
 ## Overview
 A web-based prediction game where people watching IPL matches at cafes/sports bars can predict match outcomes, earn points, and win rewards/discounts from the venue.
 
+## Brand Theme — Apes 🦍 + Bananas 🍌
+
+**Apply this theme to every new feature, copy, and visual we add — flavor only, never logic or intent.** The product mechanics stay rational; the wrapper goes ape.
+
+- **Naming**: lean into the troop. "Ape Club" (members area), "🦍 The Kong Question" (admin-fired Qs), "Bananas" (the soft-currency), the cookbook of role names already trends ape-adjacent (Maestro / Igniter / Architect / Stormcaller / Hammer fit).
+- **Currency**: bananas 🍌 are JAFFA's universal soft-currency for any new "you won this" reward — never "coins", "points-tokens", "stars". Match-points (lifetime/weekly) stay separate; bananas are the fun-currency layer.
+- **Copy voice**: keep the existing punchy commentator tone, but with mild ape flavor where it lands naturally — "go ape", "swing for it", "troop", "alpha pick", "monkey see, monkey win". Don't force it; one ape pun per screen, max.
+- **Iconography**: 🍌 + 🦍 emojis are first-class. When a lucide-react icon would do, also consider a banana/ape emoji adjacent to it (the Bananas profile card already does this). Avoid generic crowns/coins/stars when a banana works.
+- **Locked / coming-soon copy**: prefer "Apes only" / "Members of the troop" / "Bananas required" over generic "Coming Soon" — though the existing "Coming Soon" badge is fine while features actually are.
+- **Color flags**: yellow #ffd60a is the banana color; reserve it for banana counts, banana awards, "Ape Club" badges. Don't dilute — orange #ff6341 stays the primary brand action color.
+
+**What NOT to themify**: error toasts, security/auth copy, admin tooling labels, any data-correctness messaging. Stay precise where mistakes cost users.
+
 ## Tech Stack
 - **Frontend:** Next.js + Tailwind CSS (PWA)
 - **Backend:** Node.js + Express

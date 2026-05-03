@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
+import MatchPowerupTray from "@/components/MatchPowerupTray";
 import CorrectAnswerFeedback from "@/components/CorrectAnswerFeedback";
 import OverBallsPanel from "@/components/OverBallsPanel";
 import Scorecard from "@/components/Scorecard";
@@ -1407,6 +1408,16 @@ export default function MatchDashboard() {
       </div>
 
       <BottomNav />
+
+      {/* Floating 🍌 Bananergy tray — only mount when there's a real match
+          context. The tray polls /powerups/active so it shows whatever the
+          user has on / available for THIS match. */}
+      {matchId && (
+        <MatchPowerupTray
+          matchId={matchId}
+          currentOver={matchData?.scoreData?.currentOver || matchData?.currentOver || null}
+        />
+      )}
 
       {/* Correct Answer Feedback Overlay */}
       {showFeedback && feedbackData && (

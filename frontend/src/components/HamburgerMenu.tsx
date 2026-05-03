@@ -83,7 +83,10 @@ interface Props {
 export default function HamburgerMenu({ open, onClose }: Props) {
   const { state, dispatch } = useGame();
   const router = useRouter();
-  const [modesOpen, setModesOpen] = useState(true); // start expanded — most-tapped action
+  // Modes drawer defaults closed so the user lands on a clean menu (with
+  // the user chip + Store + Ape Club visible) and explicitly taps to open
+  // the Modes accordion.
+  const [modesOpen, setModesOpen] = useState(false);
   // Defer portal mounting until after hydration so SSR markup matches the
   // client and document.body is available.
   const [mounted, setMounted] = useState(false);
@@ -281,13 +284,12 @@ export default function HamburgerMenu({ open, onClose }: Props) {
                 )}
               </AnimatePresence>
 
-              {/* Store (locked) */}
+              {/* Store — Banana Drip (cosmetics, locked) + Bananergy (powerups, live). */}
               <DrawerRow
                 icon={<ShoppingBag className="w-4 h-4" />}
                 label="Store"
-                description="Spend your lifetime points on perks."
-                badge="Coming Soon"
-                locked
+                description="🍌 Bananergy powerups + Banana Drip outfits."
+                onClick={() => go("/store")}
               />
 
               {/* Ape Club (locked) */}

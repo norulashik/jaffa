@@ -15,6 +15,8 @@ import PredictionAggregate from "./PredictionAggregate";
 import SquadOverride from "./SquadOverride";
 import FiveVsFiveRoom from "./FiveVsFiveRoom";
 import FiveVsFiveSlot from "./FiveVsFiveSlot";
+import BananaLedger from "./BananaLedger";
+import UserPowerup from "./UserPowerup";
 
 // Associations
 
@@ -91,6 +93,13 @@ FiveVsFiveSlot.belongsTo(FiveVsFiveRoom, { foreignKey: "roomId", as: "room" });
 User.hasMany(FiveVsFiveSlot, { foreignKey: "userId", as: "fiveVsFiveSlots" });
 FiveVsFiveSlot.belongsTo(User, { foreignKey: "userId", as: "user" });
 
+// Banana ledger + powerup associations
+User.hasMany(BananaLedger, { foreignKey: "userId", as: "bananaLedger" });
+BananaLedger.belongsTo(User, { foreignKey: "userId", as: "user" });
+
+User.hasMany(UserPowerup, { foreignKey: "userId", as: "powerups" });
+UserPowerup.belongsTo(User, { foreignKey: "userId", as: "user" });
+
 export {
   sequelize,
   User,
@@ -109,4 +118,6 @@ export {
   SquadOverride,
   FiveVsFiveRoom,
   FiveVsFiveSlot,
+  BananaLedger,
+  UserPowerup,
 };

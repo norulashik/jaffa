@@ -709,14 +709,29 @@ async function settle5v5Room(
   const maxPoints = results.reduce((m, r) => Math.max(m, r.points), 0);
   const motmUserIds = results.filter((r) => r.points === maxPoints).map((r) => r.slot.userId);
 
-  // Persist banana grants atomically per user.
-  for (const [userId, delta] of bananaByUser.entries()) {
-    if (delta <= 0) continue;
-    await sequelize.transaction(async (t) => {
-      const u = await User.findByPk(userId, { transaction: t, lock: t.LOCK.UPDATE });
-      if (!u) return;
-      await u.update({ bananas: (u.bananas || 0) + delta }, { transaction: t });
-    });
+  // Persist banana grants via the central awardBananas helper so the
+  // ledger row + dedup-on-replay protection apply. Splits into role-win
+  // and team-win ledger entries so the banana history reads cleanly.
+  const { awardBananas } = await import("./powerups");
+  for (const r of results) {
+    if (roleWinners[r.slot.role] === r.slot.teamSide) {
+      await awardBananas(
+        r.slot.userId,
+        ROLE_BANANA_REWARD,
+        "5v5_role_win",
+        `${room.id}:${r.slot.role}`,
+        "five_vs_five_room",
+      );
+    }
+    if (winnerTeam !== "tie" && r.slot.teamSide === winnerTeam) {
+      await awardBananas(
+        r.slot.userId,
+        TEAM_BANANA_REWARD,
+        "5v5_team_win",
+        `${room.id}:${r.slot.userId}`,
+        "five_vs_five_room",
+      );
+    }
   }
 
   // Cache the result summary on the room so /results renders without

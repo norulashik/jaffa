@@ -128,10 +128,32 @@ router.post("/:predictionId/answer", authenticateUser, async (req: AuthRequest, 
       return;
     }
 
-    const validOptions = prediction.options.map((o) => o.key);
-    if (!validOptions.includes(selectedOption)) {
+    const validOptions = new Set(prediction.options.map((o) => o.key));
+    // Mayhem multi-pick: a comma-joined "opt_X,opt_Y" payload is allowed
+    // ONLY when the user has an active Monke Mayhem on this match AND the
+    // prediction is player-related (subjectType non-null). Validate every
+    // key against the option list; reject more than 2 keys (we don't
+    // currently sell a "triple-pick" powerup).
+    if (typeof selectedOption !== "string" || !selectedOption.length) {
       res.status(400).json({ error: "Invalid option" });
       return;
+    }
+    const picks = selectedOption.split(",").map((s) => s.trim()).filter(Boolean);
+    if (picks.length === 0 || picks.length > 2) {
+      res.status(400).json({ error: "Invalid option" });
+      return;
+    }
+    if (picks.some((k) => !validOptions.has(k))) {
+      res.status(400).json({ error: "Invalid option" });
+      return;
+    }
+    if (picks.length === 2) {
+      const { userCanMayhemPick } = await import("../services/powerups");
+      const allowed = await userCanMayhemPick(userId, prediction);
+      if (!allowed) {
+        res.status(400).json({ error: "Multi-pick requires an active Monke Mayhem on a player question" });
+        return;
+      }
     }
 
     // Use transaction to prevent race conditions (duplicate answers, boost over-use)
