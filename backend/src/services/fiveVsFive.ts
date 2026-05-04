@@ -52,12 +52,16 @@ import type { Player } from "../data/iplSquads";
 
 export const FIVE_V_FIVE_CATEGORY = "5v5";
 
+// Display names for the 5 roles. Internal `key` strings stay as the original
+// role tags ("maestro", "igniter", …) so existing predictions / templateKeys /
+// stored data don't need a migration — only the user-facing `title` changed
+// to ape-archetype names per the brand theme refresh.
 export const ROLE_DEFS = [
-  { role: 1, key: "maestro",     title: "Maestro",     subtitle: "Captain + Wicket-keeper",  color: "#ffd60a" },
-  { role: 2, key: "igniter",     title: "Igniter",     subtitle: "Opening Batter",           color: "#ff6341" },
-  { role: 3, key: "architect",   title: "Architect",   subtitle: "Middle Order",             color: "#3b9eff" },
-  { role: 4, key: "stormcaller", title: "Stormcaller", subtitle: "Finisher",                 color: "#a855f7" },
-  { role: 5, key: "hammer",      title: "Hammer",      subtitle: "Strike Bowler",            color: "#22c55e" },
+  { role: 1, key: "maestro",     title: "Top Banana", subtitle: "Captain + Wicket-keeper",  color: "#ffd60a" },
+  { role: 2, key: "igniter",     title: "Gibbon",     subtitle: "Opening Batter",           color: "#ff6341" },
+  { role: 3, key: "architect",   title: "Chimp",      subtitle: "Middle Order",             color: "#3b9eff" },
+  { role: 4, key: "stormcaller", title: "Brawler",    subtitle: "Finisher",                 color: "#a855f7" },
+  { role: 5, key: "hammer",      title: "Knuckler",   subtitle: "Strike Bowler",            color: "#22c55e" },
 ] as const;
 export type RoleNumber = 1 | 2 | 3 | 4 | 5;
 

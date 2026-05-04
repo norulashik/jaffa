@@ -86,6 +86,20 @@ export default function MatchDashboard() {
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackData, setFeedbackData] = useState<any>(null);
   const [matchData, setMatchData] = useState<any>(null);
+  // Bananas earned by THIS user during THIS match — populated when the
+  // match flips to "completed" so the celebration card can show the count.
+  const [matchBananas, setMatchBananas] = useState<number | null>(null);
+
+  // Fetch banana tally exactly once on completion. Re-runs if matchId
+  // changes (user switches between completed matches in their history).
+  useEffect(() => {
+    if (matchData?.status !== "completed" || !matchId) return;
+    let cancelled = false;
+    api.getMatchBananas(matchId)
+      .then((r) => { if (!cancelled) setMatchBananas(r.bananas); })
+      .catch(() => { /* silent — card falls back to no count */ });
+    return () => { cancelled = true; };
+  }, [matchData?.status, matchId]);
   const [selectedAnswers, setSelectedAnswers] = useState<Record<string, string>>({});
   const [draftAnswers, setDraftAnswers] = useState<Record<string, string>>({});
   const [activeBoost, setActiveBoost] = useState<{
@@ -1193,18 +1207,53 @@ export default function MatchDashboard() {
                       matchData?.status === "live" &&
                       (!inn1 || (Number(inn1.overs ?? 0) === 0 && Number(inn1.score ?? 0) === 0)) &&
                       (!inn2 || (Number(inn2.overs ?? 0) === 0 && Number(inn2.score ?? 0) === 0));
+                    // Goofy congrats line scaled by banana haul. Defaults
+                    // are friendly even when 0 — no tough-guy gloating.
+                    const bananaHaul = matchBananas ?? 0;
+                    const completionTitle =
+                      bananaHaul >= 16 ? "BANANA BOSS!"
+                      : bananaHaul >= 6 ? "BANANARAMA!"
+                      : bananaHaul >= 1 ? "NICE PICK."
+                      : "TOUGH ONE.";
+                    const completionSub =
+                      bananaHaul >= 1
+                        ? "Goated. Open My Picks below to count the damage."
+                        : "Bananas next time. Open My Picks below to learn the lessons.";
                     return (
-                      <div className="game-card flex flex-col items-center justify-center py-16 text-center p-6">
-                        <span className="text-5xl mb-4">{noLiveData ? "⏳" : "🏏"}</span>
+                      <div
+                        className="game-card flex flex-col items-center justify-center py-16 text-center p-6"
+                        style={isCompleted ? { borderColor: "#ffd60a", boxShadow: "4px 4px 0 0 #ffd60a" } : undefined}
+                      >
+                        {isCompleted ? (
+                          // Big banana hero + animated count tick. Replaces
+                          // the bat-and-ball emoji on completion.
+                          <div className="mb-3 flex items-baseline gap-2">
+                            <span className="text-6xl leading-none">🍌</span>
+                            {matchBananas !== null && (
+                              <motion.span
+                                key={bananaHaul}
+                                initial={{ scale: 0.4, opacity: 0 }}
+                                animate={{ scale: 1, opacity: 1 }}
+                                transition={{ type: "spring", stiffness: 380, damping: 22 }}
+                                className="text-4xl font-black"
+                                style={{ fontFamily: "'Bungee', cursive", color: "#ffd60a" }}
+                              >
+                                +{bananaHaul}
+                              </motion.span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-5xl mb-4">{noLiveData ? "⏳" : "🏏"}</span>
+                        )}
                         <h3
                           className="text-xl text-white mb-2"
                           style={{ fontFamily: "'Bungee', 'Impact', cursive" }}
                         >
-                          {isCompleted ? "MATCH COMPLETE" : noLiveData ? "MATCH WARMING UP" : "ALL CAUGHT UP!"}
+                          {isCompleted ? completionTitle : noLiveData ? "MATCH WARMING UP" : "ALL CAUGHT UP!"}
                         </h3>
                         <p className="text-sm text-white/50 max-w-[260px]">
                           {isCompleted
-                            ? "Open My Picks below to see how you did."
+                            ? completionSub
                             : noLiveData
                               ? "First updates land seconds after the umpire calls play. Stay on this page."
                               : "New predictions drop at the end of this over. Keep watching!"}

@@ -86,6 +86,10 @@ export const api = {
   // Matches
   getMatches: () => request<any[]>("/matches"),
   getMatch: (matchId: string) => request<any>(`/matches/${matchId}`),
+  // Sum of bananas earned by the user during this match. Powers the
+  // "Match Complete" celebration card.
+  getMatchBananas: (matchId: string) =>
+    request<{ matchId: string; bananas: number }>(`/matches/${matchId}/my-bananas`),
   getMatchBalls: (matchId: string) => request<{ overs: any[]; currentInnings: number; currentOver: number }>(`/matches/${matchId}/balls`),
   getMatchScorecard: (matchId: string) => request<any>(`/matches/${matchId}/scorecard`),
   importMatch: (fixtureId: string) => request<{ match: any }>(`/matches/import/${fixtureId}`, { method: "POST" }),

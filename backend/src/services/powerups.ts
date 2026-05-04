@@ -17,11 +17,23 @@
 //     layer calls (the others self-decrement during scoring).
 
 import { Op, Transaction } from "sequelize";
+import type { Server as SocketIOServer } from "socket.io";
 import { User, BananaLedger, UserPowerup, UserPrediction, Prediction } from "../models";
 import sequelize from "../config/database";
 import { getYearWeekNumber } from "../utils/weekHelper";
 import type { PowerupKey, PowerupStatus } from "../models/UserPowerup";
 import type { BananaReason } from "../models/BananaLedger";
+
+// Module-level io reference, populated once at server boot via
+// `setBananaSocketServer(io)`. Read by `awardBananas` so every banana
+// mutation emits a `banana.awarded` event to the user's private socket
+// room — fuels the floating banana animation overlay on the client.
+// Storing it module-level (vs. plumbing io through every awardBananas
+// call site) keeps the existing call sites unchanged.
+let bananaIo: SocketIOServer | null = null;
+export function setBananaSocketServer(io: SocketIOServer): void {
+  bananaIo = io;
+}
 
 // ── Catalog ─────────────────────────────────────────────────────────
 
@@ -128,8 +140,26 @@ export async function awardBananas(
 
   // Use the caller's transaction if provided so the ledger write joins their
   // atomic group; otherwise spin up a local one.
-  if (t) return inner(t);
-  return sequelize.transaction(inner);
+  const balance = t ? await inner(t) : await sequelize.transaction(inner);
+
+  // Emit a private banana-awarded event to the user's socket room — only
+  // when the ledger insert actually committed (balance != null) so we never
+  // fire animations for dedup-rejected re-runs. Fire-and-forget; missing
+  // io (e.g. test harness) silently no-ops.
+  if (balance !== null && bananaIo) {
+    try {
+      bananaIo.to(`user:${userId}`).emit("banana.awarded", {
+        delta,
+        reason,
+        refId,
+        refType,
+        balance,
+      });
+    } catch {
+      // Socket emit failures are never user-blocking — swallow.
+    }
+  }
+  return balance;
 }
 
 // ── Purchase ────────────────────────────────────────────────────────

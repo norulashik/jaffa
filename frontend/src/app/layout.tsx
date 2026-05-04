@@ -3,6 +3,7 @@ import { Toaster } from "sonner";
 import { GameProvider } from "@/context/GameContext";
 import { NotificationProvider } from "@/context/NotificationContext";
 import WinPopup from "@/components/WinPopup";
+import BananaShower from "@/components/BananaShower";
 import { SAFE_BOOT } from "@/lib/runtime-flags";
 import "./globals.css";
 
@@ -41,6 +42,12 @@ export default function RootLayout({
       <NotificationProvider>
         {children}
         <WinPopup />
+        {/* Floating "+N 🍌" celebration overlay — listens to `banana.awarded`
+            socket events and drifts a chip up the screen. Bananas are
+            credited the moment the event fires (no tap required); the tap
+            interaction just lets a playful user flick the chip off-screen
+            faster. Sits at the root so any page benefits. */}
+        <BananaShower />
       </NotificationProvider>
     </GameProvider>
   );

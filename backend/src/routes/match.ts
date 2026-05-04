@@ -738,4 +738,67 @@ router.get("/:matchId/my-story", authenticateUser, async (req: AuthRequest, res:
   }
 });
 
+// Sum of bananas the user earned during a single match. Powers the
+// "Match Complete" card's banana count. Walks BananaLedger filtered by
+// refIds tied to this match's UserPredictions + 5v5 rooms.
+router.get("/:matchId/my-bananas", authenticateUser, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const matchId = req.params.matchId as string;
+    const userId = req.userId!;
+    const { BananaLedger, UserPrediction, FiveVsFiveRoom, FiveVsFiveSlot } = await import("../models");
+
+    // 1. UserPrediction-keyed bananas (regular predictions + punter cards +
+    //    streak bonuses). Each ledger row's refId points at a UserPrediction id.
+    const ups = await UserPrediction.findAll({
+      where: { userId, matchId },
+      attributes: ["id"],
+    });
+    const upIds = ups.map((u) => u.id);
+
+    // 2. 5v5 rooms — refId is either `${roomId}:${role}` (role-win) or
+    //    `${roomId}:${userId}` (team-win). Find this user's slot in any
+    //    5v5 room for this match, then prefix-match the ledger.
+    const slots = await FiveVsFiveSlot.findAll({
+      where: { userId },
+      include: [{
+        model: FiveVsFiveRoom,
+        as: "room",
+        where: { matchId },
+        required: true,
+        attributes: ["id"],
+      }],
+    });
+    const fiveRoomIds = slots.map((s) => s.roomId);
+
+    let total = 0;
+    if (upIds.length > 0) {
+      const rows = await BananaLedger.findAll({
+        where: {
+          userId,
+          refType: "user_prediction",
+          refId: { [Op.in]: upIds },
+        },
+        attributes: ["delta"],
+      });
+      total += rows.reduce((s, r) => s + (r.delta || 0), 0);
+    }
+    if (fiveRoomIds.length > 0) {
+      const fiveRows = await BananaLedger.findAll({
+        where: {
+          userId,
+          refType: "five_vs_five_room",
+          [Op.or]: fiveRoomIds.map((id) => ({ refId: { [Op.like]: `${id}:%` } })),
+        },
+        attributes: ["delta"],
+      });
+      total += fiveRows.reduce((s, r) => s + (r.delta || 0), 0);
+    }
+
+    res.json({ matchId, bananas: Math.max(0, total) });
+  } catch (error) {
+    console.error("[Match] my-bananas error:", error);
+    res.status(500).json({ error: "Failed to load match bananas" });
+  }
+});
+
 export default router;

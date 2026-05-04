@@ -273,7 +273,7 @@ export default function FiveVsFiveLanding() {
           </div>
           <ol className="list-decimal pl-4 space-y-1">
             <li>10 players, split into 2 teams of 5.</li>
-            <li>Pick a role: Maestro · Igniter · Architect · Stormcaller · Hammer.</li>
+            <li>Pick a role: Top Banana · Gibbon · Chimp · Brawler · Knuckler.</li>
             <li>Each role gets 3 questions about your team&apos;s players.</li>
             <li>Match starts → answers lock → resolution at match end.</li>
             <li>Win your role: <span className="text-[#ffd60a] font-bold">+5 🍌</span>. Win the team total: <span className="text-[#ffd60a] font-bold">+10 🍌</span>.</li>

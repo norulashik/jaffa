@@ -76,6 +76,13 @@ app.use("/api", globalLimiter);
 // Make io accessible in routes
 app.set("io", io);
 
+// Make io accessible to the awardBananas helper (module-level singleton)
+// so every banana mutation emits a `banana.awarded` event for the floating
+// animation overlay on the client. Lazy import to avoid circular load.
+import("./services/powerups").then(({ setBananaSocketServer }) => {
+  setBananaSocketServer(io);
+});
+
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/venues", venueRoutes);

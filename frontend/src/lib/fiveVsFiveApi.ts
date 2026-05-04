@@ -147,12 +147,14 @@ export const fiveVsFiveApi = {
     fivevsfiveRequest<FiveVsFiveResultDto>(`/5v5/rooms/${roomId}/results`),
 };
 
-// Stable role display data — mirrors backend ROLE_DEFS.
+// Stable role display data — mirrors backend ROLE_DEFS. Internal numeric
+// keys (1-5) and the templateKey suffixes ("maestro", "igniter", …) are
+// unchanged; only the user-facing names + emojis swapped to ape archetypes.
 export const ROLE_VIEW = {
-  1: { title: "Maestro",     subtitle: "Captain + WK",     color: "#ffd60a", emoji: "🎩" },
-  2: { title: "Igniter",     subtitle: "Opening Batter",   color: "#ff6341", emoji: "💥" },
-  3: { title: "Architect",   subtitle: "Middle Order",     color: "#3b9eff", emoji: "🏗️" },
-  4: { title: "Stormcaller", subtitle: "Finisher",         color: "#a855f7", emoji: "⚡" },
-  5: { title: "Hammer",      subtitle: "Strike Bowler",    color: "#22c55e", emoji: "🔨" },
+  1: { title: "Top Banana", subtitle: "Captain + WK",   color: "#ffd60a", emoji: "🍌" },
+  2: { title: "Gibbon",     subtitle: "Opening Batter", color: "#ff6341", emoji: "🌀" },
+  3: { title: "Chimp",      subtitle: "Middle Order",   color: "#3b9eff", emoji: "🧠" },
+  4: { title: "Brawler",    subtitle: "Finisher",       color: "#a855f7", emoji: "💢" },
+  5: { title: "Knuckler",   subtitle: "Strike Bowler",  color: "#22c55e", emoji: "👊" },
 } as const;
 export type RoleNumber = 1 | 2 | 3 | 4 | 5;
