@@ -1669,28 +1669,77 @@ export default function OwnerPortal() {
                   <label className="block text-[#9ca3af] mb-1.5 text-xs font-black uppercase tracking-wider">
                     Match
                   </label>
-                  <select
-                    value={pcMatchId}
-                    onChange={(e) => setPcMatchId(e.target.value)}
-                    className="w-full px-3 py-3 nb-input"
-                    style={nbInputStyle}
-                  >
-                    <option value="">Pick a match…</option>
-                    {(Array.isArray(matches) ? matches : [])
-                      // Most-relevant first: completed matches usually need
-                      // the override; live next; upcoming hidden (no
-                      // resolved cards to fix yet).
-                      .filter((m: any) => m.status !== "upcoming")
-                      .sort((a: any, b: any) => {
-                        const order: Record<string, number> = { completed: 0, live: 1 };
-                        return (order[a.status] ?? 9) - (order[b.status] ?? 9);
-                      })
-                      .map((m: any) => (
-                        <option key={m.id} value={m.id}>
-                          {m.team1Short || m.team1} vs {m.team2Short || m.team2} ({m.status})
-                        </option>
-                      ))}
-                  </select>
+                  {/* Three buckets so the admin doesn't have to scan past
+                      old completed matches to find the one whose card just
+                      opened at midnight:
+                        • Upcoming  → punter card already opens at IST
+                                       midnight on match day, so admin can
+                                       fix mismatches BEFORE first ball.
+                        • Live      → mid-match correction window.
+                        • Completed → post-match resolution / overrides.
+                      Completed list is capped to recent 15 so it doesn't
+                      stretch into yesterday's tournament noise. */}
+                  {(() => {
+                    const arr = Array.isArray(matches) ? matches : [];
+                    const fmt = (iso: string | null | undefined) => {
+                      if (!iso) return "";
+                      const d = new Date(iso);
+                      const now = new Date();
+                      const sameDay = d.toDateString() === now.toDateString();
+                      const tmrw = new Date(now);
+                      tmrw.setDate(tmrw.getDate() + 1);
+                      const isTmrw = d.toDateString() === tmrw.toDateString();
+                      const time = d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+                      if (sameDay) return `Today ${time}`;
+                      if (isTmrw) return `Tomorrow ${time}`;
+                      return `${d.toLocaleDateString("en-IN", { day: "numeric", month: "short" })} ${time}`;
+                    };
+                    const upcoming = arr
+                      .filter((m: any) => m.status === "upcoming")
+                      .sort((a: any, b: any) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+                    const live = arr.filter((m: any) => m.status === "live");
+                    const completed = arr
+                      .filter((m: any) => m.status === "completed")
+                      .sort((a: any, b: any) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())
+                      .slice(0, 15);
+                    return (
+                      <select
+                        value={pcMatchId}
+                        onChange={(e) => setPcMatchId(e.target.value)}
+                        className="w-full px-3 py-3 nb-input"
+                        style={nbInputStyle}
+                      >
+                        <option value="">Pick a match…</option>
+                        {upcoming.length > 0 && (
+                          <optgroup label="🌅  Upcoming · card open">
+                            {upcoming.map((m: any) => (
+                              <option key={m.id} value={m.id}>
+                                {(m.team1Short || m.team1)} vs {(m.team2Short || m.team2)} · {fmt(m.startTime)}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {live.length > 0 && (
+                          <optgroup label="🔴  Live now">
+                            {live.map((m: any) => (
+                              <option key={m.id} value={m.id}>
+                                {(m.team1Short || m.team1)} vs {(m.team2Short || m.team2)}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {completed.length > 0 && (
+                          <optgroup label="✅  Recently completed">
+                            {completed.map((m: any) => (
+                              <option key={m.id} value={m.id}>
+                                {(m.team1Short || m.team1)} vs {(m.team2Short || m.team2)} · {fmt(m.startTime)}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </select>
+                    );
+                  })()}
                 </div>
 
                 {!pcMatchId && (
