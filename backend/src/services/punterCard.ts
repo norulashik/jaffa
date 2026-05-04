@@ -524,12 +524,29 @@ export function pickTopAllrounder(team: Player[]): Player | null {
   return pickMostFrequent(team, (p) => p.role === "all");
 }
 
+// Stable resort: appearanceCount DESC, then static-squad position (i.e.
+// preserves original order on ties). Recent regulars float to the top so
+// when we then `slice(0, 12)` we keep the players who actually play — not
+// whoever the static squad happened to list first.
+function rankByAppearance(players: Player[]): Player[] {
+  return players
+    .map((p, i) => ({ p, i, freq: p.appearanceCount ?? 0 }))
+    .sort((a, b) => (b.freq - a.freq) || (a.i - b.i))
+    .map((x) => x.p);
+}
+
 // Player of the Match — entire 22-man combined squad (XI from each side,
 // with optional impact players if listed in the source). Order interleaved
 // for fairness; points scale 7.0 → ~40 across the pool.
+//
+// Sorted by recent-appearance BEFORE the slice so dropped/rotated-out
+// players (Rohit Sharma when MI bench him; Mitchell Santner when CSK rest
+// him) fall to the high-points tail of the pool instead of dominating the
+// top-12 picks. Without this pre-sort, the static squad order — which is
+// alphabetical/positional, NOT "who actually plays" — drove the pool.
 function motmOptions(pool: SquadSource): Option[] {
-  const t1 = pool.team1Players.slice(0, 12);
-  const t2 = pool.team2Players.slice(0, 12);
+  const t1 = rankByAppearance(pool.team1Players).slice(0, 12);
+  const t2 = rankByAppearance(pool.team2Players).slice(0, 12);
   const merged = uniqueByName(interleave(t1, t2)).slice(0, 24);
   return merged.map((p, i) => ({
     key: playerKey(p.name),
@@ -539,10 +556,10 @@ function motmOptions(pool: SquadSource): Option[] {
 }
 
 // Top Batter — exclude pure bowlers. Wicketkeepers, pure bats, and
-// all-rounders all qualify. Order preserved from squad listing (top-order
-// batters first → lower points; tail batters / all-rounders later).
+// all-rounders all qualify. Same appearance-pre-sort as motmOptions: a
+// regular #3 batter shows up before a fringe rotation player.
 function topBatterOptions(pool: SquadSource): Option[] {
-  const eligible = (xs: Player[]) => xs.filter((p) => p.role !== "bowl");
+  const eligible = (xs: Player[]) => rankByAppearance(xs.filter((p) => p.role !== "bowl"));
   const t1 = eligible(pool.team1Players).slice(0, 8);
   const t2 = eligible(pool.team2Players).slice(0, 8);
   const merged = uniqueByName(interleave(t1, t2)).slice(0, 16);
@@ -554,13 +571,14 @@ function topBatterOptions(pool: SquadSource): Option[] {
 }
 
 // Top Bowler — only players who can actually bowl (frontline bowlers + all-
-// rounders). Pure bats and keepers excluded. Within the pool, frontline
-// bowlers come before all-rounders so the most-likely wicket-takers get
-// the lowest points.
+// rounders). Pure bats and keepers excluded. Two-pass partition keeps the
+// frontline-bowler front-loading (so Bumrah outranks an all-rounder),
+// THEN appearance-ranks within each partition so a benched frontline
+// bowler can't crowd out an in-form all-rounder.
 function topBowlerOptions(pool: SquadSource): Option[] {
   const partition = (xs: Player[]) => {
-    const bowl = xs.filter((p) => p.role === "bowl");
-    const all = xs.filter((p) => p.role === "all");
+    const bowl = rankByAppearance(xs.filter((p) => p.role === "bowl"));
+    const all = rankByAppearance(xs.filter((p) => p.role === "all"));
     return [...bowl, ...all];
   };
   const t1 = partition(pool.team1Players).slice(0, 8);

@@ -138,6 +138,14 @@ export default function OwnerPortal() {
   // pattern keeps the page short; admin opens one card at a time. Empty
   // string = nothing open.
   const [pcExpandedId, setPcExpandedId] = useState<string>("");
+  // Edit-options drafts keyed by predictionId. Lazy-populated when admin
+  // taps "Edit options" so the unedited cards stay cheap to render.
+  // Each draft is a working copy of the prediction.options array; saving
+  // POSTs the cleaned draft to PATCH /owner/punter-cards/:id/options.
+  const [pcOptionDrafts, setPcOptionDrafts] = useState<
+    Record<string, { key: string | null; label: string; points: string }[]>
+  >({});
+  const [pcSavingOptionsId, setPcSavingOptionsId] = useState<string | null>(null);
 
   /* ── Kong ────────────────────────────────────────────────── */
   const [kongMatchId, setKongMatchId] = useState("");
@@ -324,6 +332,83 @@ export default function OwnerPortal() {
       toast.error(err?.message || "Override failed", { id: pendingId });
     } finally {
       setPcOverridingId(null);
+    }
+  };
+
+  // ── Punter card option editor handlers ──
+  // Lazy-init: copy the current options into a draft so we can edit
+  // without mutating the loaded list. existing keys preserved (server
+  // rejects rename); new options carry key=null so the server allocates
+  // a fresh `opt_custom_<n>` key.
+  const startEditOptions = (p: PunterCardRow) => {
+    setPcOptionDrafts((prev) => ({
+      ...prev,
+      [p.id]: p.options.map((o) => ({ key: o.key, label: o.label, points: String(o.points) })),
+    }));
+  };
+  const cancelEditOptions = (predId: string) => {
+    setPcOptionDrafts((prev) => {
+      const next = { ...prev };
+      delete next[predId];
+      return next;
+    });
+  };
+  const updateDraftField = (predId: string, idx: number, patch: Partial<{ label: string; points: string }>) => {
+    setPcOptionDrafts((prev) => {
+      const arr = prev[predId];
+      if (!arr) return prev;
+      const next = [...arr];
+      next[idx] = { ...next[idx], ...patch };
+      return { ...prev, [predId]: next };
+    });
+  };
+  const addDraftOption = (predId: string) => {
+    setPcOptionDrafts((prev) => {
+      const arr = prev[predId];
+      if (!arr || arr.length >= 12) return prev;
+      return { ...prev, [predId]: [...arr, { key: null, label: "", points: "20" }] };
+    });
+  };
+  const removeDraftOption = (predId: string, idx: number) => {
+    setPcOptionDrafts((prev) => {
+      const arr = prev[predId];
+      if (!arr || arr.length <= 2) return prev;
+      return { ...prev, [predId]: arr.filter((_, i) => i !== idx) };
+    });
+  };
+  const saveOptions = async (predId: string) => {
+    const draft = pcOptionDrafts[predId];
+    if (!draft) return;
+    if (draft.length < 2) { toast.error("Need at least 2 options"); return; }
+    const payload = draft.map((o) => ({
+      key: o.key,
+      label: o.label.trim(),
+      points: Number(o.points),
+    }));
+    if (payload.some((o) => !o.label)) { toast.error("Every option needs a label"); return; }
+    if (payload.some((o) => !Number.isFinite(o.points) || o.points < 1 || o.points > 500)) {
+      toast.error("Points must be 1-500"); return;
+    }
+    setPcSavingOptionsId(predId);
+    try {
+      const res = await ownerFetch(`/owner/punter-cards/${predId}/options`, {
+        method: "PATCH",
+        body: JSON.stringify({ options: payload }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success("Options updated");
+        cancelEditOptions(predId);
+        loadPunterCards(pcMatchId);
+      } else {
+        // Server returns descriptive errors (e.g. "Can't remove options users
+        // picked: ROHIT SHARMA (3)") — surface them verbatim.
+        toast.error(data.error || "Update failed");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Update failed");
+    } finally {
+      setPcSavingOptionsId(null);
     }
   };
 
@@ -1688,45 +1773,133 @@ export default function OwnerPortal() {
 
                           {expanded && (
                             <div className="px-4 pb-4 pt-1 space-y-1.5 border-t border-[#2a2a2a]">
-                              {p.options.map((opt) => {
-                                const count = p.responses[opt.key] || 0;
-                                const isCurrent = !isVoided && p.correctOption === opt.key;
-                                const busy = pcOverridingId === p.id;
-                                return (
-                                  <div
-                                    key={opt.key}
-                                    className="flex items-center justify-between gap-2 px-3 py-2"
-                                    style={{
-                                      background: isCurrent ? "rgba(34,197,94,0.12)" : "#0d0d0d",
-                                      border: `1px solid ${isCurrent ? "#22c55e" : "#2a2a2a"}`,
-                                      borderRadius: 4,
-                                    }}
-                                  >
-                                    <div className="flex-1 text-xs">
-                                      <span className="text-white font-bold">{opt.label}</span>
-                                      <span className="text-[#9ca3af] ml-2">{opt.points}pts</span>
-                                    </div>
-                                    <span className="text-[#9ca3af] text-[11px]">{count} vote{count === 1 ? "" : "s"}</span>
-                                    {isCurrent ? (
-                                      <span className="text-[10px] font-black uppercase tracking-wider text-[#22c55e]">
-                                        ✓ Current
-                                      </span>
-                                    ) : (
+                              {/* Edit-options mode swaps the resolve buttons
+                                  for an inline option editor (label + points
+                                  + add/remove). Drafts live in
+                                  pcOptionDrafts; saving PATCHes the array. */}
+                              {pcOptionDrafts[p.id] ? (
+                                <div className="space-y-2 pt-2">
+                                  <p className="text-[10px] uppercase tracking-widest font-bold text-[#9ca3af]">
+                                    Editing options · {pcOptionDrafts[p.id].length}/12
+                                  </p>
+                                  {pcOptionDrafts[p.id].map((draft, i) => {
+                                    const isExisting = !!draft.key;
+                                    const voteCount = isExisting ? (p.responses[draft.key!] || 0) : 0;
+                                    return (
+                                      <div key={i} className="flex items-center gap-2">
+                                        <input
+                                          type="text"
+                                          value={draft.label}
+                                          onChange={(e) => updateDraftField(p.id, i, { label: e.target.value })}
+                                          placeholder={isExisting ? draft.label : `Option ${i + 1}`}
+                                          className="flex-1 px-3 py-2 nb-input text-sm"
+                                          style={nbInputStyle}
+                                        />
+                                        <input
+                                          type="number"
+                                          value={draft.points}
+                                          onChange={(e) => updateDraftField(p.id, i, { points: e.target.value })}
+                                          min={1}
+                                          max={500}
+                                          className="w-20 px-3 py-2 nb-input text-sm text-center"
+                                          style={nbInputStyle}
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => removeDraftOption(p.id, i)}
+                                          disabled={pcOptionDrafts[p.id].length <= 2 || voteCount > 0}
+                                          title={voteCount > 0 ? `${voteCount} user${voteCount === 1 ? "" : "s"} picked this` : ""}
+                                          className="btn-gray px-2 text-xs disabled:opacity-40"
+                                        >
+                                          {voteCount > 0 ? `🔒 ${voteCount}` : "✕"}
+                                        </button>
+                                      </div>
+                                    );
+                                  })}
+                                  <div className="flex items-center justify-between pt-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => addDraftOption(p.id)}
+                                      disabled={pcOptionDrafts[p.id].length >= 12}
+                                      className="btn-secondary px-3 py-1.5 text-[10px]"
+                                    >
+                                      + Add option
+                                    </button>
+                                    <div className="flex gap-2">
                                       <button
                                         type="button"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          overridePunterCard(p.id, opt.key);
-                                        }}
-                                        disabled={busy}
-                                        className="btn-sticker btn-orange px-3 py-1 text-[10px] disabled:opacity-50"
+                                        onClick={() => cancelEditOptions(p.id)}
+                                        className="btn-gray px-3 py-1.5 text-[10px]"
                                       >
-                                        {busy ? "…" : "Set as correct"}
+                                        Cancel
                                       </button>
-                                    )}
+                                      <button
+                                        type="button"
+                                        onClick={() => saveOptions(p.id)}
+                                        disabled={pcSavingOptionsId === p.id}
+                                        className="btn-sticker btn-orange px-3 py-1.5 text-[10px]"
+                                      >
+                                        {pcSavingOptionsId === p.id ? "Saving…" : "Save options"}
+                                      </button>
+                                    </div>
                                   </div>
-                                );
-                              })}
+                                  <p className="text-[10px] text-[#6b7280] pt-1 leading-relaxed">
+                                    Locked rows have user picks — resolve or void the question first to remove them.
+                                    New options get a fresh internal key automatically.
+                                  </p>
+                                </div>
+                              ) : (
+                                <>
+                                  {p.options.map((opt) => {
+                                    const count = p.responses[opt.key] || 0;
+                                    const isCurrent = !isVoided && p.correctOption === opt.key;
+                                    const busy = pcOverridingId === p.id;
+                                    return (
+                                      <div
+                                        key={opt.key}
+                                        className="flex items-center justify-between gap-2 px-3 py-2"
+                                        style={{
+                                          background: isCurrent ? "rgba(34,197,94,0.12)" : "#0d0d0d",
+                                          border: `1px solid ${isCurrent ? "#22c55e" : "#2a2a2a"}`,
+                                          borderRadius: 4,
+                                        }}
+                                      >
+                                        <div className="flex-1 text-xs">
+                                          <span className="text-white font-bold">{opt.label}</span>
+                                          <span className="text-[#9ca3af] ml-2">{opt.points}pts</span>
+                                        </div>
+                                        <span className="text-[#9ca3af] text-[11px]">{count} vote{count === 1 ? "" : "s"}</span>
+                                        {isCurrent ? (
+                                          <span className="text-[10px] font-black uppercase tracking-wider text-[#22c55e]">
+                                            ✓ Current
+                                          </span>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              overridePunterCard(p.id, opt.key);
+                                            }}
+                                            disabled={busy}
+                                            className="btn-sticker btn-orange px-3 py-1 text-[10px] disabled:opacity-50"
+                                          >
+                                            {busy ? "…" : "Set as correct"}
+                                          </button>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                  <div className="pt-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => startEditOptions(p)}
+                                      className="btn-secondary px-3 py-1.5 text-[10px]"
+                                    >
+                                      ✏️ Edit options
+                                    </button>
+                                  </div>
+                                </>
+                              )}
                             </div>
                           )}
                         </div>

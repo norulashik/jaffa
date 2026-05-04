@@ -654,6 +654,159 @@ router.post("/punter-cards/:predictionId/override", authenticateOwner, async (re
   }
 });
 
+// PATCH /owner/punter-cards/:predictionId/options
+//
+// Admin-side editor for the options array on a punter card question.
+// Common use case: minor name mismatches (Ryan Rickleton ↔ Rickelton),
+// adding a player the auto-generator missed, or fixing point values.
+//
+// Safety rules:
+//   - Existing option keys MUST be preserved exactly. Renaming a key
+//     would orphan every UserPrediction.selectedOption pointing at it.
+//   - Removing an option is only allowed when zero users picked it.
+//     Otherwise: 400 with the vote count, prompting the admin to first
+//     resolve / void the question instead.
+//   - New options can be added; the server picks a fresh `key` like
+//     `opt_custom_<n>` to avoid colliding with the existing keyspace.
+//   - Labels and points can be edited freely (display-only / scoring-only
+//     fields; existing UserPredictions remain valid).
+//   - Category-guarded to category === "punter_card".
+//
+// After a successful edit, the backend re-runs writePredictionAggregates
+// (if already resolved) and emits a `predictionResolved` socket so any
+// match-page client viewing the question refetches and renders the new
+// option list.
+router.patch("/punter-cards/:predictionId/options", authenticateOwner, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const predictionId = req.params.predictionId as string;
+    const { options } = req.body as {
+      options?: { key?: string | null; label?: string; points?: number }[];
+    };
+    if (!Array.isArray(options) || options.length < 2) {
+      res.status(400).json({ error: "options must be an array with at least 2 entries" });
+      return;
+    }
+
+    const prediction = await Prediction.findByPk(predictionId);
+    if (!prediction) { res.status(404).json({ error: "Prediction not found" }); return; }
+    if (prediction.category !== "punter_card") {
+      res.status(400).json({ error: "Endpoint only edits punter card questions" });
+      return;
+    }
+
+    const existingByKey = new Map(prediction.options.map((o) => [o.key, o] as const));
+    const seenKeys = new Set<string>();
+    const cleaned: { key: string; label: string; points: number }[] = [];
+
+    // Allocate fresh keys for additions in a stable, collision-free way
+    // (opt_custom_1, opt_custom_2, …). Reading the highest existing
+    // numeric suffix keeps the next-available counter monotonic across
+    // multiple edits.
+    let nextCustom =
+      Math.max(
+        0,
+        ...prediction.options
+          .map((o) => /^opt_custom_(\d+)$/.exec(o.key)?.[1])
+          .filter((n): n is string => !!n)
+          .map((n) => parseInt(n, 10)),
+      ) + 1;
+
+    for (const raw of options) {
+      const label = typeof raw?.label === "string" ? raw.label.trim() : "";
+      const points = Number(raw?.points);
+      if (!label) {
+        res.status(400).json({ error: "Each option needs a non-empty label" });
+        return;
+      }
+      if (!Number.isFinite(points) || points < 1 || points > 500) {
+        res.status(400).json({ error: "Each option's points must be 1-500" });
+        return;
+      }
+      // Existing key → must match an existing option (we don't allow renames).
+      let key = typeof raw?.key === "string" && raw.key ? raw.key.trim() : null;
+      if (key) {
+        if (!existingByKey.has(key)) {
+          res.status(400).json({ error: `Unknown option key: ${key}` });
+          return;
+        }
+      } else {
+        key = `opt_custom_${nextCustom++}`;
+      }
+      if (seenKeys.has(key)) {
+        res.status(400).json({ error: `Duplicate option key in payload: ${key}` });
+        return;
+      }
+      seenKeys.add(key);
+      cleaned.push({ key, label, points });
+    }
+
+    // Vote-safety check: reject removal of any option that's been picked.
+    const removedKeys = [...existingByKey.keys()].filter((k) => !seenKeys.has(k));
+    if (removedKeys.length > 0) {
+      const tallies = await UserPrediction.findAll({
+        where: { predictionId, selectedOption: { [Op.in]: removedKeys } },
+        attributes: ["selectedOption"],
+      });
+      // Mayhem multi-pick stores comma-joined; split + count any token that
+      // hits a removed key.
+      const tally = new Map<string, number>();
+      for (const ua of tallies) {
+        const tokens = (ua.selectedOption || "").split(",").map((s) => s.trim()).filter(Boolean);
+        for (const t of tokens) {
+          if (removedKeys.includes(t)) tally.set(t, (tally.get(t) || 0) + 1);
+        }
+      }
+      const blocked = Array.from(tally.entries()).filter(([, n]) => n > 0);
+      if (blocked.length > 0) {
+        const display = blocked
+          .map(([k, n]) => {
+            const opt = existingByKey.get(k);
+            return `${opt?.label || k} (${n})`;
+          })
+          .join(", ");
+        res.status(400).json({
+          error: `Can't remove options users picked: ${display}. Resolve or void the question first.`,
+        });
+        return;
+      }
+    }
+
+    // If the current correctOption was removed, clear it so a stale answer
+    // doesn't sit on the row. The admin can re-resolve via the override
+    // endpoint after editing.
+    let updates: Record<string, unknown> = { options: cleaned };
+    if (prediction.correctOption && !seenKeys.has(prediction.correctOption)) {
+      updates.correctOption = null;
+      // If removing the correct answer flips the row out of "resolved", a
+      // re-override is needed before scoring runs again. Drop status back
+      // to "open" so the resolver path treats it as unresolved.
+      if (prediction.status === "resolved") updates.status = "open";
+    }
+
+    await prediction.update(updates as any);
+
+    // Refetch + emit so any open client refreshes the option list. Same
+    // socket the override endpoint uses, so the existing predictionResolved
+    // listener fires the cards' re-fetch path.
+    const fresh = await Prediction.findByPk(predictionId);
+    const io = req.app.get("io");
+    const ups = await UserPrediction.findAll({ where: { predictionId }, attributes: ["venueId"] });
+    const venues = [...new Set(ups.map((u) => u.venueId))];
+    for (const venueId of venues) {
+      io.to(`venue:${venueId}:${prediction.matchId}`).emit("predictionResolved", {
+        matchId: prediction.matchId,
+        predictionId,
+        optionsEdited: true,
+      });
+    }
+
+    res.json({ prediction: fresh });
+  } catch (error: any) {
+    console.error("Owner punter-cards options edit error:", error);
+    res.status(500).json({ error: error?.message || "Failed to update options" });
+  }
+});
+
 // Suppress an unused-import warning when sequelize literal isn't used downstream.
 void literal;
 

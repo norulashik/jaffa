@@ -233,6 +233,13 @@ export function squadForTeam(short: string | null | undefined): string[] | null 
 //     a wk; we keep wk explicit).
 //   - Override rows whose name doesn't appear in the static squad are
 //     appended as new players.
+// SquadOverride rows we'll consider for the live punter-card pool: must
+// have been seen in a real ball stream within this window. Anything older
+// is treated as a cameo/rotation that's drifted out of the rotation, and
+// we lean on the static squad + recent-XI frequency instead. 14 days
+// covers an IPL team's typical "miss 1-2 matches and come back" window.
+const STALE_OVERRIDE_DAYS = 14;
+
 export async function squadWithRolesForTeam(short: string | null | undefined): Promise<Player[] | null> {
   if (!short) return null;
   const team = short.toUpperCase();
@@ -242,24 +249,39 @@ export async function squadWithRolesForTeam(short: string | null | undefined): P
   // Lazy-load the model to avoid a circular import (models/index.ts
   // imports utility code, and this file might be reached during model init
   // in pathological test setups).
-  type OverrideRow = { playerName: string; canonicalName: string | null; role: PlayerRole };
+  type OverrideRow = { playerName: string; canonicalName: string | null; role: PlayerRole; lastSeenAt: Date | null };
   let overrides: OverrideRow[] = [];
   try {
     const { SquadOverride } = await import("../models");
     const rows = await SquadOverride.findAll({
       where: { team, removedAt: null },
-      attributes: ["playerName", "canonicalName", "role"],
+      attributes: ["playerName", "canonicalName", "role", "lastSeenAt"],
     });
     overrides = rows.map((r) => ({
       playerName: r.playerName,
       canonicalName: r.canonicalName,
       role: r.role as PlayerRole,
+      lastSeenAt: r.lastSeenAt,
     }));
   } catch {
     // Table may not exist yet on a fresh deploy before sequelize.sync
     // creates it. Fall back to static-only — same behaviour as v1.
     return base;
   }
+
+  // Stale-override prune: a SquadOverride row that's NOT linked back to a
+  // static-squad player (canonicalName is null) AND hasn't been seen in
+  // the last STALE_OVERRIDE_DAYS days is treated as a one-off cameo (e.g.
+  // an injury cover that played once and never again). Drop these so the
+  // punter-card pool doesn't keep surfacing them after they've drifted
+  // out of rotation. Static-linked overrides are kept regardless — they
+  // exist to capture name-spelling drift, not to add new players.
+  const staleCutoff = Date.now() - STALE_OVERRIDE_DAYS * 24 * 60 * 60 * 1000;
+  overrides = overrides.filter((o) => {
+    if (o.canonicalName) return true; // alias of an existing static player — keep
+    if (!o.lastSeenAt) return false;  // no signal at all — drop
+    return new Date(o.lastSeenAt).getTime() >= staleCutoff;
+  });
 
   // Lazy import to avoid a hard dependency from data/ → services/ in the
   // circular-import path. Only used for fuzzy-name dedup below.
