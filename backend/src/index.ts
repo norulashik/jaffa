@@ -243,6 +243,21 @@ async function start() {
     await sequelize.sync({ alter: true });
     console.log("Database synced");
 
+    // One-time-on-boot vacuum for orphaned simulation match data left by
+    // the deleted sim feature. Idempotent — silent no-op when nothing
+    // matches the sim signals (externalId LIKE 'sim:%' OR SIM1/SIM2).
+    try {
+      const { purgeSimulationData } = await import("./services/cleanupSim");
+      const purge = await purgeSimulationData();
+      if (purge.matchesPurged > 0) {
+        console.log(
+          `[Cleanup] Purged ${purge.matchesPurged} sim match(es), ${purge.predictionsPurged} predictions, ${purge.userPredictionsPurged} user picks`,
+        );
+      }
+    } catch (err) {
+      console.error("[Cleanup] sim purge failed:", err);
+    }
+
     await ensureRoomVenue();
 
     await new Promise<void>((resolve, reject) => {
