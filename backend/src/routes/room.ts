@@ -6,6 +6,11 @@ import { ROOM_VENUE_ID } from "../services/roomVenue";
 import { getCurrentRound } from "../services/predictionEngine";
 import sequelize from "../config/database";
 import { backfillSeasonRoomParticipants } from "../services/roomParticipation";
+import {
+  fetchSportsmonkLiveScores,
+  fetchUpcomingFixtures,
+  ensureSportsmonkFixtureImported,
+} from "../services/sportsmonkApi";
 
 const router = Router();
 
@@ -83,15 +88,56 @@ async function buildRoomPayload(roomId: string) {
   };
 }
 
+// Pick an IPL fixture out of a Sportsmonk fixture list. Sportsmonk team
+// codes occasionally drift from the IPL_TEAM_SHORTS whitelist (e.g. some
+// seasons have returned "PB" for Punjab); fall back to a name-substring
+// check so we still surface obvious IPL fixtures.
+function isIplSportsmonkFixture(f: any): boolean {
+  const code1 = (f?.localteam?.data?.code || "").toUpperCase();
+  const code2 = (f?.visitorteam?.data?.code || "").toUpperCase();
+  if (IPL_TEAM_SHORTS.has(code1) && IPL_TEAM_SHORTS.has(code2)) return true;
+  const league = (f?.league?.data?.name || f?.league_name || "").toLowerCase();
+  return league.includes("indian premier league") || league.includes("ipl");
+}
+
 async function findBestSeasonMatch(): Promise<Match | null> {
+  // 1. Try local DB first — covers the common case where the Sportsmonk
+  //    poll loop has already auto-imported today's IPL fixtures.
   const matches = await Match.findAll({
     where: { status: { [Op.in]: ["live", "upcoming"] } },
     order: [["startTime", "ASC"]],
   });
   const ipl = matches.filter(isIplMatch);
-  if (ipl.length === 0) return null;
-  const live = ipl.find((m) => m.status === "live");
-  return live || ipl[0];
+  if (ipl.length > 0) {
+    const live = ipl.find((m) => m.status === "live");
+    return live || ipl[0];
+  }
+
+  // 2. Fallback: lobby's home page merges Sportsmonk live + upcoming on top
+  //    of the DB list, so a freshly-started match can show as ACTIVE BATTLE
+  //    on the home page while not yet existing as a Match row. Mirror that
+  //    here so the season room never lags behind the lobby. Lazy-import
+  //    the first IPL fixture we find; subsequent loads see it via path 1.
+  try {
+    const [liveFixtures, upcomingFixtures] = await Promise.all([
+      fetchSportsmonkLiveScores(),
+      fetchUpcomingFixtures(),
+    ]);
+    const candidates = [...liveFixtures, ...upcomingFixtures].filter(isIplSportsmonkFixture);
+    candidates.sort((a, b) => {
+      const aLive = a.status && a.status !== "NS" && a.status !== "Finished" ? 0 : 1;
+      const bLive = b.status && b.status !== "NS" && b.status !== "Finished" ? 0 : 1;
+      if (aLive !== bLive) return aLive - bLive;
+      return new Date(a.starting_at).getTime() - new Date(b.starting_at).getTime();
+    });
+    for (const f of candidates) {
+      const imported = await ensureSportsmonkFixtureImported(String(f.id));
+      if (imported) return imported;
+    }
+  } catch (err) {
+    console.error("[SeasonRoom] Sportsmonk fallback failed:", err);
+  }
+  return null;
 }
 
 async function findSeasonAnchorMatch(): Promise<Match | null> {

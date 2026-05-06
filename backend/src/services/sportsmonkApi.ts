@@ -1131,6 +1131,76 @@ async function autoImportTodayFixtures(): Promise<void> {
   }
 }
 
+// On-demand single-fixture import. Used by callers (e.g. season-room
+// resolver) that need a particular Sportsmonk fixture to exist as a local
+// Match row right now and can't wait for the next 30-min `autoImportToday`
+// scan. Idempotent — returns the existing row if already imported.
+//
+// Differs from autoImportTodayFixtures only in that it bypasses the day-
+// level debounce and operates on a single fixtureId.
+export async function ensureSportsmonkFixtureImported(
+  fixtureId: string,
+): Promise<Match | null> {
+  const existing = await Match.findOne({ where: { externalId: fixtureId } });
+  if (existing) return existing;
+
+  try {
+    const cfg = sportsmonkConfig();
+    const fixtureRes = await fetch(
+      `${cfg.base}/fixtures/${fixtureId}?api_token=${cfg.token}`,
+      { headers: cfg.headers },
+    );
+    const fixtureData: any = await fixtureRes.json();
+    const fixture = fixtureData?.data;
+    if (!fixture) return null;
+
+    const team1 = await fetchTeamData(fixture.localteam_id);
+    const team2 = await fetchTeamData(fixture.visitorteam_id);
+    const fStatus =
+      fixture.status === "Finished" ? "completed" :
+      fixture.status === "NS" ? "upcoming" : "live";
+
+    const match = await Match.create({
+      externalId: fixtureId,
+      team1: team1.name,
+      team2: team2.name,
+      team1Short: team1.code || "T1",
+      team2Short: team2.code || "T2",
+      team1Players: [],
+      team2Players: [],
+      startTime: new Date(fixture.starting_at),
+      status: fStatus as any,
+      scoreData: {
+        venue: fixture.venue_id,
+        team1Img: team1.image_path || "",
+        team2Img: team2.image_path || "",
+      } as any,
+    });
+
+    const preMatchQuestions = generatePreMatchPredictions(
+      match.id, match.team1, match.team2,
+      match.team1Short, match.team2Short,
+      match.team1Players, match.team2Players,
+    );
+    for (const q of preMatchQuestions) {
+      await Prediction.create(q as any);
+    }
+    if (match.startTime) {
+      const opensAt = new Date(new Date(match.startTime).getTime() - 45 * 60_000);
+      await Prediction.update(
+        { opensAt },
+        { where: { matchId: match.id, category: "pre_match" } },
+      );
+    }
+
+    console.log(`[AutoImport] ${match.team1Short} vs ${match.team2Short} imported (on-demand fixture ${fixtureId})`);
+    return match;
+  } catch (err) {
+    console.error(`[AutoImport] On-demand import failed for fixture ${fixtureId}:`, err);
+    return null;
+  }
+}
+
 // Match-end flow extracted so it can be triggered both from Sportsmonk's
 // "Finished" status and from our own end-of-match detection (target chased
 // etc.). Idempotent: bails out if status is already "completed".

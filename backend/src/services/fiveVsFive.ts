@@ -25,6 +25,7 @@ import {
   User,
   FiveVsFiveRoom,
   FiveVsFiveSlot,
+  BananaLedger,
 } from "../models";
 import sequelize from "../config/database";
 import {
@@ -328,11 +329,17 @@ export async function ensure5v5Card(match: Match): Promise<{ created: number; ex
 // Returns the correct option key for one prediction, or null if unresolvable
 // (e.g. squad pool missing, ball data not present yet). Mirrors
 // computeCorrectFromBalls in punterCard.ts. Same fixture/allBalls inputs.
+//
+// `matchPredictions` is the full match-scoped 5v5 prediction set — needed
+// for cases that read sibling-question state (e.g. architect_sixes pulls
+// the trio's player names from the architect_topscorer question's options
+// instead of trying to re-derive role assignments from the squad pool).
 export function compute5v5CorrectOption(
   prediction: Prediction,
   fixture: any,
   allBalls: any[],
   match?: Match | null,
+  matchPredictions: Prediction[] = [],
 ): string | null {
   if (!match) return null;
   const tk = prediction.templateKey || "";
@@ -464,12 +471,33 @@ export function compute5v5CorrectOption(
       return best.key || null;
     }
     case `5v5_architect_sixes_${teamSide}`: {
-      // Re-extract the architect trio from the matching topscorer question's
-      // options (always generated alongside this template).
-      const trioPred = await_findSiblingArchitect(prediction);
-      const names = trioPred?.options?.filter((o) => ["m1", "m2", "m3"].includes(o.key)).map((o) => o.label) || [];
-      if (names.length === 0) return null;
-      const sixes = sixesByBatterNames(allBalls, names);
+      // Trio names live on the SIBLING architect_topscorer question's
+      // options (one per middle-order batter, keys m1/m2/m3, labels =
+      // player names). Reading from there is more robust than re-deriving
+      // the trio from the squad pool because squadSync may have shuffled
+      // the assignment after the card was generated.
+      const sibling = matchPredictions.find(
+        (p) =>
+          p.matchId === prediction.matchId &&
+          p.templateKey === `5v5_architect_topscorer_${teamSide}`,
+      );
+      const names = sibling?.options
+        ?.filter((o) => ["m1", "m2", "m3"].includes(o.key))
+        .map((o) => o.label) || [];
+      // Defensive fallback: if the sibling row is somehow missing, parse
+      // from the architect_runs question text ("Combined runs of A, B & C").
+      let trioNames = names;
+      if (trioNames.length === 0) {
+        const runsQ = matchPredictions.find(
+          (p) =>
+            p.matchId === prediction.matchId &&
+            p.templateKey === `5v5_architect_runs_${teamSide}`,
+        );
+        const m = runsQ?.question.match(/runs of ([\w. '-]+), ([\w. '-]+) & ([\w. '-]+)/);
+        if (m) trioNames = [m[1].trim(), m[2].trim(), m[3].trim()];
+      }
+      if (trioNames.length === 0) return null;
+      const sixes = sixesByBatterNames(allBalls, trioNames);
       return sixes >= 5 ? "yes" : "no";
     }
 
@@ -559,17 +587,6 @@ export function compute5v5CorrectOption(
   return null;
 }
 
-// `compute5v5CorrectOption` is sync; this `async`-named helper is a tiny
-// shim so the architect_sixes case can read its sibling architect_topscorer
-// prediction. We cache the lookup per call by closing over a Map to keep
-// resolution cost O(rooms × predictions).
-function await_findSiblingArchitect(_pred: Prediction): { options: { key: string; label: string }[] } | null {
-  // Sibling lookup not needed at runtime — the architect_sixes case reads
-  // names directly from question text in v2. Returning null here makes the
-  // sixes question fall back to "no" if names can't be parsed; safe default.
-  return null;
-}
-
 // ── Match-end resolution ────────────────────────────────────────────
 
 // Resolve all 5v5 rooms for a finished match.
@@ -599,7 +616,7 @@ export async function resolve5v5Match(
 
   for (const pred of predictions) {
     if (pred.correctOption) continue;
-    const correct = compute5v5CorrectOption(pred, fixture, allBalls, match);
+    const correct = compute5v5CorrectOption(pred, fixture, allBalls, match, predictions);
     if (!correct) continue;
     await pred.update({ correctOption: correct, status: "resolved" });
   }
@@ -779,6 +796,123 @@ export async function voidUnfilled5v5Rooms(matchId: string, io: SocketIOServer):
     io.to(`5v5:${room.id}`).emit("5v5.voided", { roomId: room.id, reason: "unfilled" });
     console.log(`[5v5] voided room ${room.id} (${filled}/${TOTAL_SLOTS} slots filled at match start)`);
   }
+}
+
+// ── Admin override: re-settle a single completed room ───────────────
+//
+// Walks back the previous banana grants for `roomId`, then re-runs the
+// standard settle5v5Room pass so the role-winner / team-winner / MOTM
+// math + ledger writes flow through exactly one code path.
+//
+// Reverse-then-resettle is required because awardBananas is idempotent on
+// (userId, reason, refId): a second call with the same key is a silent
+// no-op, so without clearing the prior ledger rows the new awards would
+// never land. We delete the old rows + decrement User.bananas in one
+// transaction so a partial reversal can't strand the user mid-balance.
+export async function reSettle5v5Room(
+  roomId: string,
+  io: SocketIOServer,
+): Promise<void> {
+  const room = await FiveVsFiveRoom.findByPk(roomId);
+  if (!room) return;
+  if (room.status !== "completed") {
+    // Waiting/active rooms haven't issued any bananas yet — the next
+    // resolve5v5Match cycle will pick up the new correctOption naturally.
+    return;
+  }
+
+  await sequelize.transaction(async (t) => {
+    const oldRows = await BananaLedger.findAll({
+      where: {
+        refType: "five_vs_five_room",
+        reason: { [Op.in]: ["5v5_role_win", "5v5_team_win"] },
+        refId: { [Op.like]: `${roomId}:%` },
+      },
+      transaction: t,
+    });
+
+    // Aggregate refunds per user so we hit User a single time per user.
+    const refundByUser = new Map<string, number>();
+    for (const row of oldRows) {
+      refundByUser.set(row.userId, (refundByUser.get(row.userId) || 0) + row.delta);
+    }
+
+    for (const [userId, delta] of refundByUser) {
+      const user = await User.findByPk(userId, { transaction: t, lock: t.LOCK.UPDATE });
+      if (!user) continue;
+      const next = Math.max(0, (user.bananas || 0) - delta);
+      await user.update({ bananas: next }, { transaction: t });
+    }
+
+    if (oldRows.length > 0) {
+      await BananaLedger.destroy({
+        where: { id: { [Op.in]: oldRows.map((r) => r.id) } },
+        transaction: t,
+      });
+    }
+
+    // Reset settlement state so settle5v5Room runs the cleanup cleanly.
+    await room.update(
+      { status: "active", settledAt: null, resultSummary: null },
+      { transaction: t },
+    );
+  });
+
+  // Reload outside the txn — settle5v5Room manages its own lifecycle.
+  const slots = await FiveVsFiveSlot.findAll({ where: { roomId } });
+  const matchPredictions = await Prediction.findAll({
+    where: { matchId: room.matchId, category: FIVE_V_FIVE_CATEGORY },
+  });
+  await settle5v5Room(room, slots, matchPredictions, io);
+  console.log(`[5v5] re-settled room ${roomId}`);
+}
+
+// ── Admin override: re-resolve a single 5v5 prediction ──────────────
+//
+// Sets a new correctOption on a prediction and replays settlement on
+// every completed room of that match. Active/waiting rooms need no
+// special handling — they pick up the new correctOption on the next
+// resolve5v5Match polling tick.
+export async function reResolveFiveVsFivePrediction(
+  prediction: Prediction,
+  newCorrectOption: string,
+  io: SocketIOServer,
+): Promise<{ changed: boolean; roomsResettled: number }> {
+  const validKeys = new Set(prediction.options.map((o) => o.key));
+  if (!validKeys.has(newCorrectOption)) {
+    throw new Error("newCorrectOption must match one of the option keys");
+  }
+
+  const noChange = prediction.correctOption === newCorrectOption && prediction.status === "resolved";
+  if (!noChange) {
+    await prediction.update({ correctOption: newCorrectOption, status: "resolved" });
+  }
+
+  const completedRooms = await FiveVsFiveRoom.findAll({
+    where: { matchId: prediction.matchId, status: "completed" },
+  });
+
+  for (const room of completedRooms) {
+    try {
+      await reSettle5v5Room(room.id, io);
+    } catch (err) {
+      // Don't strand the rest of the matchhistorically — log + continue.
+      console.error(`[5v5] re-settle failed for room ${room.id}:`, err);
+    }
+  }
+
+  // Notify any open match-page subscribers so resolved-question UI updates
+  // without a hard refresh. Mirrors the punter-card override emit.
+  try {
+    io.to(`match:${prediction.matchId}`).emit("predictionResolved", {
+      predictionId: prediction.id,
+      correctOption: newCorrectOption,
+    });
+  } catch {
+    // Non-blocking.
+  }
+
+  return { changed: !noChange, roomsResettled: completedRooms.length };
 }
 
 // Suppress unused-import lint for sequelize when no transactions fire on

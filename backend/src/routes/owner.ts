@@ -11,6 +11,11 @@ import { JWT_SECRET, OWNER_USER, OWNER_PASS } from "../config/secrets";
 import { parsePagination, paginationMeta } from "../utils/pagination";
 import { reResolvePrediction } from "../services/pointsEngine";
 import { reResolvePunterCardAnswer } from "../services/punterCard";
+import {
+  reResolveFiveVsFivePrediction,
+  FIVE_V_FIVE_CATEGORY,
+  ROLE_DEFS,
+} from "../services/fiveVsFive";
 
 const router = Router();
 
@@ -804,6 +809,275 @@ router.patch("/punter-cards/:predictionId/options", authenticateOwner, async (re
   } catch (error: any) {
     console.error("Owner punter-cards options edit error:", error);
     res.status(500).json({ error: error?.message || "Failed to update options" });
+  }
+});
+
+// ── 5v5 Admin (mirrors Punter Card admin trio) ──────────────────────
+//
+// Three endpoints for owner-side correction of 5v5 questions:
+//   GET  /owner/5v5-cards/:matchId               → list with tallies
+//   POST /owner/5v5-cards/:predictionId/override → set correctOption
+//   PATCH /owner/5v5-cards/:predictionId/options → edit option list
+//
+// Re-settlement flows through reResolveFiveVsFivePrediction →
+// reSettle5v5Room so role-winner / team-winner / banana math stays in
+// one place (fiveVsFive.settle5v5Room) — admin overrides never duplicate
+// scoring logic.
+
+// Internal: derive (teamSide, role) from a 5v5 templateKey.
+// Format: `5v5_${roleKey}_${question}_${teamSide}` where teamSide is
+// the trailing token. roleKey is one of maestro/igniter/architect/
+// stormcaller/hammer.
+function parseFiveVsFiveTemplateKey(templateKey: string | null): {
+  teamSide: "team1" | "team2" | null;
+  role: number | null;
+  roleName: string | null;
+} {
+  if (!templateKey) return { teamSide: null, role: null, roleName: null };
+  const parts = templateKey.split("_");
+  if (parts.length < 4 || parts[0] !== "5v5") {
+    return { teamSide: null, role: null, roleName: null };
+  }
+  const teamSide = parts[parts.length - 1] === "team1"
+    ? "team1"
+    : parts[parts.length - 1] === "team2"
+      ? "team2"
+      : null;
+  const roleKey = parts[1];
+  const def = ROLE_DEFS.find((r) => r.key === roleKey);
+  return {
+    teamSide,
+    role: def ? def.role : null,
+    roleName: def ? def.title : null,
+  };
+}
+
+router.get("/5v5-cards/:matchId", authenticateOwner, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const matchId = req.params.matchId as string;
+
+    const predictions = await Prediction.findAll({
+      where: { matchId, category: FIVE_V_FIVE_CATEGORY },
+      order: [["createdAt", "ASC"]],
+    });
+
+    if (predictions.length === 0) {
+      res.json({ predictions: [] });
+      return;
+    }
+
+    // Single grouped query for per-option vote tallies — same shape the
+    // punter-card list uses; avoids an N+1 across 30 5v5 questions.
+    const tallies = await UserPrediction.findAll({
+      where: { predictionId: { [Op.in]: predictions.map((p) => p.id) } },
+      attributes: [
+        "predictionId",
+        "selectedOption",
+        [fn("COUNT", col("id")), "count"],
+      ],
+      group: ["predictionId", "selectedOption"],
+      raw: true,
+    }) as unknown as { predictionId: string; selectedOption: string; count: string | number }[];
+
+    const tallyMap = new Map<string, Record<string, number>>();
+    for (const row of tallies) {
+      const inner = tallyMap.get(row.predictionId) || {};
+      inner[row.selectedOption] = Number(row.count);
+      tallyMap.set(row.predictionId, inner);
+    }
+
+    res.json({
+      predictions: predictions.map((p) => {
+        const meta = parseFiveVsFiveTemplateKey(p.templateKey);
+        return {
+          ...p.toJSON(),
+          responses: tallyMap.get(p.id) || {},
+          totalResponses: Object.values(tallyMap.get(p.id) || {}).reduce((a, b) => a + b, 0),
+          teamSide: meta.teamSide,
+          role: meta.role,
+          roleName: meta.roleName,
+        };
+      }),
+    });
+  } catch (error) {
+    console.error("Owner 5v5-cards list error:", error);
+    res.status(500).json({ error: "Failed to list 5v5 cards" });
+  }
+});
+
+router.post("/5v5-cards/:predictionId/override", authenticateOwner, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const predictionId = req.params.predictionId as string;
+    const { correctOption } = req.body as { correctOption?: string };
+
+    if (!correctOption || typeof correctOption !== "string") {
+      res.status(400).json({ error: "correctOption is required" });
+      return;
+    }
+
+    const prediction = await Prediction.findByPk(predictionId);
+    if (!prediction) { res.status(404).json({ error: "Prediction not found" }); return; }
+
+    // Category guard: this endpoint mutates 5v5 answers only.
+    if (prediction.category !== FIVE_V_FIVE_CATEGORY) {
+      res.status(400).json({ error: "Endpoint only overrides 5v5 questions" });
+      return;
+    }
+
+    const validKeys = new Set(prediction.options.map((o) => o.key));
+    if (!validKeys.has(correctOption)) {
+      res.status(400).json({ error: "correctOption must match one of the option keys" });
+      return;
+    }
+
+    const io = req.app.get("io");
+
+    // Already-resolved → run the full re-settlement (reverse + replay).
+    // Otherwise just stamp correctOption + status; settlement happens at
+    // match-end via resolve5v5Match.
+    if (prediction.status === "resolved") {
+      const result = await reResolveFiveVsFivePrediction(prediction, correctOption, io);
+      res.json(result);
+    } else {
+      await prediction.update({ correctOption, status: "resolved" });
+      res.json({ changed: true, roomsResettled: 0 });
+    }
+  } catch (error: any) {
+    console.error("Owner 5v5-cards override error:", error);
+    res.status(500).json({ error: error?.message || "Failed to override 5v5 answer" });
+  }
+});
+
+router.patch("/5v5-cards/:predictionId/options", authenticateOwner, async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const predictionId = req.params.predictionId as string;
+    const { options } = req.body as {
+      options?: { key?: string | null; label?: string; points?: number }[];
+    };
+    if (!Array.isArray(options) || options.length < 2) {
+      res.status(400).json({ error: "options must be an array with at least 2 entries" });
+      return;
+    }
+
+    const prediction = await Prediction.findByPk(predictionId);
+    if (!prediction) { res.status(404).json({ error: "Prediction not found" }); return; }
+    if (prediction.category !== FIVE_V_FIVE_CATEGORY) {
+      res.status(400).json({ error: "Endpoint only edits 5v5 questions" });
+      return;
+    }
+
+    const existingByKey = new Map(prediction.options.map((o) => [o.key, o] as const));
+    const seenKeys = new Set<string>();
+    const cleaned: { key: string; label: string; points: number }[] = [];
+
+    let nextCustom =
+      Math.max(
+        0,
+        ...prediction.options
+          .map((o) => /^opt_custom_(\d+)$/.exec(o.key)?.[1])
+          .filter((n): n is string => !!n)
+          .map((n) => parseInt(n, 10)),
+      ) + 1;
+
+    for (const raw of options) {
+      const label = typeof raw?.label === "string" ? raw.label.trim() : "";
+      const points = Number(raw?.points);
+      if (!label) {
+        res.status(400).json({ error: "Each option needs a non-empty label" });
+        return;
+      }
+      if (!Number.isFinite(points) || points < 1 || points > 500) {
+        res.status(400).json({ error: "Each option's points must be 1-500" });
+        return;
+      }
+      let key = typeof raw?.key === "string" && raw.key ? raw.key.trim() : null;
+      if (key) {
+        if (!existingByKey.has(key)) {
+          res.status(400).json({ error: `Unknown option key: ${key}` });
+          return;
+        }
+      } else {
+        key = `opt_custom_${nextCustom++}`;
+      }
+      if (seenKeys.has(key)) {
+        res.status(400).json({ error: `Duplicate option key in payload: ${key}` });
+        return;
+      }
+      seenKeys.add(key);
+      cleaned.push({ key, label, points });
+    }
+
+    // Vote-safety: reject removal of any option that's been picked.
+    const removedKeys = [...existingByKey.keys()].filter((k) => !seenKeys.has(k));
+    if (removedKeys.length > 0) {
+      const tallies = await UserPrediction.findAll({
+        where: { predictionId, selectedOption: { [Op.in]: removedKeys } },
+        attributes: ["selectedOption"],
+      });
+      // 5v5 doesn't use Mayhem multi-pick today, but mirror the comma-split
+      // tally so this stays consistent with the punter-card admin shape.
+      const tally = new Map<string, number>();
+      for (const ua of tallies) {
+        const tokens = (ua.selectedOption || "").split(",").map((s) => s.trim()).filter(Boolean);
+        for (const t of tokens) {
+          if (removedKeys.includes(t)) tally.set(t, (tally.get(t) || 0) + 1);
+        }
+      }
+      const blocked = Array.from(tally.entries()).filter(([, n]) => n > 0);
+      if (blocked.length > 0) {
+        const display = blocked
+          .map(([k, n]) => {
+            const opt = existingByKey.get(k);
+            return `${opt?.label || k} (${n})`;
+          })
+          .join(", ");
+        res.status(400).json({
+          error: `Can't remove options users picked: ${display}. Resolve or void the question first.`,
+        });
+        return;
+      }
+    }
+
+    let updates: Record<string, unknown> = { options: cleaned };
+    let droppedCorrect = false;
+    if (prediction.correctOption && !seenKeys.has(prediction.correctOption)) {
+      updates.correctOption = null;
+      if (prediction.status === "resolved") {
+        updates.status = "open";
+        droppedCorrect = true;
+      }
+    }
+
+    const wasResolved = prediction.status === "resolved";
+    const previousCorrectOption = prediction.correctOption;
+
+    await prediction.update(updates as any);
+
+    // If the question was already resolved AND the correct option still
+    // exists in the new option list, re-flow scoring through every
+    // completed room — option label/points changes can shift role-winner
+    // and team-winner outcomes even when the same key remains correct.
+    let roomsResettled = 0;
+    const io = req.app.get("io");
+    if (wasResolved && !droppedCorrect && previousCorrectOption) {
+      const fresh = await Prediction.findByPk(predictionId);
+      if (fresh) {
+        const result = await reResolveFiveVsFivePrediction(fresh, previousCorrectOption, io);
+        roomsResettled = result.roomsResettled;
+      }
+    }
+
+    const fresh = await Prediction.findByPk(predictionId);
+    io.to(`match:${prediction.matchId}`).emit("predictionResolved", {
+      matchId: prediction.matchId,
+      predictionId,
+      optionsEdited: true,
+    });
+
+    res.json({ prediction: fresh, roomsResettled, droppedCorrect });
+  } catch (error: any) {
+    console.error("Owner 5v5-cards options edit error:", error);
+    res.status(500).json({ error: error?.message || "Failed to update 5v5 options" });
   }
 });
 

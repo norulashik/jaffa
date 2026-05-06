@@ -36,6 +36,20 @@ type PunterCardRow = {
   totalResponses: number;
 };
 
+type FiveVsFiveCardRow = {
+  id: string;
+  question: string;
+  templateKey: string | null;
+  status: "open" | "locked" | "resolved" | "voided";
+  correctOption: string | null;
+  options: { key: string; label: string; points: number }[];
+  responses: Record<string, number>;
+  totalResponses: number;
+  teamSide: "team1" | "team2" | null;
+  role: number | null;
+  roleName: string | null;
+};
+
 type KongPrediction = {
   id: string;
   matchId: string;
@@ -146,6 +160,17 @@ export default function OwnerPortal() {
     Record<string, { key: string | null; label: string; points: string }[]>
   >({});
   const [pcSavingOptionsId, setPcSavingOptionsId] = useState<string | null>(null);
+
+  /* ── 5v5 Admin ────────────────────────────────────────────── */
+  const [fvfMatchId, setFvfMatchId] = useState("");
+  const [fvfList, setFvfList] = useState<FiveVsFiveCardRow[]>([]);
+  const [fvfLoading, setFvfLoading] = useState(false);
+  const [fvfOverridingId, setFvfOverridingId] = useState<string | null>(null);
+  const [fvfExpandedId, setFvfExpandedId] = useState<string>("");
+  const [fvfOptionDrafts, setFvfOptionDrafts] = useState<
+    Record<string, { key: string | null; label: string; points: string }[]>
+  >({});
+  const [fvfSavingOptionsId, setFvfSavingOptionsId] = useState<string | null>(null);
 
   /* ── Kong ────────────────────────────────────────────────── */
   const [kongMatchId, setKongMatchId] = useState("");
@@ -412,6 +437,132 @@ export default function OwnerPortal() {
     }
   };
 
+  /* ── 5v5 admin loaders/actions (mirrors punter-card admin) ── */
+  const loadFiveVsFive = useCallback(async (mid: string) => {
+    if (!mid) { setFvfList([]); return; }
+    setFvfLoading(true);
+    try {
+      const res = await ownerFetch(`/owner/5v5-cards/${mid}`);
+      if (res.ok) {
+        const data = await res.json();
+        setFvfList(data.predictions || []);
+      } else {
+        setFvfList([]);
+      }
+    } catch {
+      setFvfList([]);
+    } finally {
+      setFvfLoading(false);
+    }
+  }, [ownerFetch]);
+
+  const overrideFiveVsFive = async (predictionId: string, optionKey: string) => {
+    const pendingId = toast.loading("Updating answer & re-settling rooms…");
+    setFvfOverridingId(predictionId);
+    try {
+      const res = await ownerFetch(`/owner/5v5-cards/${predictionId}/override`, {
+        method: "POST",
+        body: JSON.stringify({ correctOption: optionKey }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        if (data.changed === false) {
+          toast("No change — option already marked correct", { id: pendingId });
+        } else {
+          const n = data.roomsResettled || 0;
+          toast.success(
+            n > 0
+              ? `Updated — re-settled ${n} room${n === 1 ? "" : "s"}`
+              : "Updated — settlement deferred until match end",
+            { id: pendingId },
+          );
+        }
+        loadFiveVsFive(fvfMatchId);
+      } else {
+        toast.error(data.error || "Override failed", { id: pendingId });
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Override failed", { id: pendingId });
+    } finally {
+      setFvfOverridingId(null);
+    }
+  };
+
+  const startEditFvfOptions = (p: FiveVsFiveCardRow) => {
+    setFvfOptionDrafts((prev) => ({
+      ...prev,
+      [p.id]: p.options.map((o) => ({ key: o.key, label: o.label, points: String(o.points) })),
+    }));
+  };
+  const cancelEditFvfOptions = (predId: string) => {
+    setFvfOptionDrafts((prev) => {
+      const next = { ...prev };
+      delete next[predId];
+      return next;
+    });
+  };
+  const updateFvfDraftField = (predId: string, idx: number, patch: Partial<{ label: string; points: string }>) => {
+    setFvfOptionDrafts((prev) => {
+      const arr = prev[predId];
+      if (!arr) return prev;
+      const next = [...arr];
+      next[idx] = { ...next[idx], ...patch };
+      return { ...prev, [predId]: next };
+    });
+  };
+  const addFvfDraftOption = (predId: string) => {
+    setFvfOptionDrafts((prev) => {
+      const arr = prev[predId];
+      if (!arr || arr.length >= 12) return prev;
+      return { ...prev, [predId]: [...arr, { key: null, label: "", points: "20" }] };
+    });
+  };
+  const removeFvfDraftOption = (predId: string, idx: number) => {
+    setFvfOptionDrafts((prev) => {
+      const arr = prev[predId];
+      if (!arr || arr.length <= 2) return prev;
+      return { ...prev, [predId]: arr.filter((_, i) => i !== idx) };
+    });
+  };
+  const saveFvfOptions = async (predId: string) => {
+    const draft = fvfOptionDrafts[predId];
+    if (!draft) return;
+    if (draft.length < 2) { toast.error("Need at least 2 options"); return; }
+    const payload = draft.map((o) => ({
+      key: o.key,
+      label: o.label.trim(),
+      points: Number(o.points),
+    }));
+    if (payload.some((o) => !o.label)) { toast.error("Every option needs a label"); return; }
+    if (payload.some((o) => !Number.isFinite(o.points) || o.points < 1 || o.points > 500)) {
+      toast.error("Points must be 1-500"); return;
+    }
+    setFvfSavingOptionsId(predId);
+    try {
+      const res = await ownerFetch(`/owner/5v5-cards/${predId}/options`, {
+        method: "PATCH",
+        body: JSON.stringify({ options: payload }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const n = data.roomsResettled || 0;
+        toast.success(
+          n > 0
+            ? `Options updated — re-settled ${n} room${n === 1 ? "" : "s"}`
+            : "Options updated",
+        );
+        cancelEditFvfOptions(predId);
+        loadFiveVsFive(fvfMatchId);
+      } else {
+        toast.error(data.error || "Update failed");
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Update failed");
+    } finally {
+      setFvfSavingOptionsId(null);
+    }
+  };
+
   /* ── Auto-refresh every 15s ──────────────────────────────── */
   useEffect(() => {
     if (isLoggedIn && token) {
@@ -444,6 +595,15 @@ export default function OwnerPortal() {
       return () => clearInterval(interval);
     }
   }, [isLoggedIn, token, pcMatchId, loadPunterCards]);
+
+  /* Reload 5v5 list when admin switches selected match in Tools tab. */
+  useEffect(() => {
+    if (isLoggedIn && token && fvfMatchId) {
+      loadFiveVsFive(fvfMatchId);
+      const interval = setInterval(() => loadFiveVsFive(fvfMatchId), 8000);
+      return () => clearInterval(interval);
+    }
+  }, [isLoggedIn, token, fvfMatchId, loadFiveVsFive]);
 
   /* ── Venue filter/search triggers reload ─────────────────── */
   useEffect(() => {
@@ -1759,7 +1919,7 @@ export default function OwnerPortal() {
                 )}
 
                 {pcList.length > 0 && (
-                  <div className="space-y-2">
+                  <div className="space-y-2" data-pc-list>
                     {pcList.map((p) => {
                       // Voided punter card questions are stored as
                       // status="resolved", correctOption="__void__". For the
@@ -1956,6 +2116,336 @@ export default function OwnerPortal() {
                     })}
                   </div>
                 )}
+              </div>
+
+              {/* 🦍 5v5 Question Admin — mirrors Punter Card Admin but for
+                  5v5 mode. Calls /owner/5v5-cards/:matchId for the grouped
+                  list and /owner/5v5-cards/:predictionId/{override,options}
+                  for changes. Override flows through reSettle5v5Room so
+                  bananas + leaderboard stay consistent across every
+                  completed room of the match. */}
+              <div className="game-card p-6 space-y-4">
+                <div>
+                  <h3 className="text-lg text-white" style={{ fontFamily: "Bungee" }}>
+                    🦍 5v5 Question Admin
+                  </h3>
+                  <p className="text-[#9ca3af] text-xs font-bold mt-1">
+                    Pick a match → review every troop pick → override anything wrong. Bananas + leaderboards recompute live.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-[#9ca3af] mb-1.5 text-xs font-black uppercase tracking-wider">
+                    Match
+                  </label>
+                  {(() => {
+                    const arr = Array.isArray(matches) ? matches : [];
+                    const fmt = (iso: string | null | undefined) => {
+                      if (!iso) return "";
+                      const d = new Date(iso);
+                      const now = new Date();
+                      const sameDay = d.toDateString() === now.toDateString();
+                      const tmrw = new Date(now);
+                      tmrw.setDate(tmrw.getDate() + 1);
+                      const isTmrw = d.toDateString() === tmrw.toDateString();
+                      const time = d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+                      if (sameDay) return `Today ${time}`;
+                      if (isTmrw) return `Tomorrow ${time}`;
+                      return `${d.toLocaleDateString("en-IN", { day: "numeric", month: "short" })} ${time}`;
+                    };
+                    const upcoming = arr
+                      .filter((m: any) => m.status === "upcoming")
+                      .sort((a: any, b: any) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+                    const live = arr.filter((m: any) => m.status === "live");
+                    const completed = arr
+                      .filter((m: any) => m.status === "completed")
+                      .sort((a: any, b: any) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())
+                      .slice(0, 15);
+                    return (
+                      <select
+                        value={fvfMatchId}
+                        onChange={(e) => setFvfMatchId(e.target.value)}
+                        className="w-full px-3 py-3 nb-input"
+                        style={nbInputStyle}
+                      >
+                        <option value="">Pick a match…</option>
+                        {upcoming.length > 0 && (
+                          <optgroup label="🌅  Upcoming">
+                            {upcoming.map((m: any) => (
+                              <option key={m.id} value={m.id}>
+                                {(m.team1Short || m.team1)} vs {(m.team2Short || m.team2)} · {fmt(m.startTime)}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {live.length > 0 && (
+                          <optgroup label="🔴  Live now">
+                            {live.map((m: any) => (
+                              <option key={m.id} value={m.id}>
+                                {(m.team1Short || m.team1)} vs {(m.team2Short || m.team2)}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {completed.length > 0 && (
+                          <optgroup label="✅  Recently completed">
+                            {completed.map((m: any) => (
+                              <option key={m.id} value={m.id}>
+                                {(m.team1Short || m.team1)} vs {(m.team2Short || m.team2)} · {fmt(m.startTime)}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </select>
+                    );
+                  })()}
+                </div>
+
+                {!fvfMatchId && (
+                  <p className="text-[#6b7280] text-xs">
+                    Pick a match to see its 5v5 troop picks (5 roles × 3 Qs × 2 teams = 30 questions).
+                  </p>
+                )}
+
+                {fvfMatchId && fvfLoading && fvfList.length === 0 && (
+                  <p className="text-[#9ca3af] text-xs">Loading 5v5 questions…</p>
+                )}
+
+                {fvfMatchId && !fvfLoading && fvfList.length === 0 && (
+                  <p className="text-[#6b7280] text-xs">
+                    No 5v5 card found for this match.
+                  </p>
+                )}
+
+                {fvfList.length > 0 && (() => {
+                  // Group by (teamSide, role) so the admin scans one role
+                  // matchup at a time. Sort: team1 first → team2; within
+                  // team, role 1 → 5; within role, predictions in createdAt
+                  // order (already sorted server-side).
+                  type GroupKey = `${"team1" | "team2"}::${number}`;
+                  const groups = new Map<GroupKey, FiveVsFiveCardRow[]>();
+                  for (const row of fvfList) {
+                    if (!row.teamSide || row.role == null) continue;
+                    const key: GroupKey = `${row.teamSide}::${row.role}`;
+                    const list = groups.get(key) || [];
+                    list.push(row);
+                    groups.set(key, list);
+                  }
+                  const sortedKeys = Array.from(groups.keys()).sort((a, b) => {
+                    const [ta, ra] = a.split("::");
+                    const [tb, rb] = b.split("::");
+                    if (ta !== tb) return ta < tb ? -1 : 1;
+                    return Number(ra) - Number(rb);
+                  });
+
+                  return (
+                    <div className="space-y-4">
+                      {sortedKeys.map((key) => {
+                        const [teamSide, roleStr] = key.split("::");
+                        const rows = groups.get(key as GroupKey)!;
+                        const roleName = rows[0]?.roleName || `Role ${roleStr}`;
+                        const teamLabel = teamSide === "team1" ? "Team 1" : "Team 2";
+                        return (
+                          <div key={key} className="space-y-2">
+                            <div className="flex items-center gap-2 px-1">
+                              <span
+                                className="text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded"
+                                style={{
+                                  background: teamSide === "team1" ? "rgba(255,99,65,0.18)" : "rgba(59,158,255,0.18)",
+                                  color: teamSide === "team1" ? "#ff6341" : "#3b9eff",
+                                }}
+                              >
+                                {teamLabel}
+                              </span>
+                              <span className="text-white text-sm font-black" style={{ fontFamily: "Bungee" }}>
+                                {roleName}
+                              </span>
+                              <span className="text-[#6b7280] text-[10px]">· role {roleStr}</span>
+                            </div>
+                            {rows.map((p) => {
+                              const expanded = fvfExpandedId === p.id;
+                              const displayStatus = p.status;
+                              const currentLabel = p.correctOption
+                                ? p.options.find((o) => o.key === p.correctOption)?.label || null
+                                : null;
+                              return (
+                                <div key={p.id} className="game-card p-0 overflow-hidden">
+                                  <button
+                                    type="button"
+                                    onClick={() => setFvfExpandedId(expanded ? "" : p.id)}
+                                    className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-[#1a1a1a] transition-colors"
+                                  >
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-white font-bold text-sm">{p.question}</p>
+                                      <p className="text-[10px] mt-1">
+                                        {currentLabel ? (
+                                          <>
+                                            <span className="text-[#22c55e] font-bold">Correct: {currentLabel}</span>
+                                            <span className="text-[#6b7280] ml-2">· {p.totalResponses} pick{p.totalResponses === 1 ? "" : "s"}</span>
+                                          </>
+                                        ) : (
+                                          <span className="text-[#6b7280]">Awaiting resolution · {p.totalResponses} pick{p.totalResponses === 1 ? "" : "s"}</span>
+                                        )}
+                                      </p>
+                                    </div>
+                                    <span
+                                      className="text-[10px] font-black uppercase px-2 py-1 rounded shrink-0"
+                                      style={{
+                                        background: displayStatus === "resolved" ? "rgba(34,197,94,0.18)"
+                                          : displayStatus === "voided" ? "rgba(156,163,175,0.18)"
+                                          : displayStatus === "open" ? "rgba(251,146,60,0.18)"
+                                          : "rgba(59,158,255,0.18)",
+                                        color: displayStatus === "resolved" ? "#22c55e"
+                                          : displayStatus === "voided" ? "#9ca3af"
+                                          : displayStatus === "open" ? "#fb923c"
+                                          : "#3b9eff",
+                                      }}
+                                    >
+                                      {displayStatus}
+                                    </span>
+                                    {expanded ? (
+                                      <IoChevronUp className="text-[#9ca3af] text-base shrink-0" />
+                                    ) : (
+                                      <IoChevronDown className="text-[#9ca3af] text-base shrink-0" />
+                                    )}
+                                  </button>
+
+                                  {expanded && (
+                                    <div className="px-4 pb-4 pt-1 space-y-1.5 border-t border-[#2a2a2a]">
+                                      {fvfOptionDrafts[p.id] ? (
+                                        <div className="space-y-2 pt-2">
+                                          <p className="text-[10px] uppercase tracking-widest font-bold text-[#9ca3af]">
+                                            Editing options · {fvfOptionDrafts[p.id].length}/12
+                                          </p>
+                                          {fvfOptionDrafts[p.id].map((draft, i) => {
+                                            const isExisting = !!draft.key;
+                                            const voteCount = isExisting ? (p.responses[draft.key!] || 0) : 0;
+                                            return (
+                                              <div key={i} className="flex items-center gap-2">
+                                                <input
+                                                  type="text"
+                                                  value={draft.label}
+                                                  onChange={(e) => updateFvfDraftField(p.id, i, { label: e.target.value })}
+                                                  placeholder={isExisting ? draft.label : `Option ${i + 1}`}
+                                                  className="flex-1 px-3 py-2 nb-input text-sm"
+                                                  style={nbInputStyle}
+                                                />
+                                                <input
+                                                  type="number"
+                                                  value={draft.points}
+                                                  onChange={(e) => updateFvfDraftField(p.id, i, { points: e.target.value })}
+                                                  min={1}
+                                                  max={500}
+                                                  className="w-20 px-3 py-2 nb-input text-sm text-center"
+                                                  style={nbInputStyle}
+                                                />
+                                                <button
+                                                  type="button"
+                                                  onClick={() => removeFvfDraftOption(p.id, i)}
+                                                  disabled={fvfOptionDrafts[p.id].length <= 2 || voteCount > 0}
+                                                  title={voteCount > 0 ? `${voteCount} user${voteCount === 1 ? "" : "s"} picked this` : ""}
+                                                  className="btn-gray px-2 text-xs disabled:opacity-40"
+                                                >
+                                                  {voteCount > 0 ? `🔒 ${voteCount}` : "✕"}
+                                                </button>
+                                              </div>
+                                            );
+                                          })}
+                                          <div className="flex items-center justify-between pt-1">
+                                            <button
+                                              type="button"
+                                              onClick={() => addFvfDraftOption(p.id)}
+                                              disabled={fvfOptionDrafts[p.id].length >= 12}
+                                              className="btn-secondary px-3 py-1.5 text-[10px]"
+                                            >
+                                              + Add option
+                                            </button>
+                                            <div className="flex gap-2">
+                                              <button
+                                                type="button"
+                                                onClick={() => cancelEditFvfOptions(p.id)}
+                                                className="btn-gray px-3 py-1.5 text-[10px]"
+                                              >
+                                                Cancel
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => saveFvfOptions(p.id)}
+                                                disabled={fvfSavingOptionsId === p.id}
+                                                className="btn-sticker btn-orange px-3 py-1.5 text-[10px]"
+                                              >
+                                                {fvfSavingOptionsId === p.id ? "Saving…" : "Save options"}
+                                              </button>
+                                            </div>
+                                          </div>
+                                          <p className="text-[10px] text-[#6b7280] pt-1 leading-relaxed">
+                                            Locked rows have user picks. New options get a fresh internal key automatically.
+                                            Editing labels/points re-flows scoring across every completed room of this match.
+                                          </p>
+                                        </div>
+                                      ) : (
+                                        <>
+                                          {p.options.map((opt) => {
+                                            const count = p.responses[opt.key] || 0;
+                                            const isCurrent = p.correctOption === opt.key;
+                                            const busy = fvfOverridingId === p.id;
+                                            return (
+                                              <div
+                                                key={opt.key}
+                                                className="flex items-center justify-between gap-2 px-3 py-2"
+                                                style={{
+                                                  background: isCurrent ? "rgba(34,197,94,0.12)" : "#0d0d0d",
+                                                  border: `1px solid ${isCurrent ? "#22c55e" : "#2a2a2a"}`,
+                                                  borderRadius: 4,
+                                                }}
+                                              >
+                                                <div className="flex-1 text-xs">
+                                                  <span className="text-white font-bold">{opt.label}</span>
+                                                  <span className="text-[#9ca3af] ml-2">{opt.points}pts</span>
+                                                </div>
+                                                <span className="text-[#9ca3af] text-[11px]">{count} pick{count === 1 ? "" : "s"}</span>
+                                                {isCurrent ? (
+                                                  <span className="text-[10px] font-black uppercase tracking-wider text-[#22c55e]">
+                                                    ✓ Current
+                                                  </span>
+                                                ) : (
+                                                  <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      overrideFiveVsFive(p.id, opt.key);
+                                                    }}
+                                                    disabled={busy}
+                                                    className="btn-sticker btn-orange px-3 py-1 text-[10px] disabled:opacity-50"
+                                                  >
+                                                    {busy ? "…" : "Set as correct"}
+                                                  </button>
+                                                )}
+                                              </div>
+                                            );
+                                          })}
+                                          <div className="pt-2">
+                                            <button
+                                              type="button"
+                                              onClick={() => startEditFvfOptions(p)}
+                                              className="btn-secondary px-3 py-1.5 text-[10px]"
+                                            >
+                                              ✏️ Edit options
+                                            </button>
+                                          </div>
+                                        </>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
               </div>
             </motion.div>
           </TabsContent>
