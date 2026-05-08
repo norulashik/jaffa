@@ -22,35 +22,38 @@ export type Rect = {
 };
 
 export const SLOTS = {
-  // [1] Date badge — pass 4: shift LEFT 12px (right += 0.85%) and DOWN
-  //     6px (top += 0.36%) per Position Correction Rules.
-  dateBadge:    { top: "4.86%", right: "5.85%", width: "19.0%", height: "3.8%" } as Rect,
+  // Pass 5: every rectangle below is derived directly from user-measured
+  // pixel coords on the source PNG (941×1672). Source-of-truth for every
+  // placeholder. If the PNG is ever regenerated these need re-measuring.
 
-  // [2] Header — pass 4: circles shifted UP 18px (top -= 1.08%); logo
-  //     scale itself bumps via HEADER.logoFitPct below. Pills shifted
-  //     DOWN 8px (top += 0.48%).
-  leftCircle:   { top: "19.92%", left: "11.0%",  width: "12.0%", height: "7.2%" } as Rect,
-  rightCircle:  { top: "19.92%", right: "11.0%", width: "12.0%", height: "7.2%" } as Rect,
-  pillLeft:     { top: "31.98%", left: "10.0%",  width: "37.0%", height: "5.6%" } as Rect,
-  pillRight:    { top: "31.98%", right: "10.0%", width: "37.0%", height: "5.6%" } as Rect,
+  // [1] Date badge — px 777,53 → 866,76.
+  dateBadge:    { top: "3.17%", right: "7.97%", width: "9.46%", height: "1.38%" } as Rect,
 
-  // [3] 10 prediction rows. Pass 3 band-position kept; pass 4 changes
-  //     happen INSIDE each row container (see ROW.* below + page.tsx row
-  //     JSX, switched from flex-centre to absolute pixel anchors).
-  rowsTop:      "43.0%",
-  rowsHeight:   "37.0%",
-  rowCount:     10,
-  rowGap:       0.6,
-  rowQuestion:  { left: "5.5%",  width: "62%" } as Rect,
-  rowAnswer:    { left: "5.5%",  width: "62%" } as Rect,
-  rowPoints:    { right: "5.0%", width: "21%", height: "62%" } as Rect,
+  // [2] Header circles — px 85,371 → 140,426 (left), 787,375 → 840,424 (right).
+  leftCircle:   { top: "22.19%", left: "9.03%",   width: "5.84%", height: "3.29%" } as Rect,
+  rightCircle:  { top: "22.43%", right: "10.73%", width: "5.63%", height: "2.93%" } as Rect,
+  // [2] Pills — px 140,519 → 374,556 (left), 566,511 → 752,562 (right).
+  pillLeft:     { top: "31.04%", left: "14.88%",  width: "24.87%", height: "2.21%" } as Rect,
+  pillRight:    { top: "30.56%", right: "20.09%", width: "19.77%", height: "3.05%" } as Rect,
 
-  // [4] Max-potential — pass 4: shifted DOWN 14px (bottom -= 0.84%) per
-  //     Position Correction Rules.
-  maxPotential: { bottom: "6.16%", left: "6.5%",  width: "30%", height: "9.5%" } as Rect,
+  // [3] 9 prediction rows (was 10 — user dropped one for breathing room).
+  //     Band derived from row1 (80,624→835,653) and row9 (80,1245→835,1277):
+  //     top = row1.top%, height = row9.bottom% − row1.top%.
+  //     rowGap is tuned so the formula's i-th row top lands exactly on
+  //     the stripe coords for i = 0 and i = 8.
+  rowsTop:      "37.32%",
+  rowsHeight:   "39.06%",
+  rowCount:     9,
+  rowGap:       2.72,
+  rowQuestion:  { left: "8.5%",  width: "65%" } as Rect,
+  rowAnswer:    { left: "8.5%",  width: "65%" } as Rect,
+  rowPoints:    { right: "5.0%", width: "20%", height: "100%" } as Rect,
 
-  // [5] CTA — pass 4: shifted DOWN 10px (bottom -= 0.6%) likewise.
-  cta:          { bottom: "6.4%", right: "5.0%", width: "38%", height: "9.5%" } as Rect,
+  // [4] MAX POTENTIAL — px 80,1360 → 282,1440.
+  maxPotential: { bottom: "13.88%", left: "8.5%",  width: "21.47%", height: "4.78%" } as Rect,
+
+  // [5] CTA — px 640,1360 → 850,1440.
+  cta:          { bottom: "13.88%", right: "9.67%", width: "22.32%", height: "4.78%" } as Rect,
 } as const;
 
 // Inner-content layout constants — consumed by ShareCard's flex containers.
@@ -61,18 +64,21 @@ export const SLOTS = {
 // 941×1672 dimensions, so px units are deterministic. Font sizes are also
 // in px for the same reason.
 export const ROW = {
-  padX: 32,             // px — was 28; matches Position Correction Rules
-  padY: 12,             // px — top + bottom padding inside each row stripe
+  padX: 32,             // px — left/right padding inside each row stripe
+  padY: 12,             // px — kept for future use (currently slot ≡ stripe)
   gap: 16,              // px reserved between left content area and points badge
   labelFontPx: 13,      // small uppercase question label
   answerFontPx: 20,     // bold pick text
-  pointsFontPx: 18,     // points badge ("40 PTS" / "VOID")
-  // Pass 4 — fixed-px anchors inside each row container.
-  labelTopPx: 14,       // top offset of the question label from row top
-  answerTopPx: 34,      // top offset of the answer from row top
+  pointsFontPx: 16,     // points badge ("40 PTS" / "VOID") — shrunk to fit thin stripe
+  // Pass 5 — slot ≡ stripe (~32px tall). Stripe is too thin to fit a
+  // stacked label+answer inside, so label/answer use NEGATIVE top
+  // offsets to render above the stripe (the stripe acts as a visual
+  // underline). Points badge stays inside the stripe, vertically centred.
+  labelTopPx: -42,      // label sits ~42px above stripe top
+  answerTopPx: -18,     // answer sits ~18px above stripe top (just above its top edge)
   pointsRightPx: 22,    // right offset of the points badge from row right
-  pointsWidthPx: 140,   // fixed-px width of the points badge
-  pointsHeightPx: 40,   // fixed-px height of the points badge
+  pointsWidthPx: 130,   // fixed-px width of the points badge
+  pointsHeightPx: 24,   // shrunk from 40 → fits inside ~32px stripe
 } as const;
 
 export const HEADER = {
@@ -118,7 +124,9 @@ export const LABEL_BY_TEMPLATE_KEY: Record<string, string> = {
 };
 
 // Stable row-order so the same question always lands in the same row
-// across cards. Anything not in this array slots in at the end.
+// across cards. Pass 5: 9 rows (was 10) — `punter_balls_per_boundary`
+// dropped to give the share card breathing room. The backend still
+// generates it; we just don't render it on the share card.
 export const ROW_ORDER: ReadonlyArray<string> = [
   "punter_motm",
   "punter_top_batter",
@@ -129,7 +137,6 @@ export const ROW_ORDER: ReadonlyArray<string> = [
   "punter_allrounder_impact",
   "punter_first_event",
   "punter_overs_16_20_runs",
-  "punter_balls_per_boundary",
 ];
 
 export function shortLabelFor(templateKey: string | undefined, fallback: string): string {
