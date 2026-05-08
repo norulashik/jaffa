@@ -22,40 +22,36 @@ export type Rect = {
 };
 
 export const SLOTS = {
-  // [1] Top-right rounded badge — match date. Pass-2 calibration: bumped
-  //     down ~1.4% so "8 MAY" centers inside the bubble outline.
-  dateBadge:    { top: "5.0%",  right: "6.0%", width: "22.5%", height: "4.0%" } as Rect,
+  // [1] Date badge — pass 3 (debug-overlay reading): tightened width +
+  //     nudged in to land inside the PNG's bubble outline (was bleeding
+  //     past the bubble's left edge into the wordmark area).
+  dateBadge:    { top: "4.5%",  right: "5.0%", width: "19.0%", height: "3.8%" } as Rect,
 
-  // [2] Header — circles (logos) + pills (team shorts), sitting under the
-  //     "jaffa" wordmark baked into the PNG. Pass-2: dropped ~1% so the
-  //     elements land inside their drawn outlines.
-  leftCircle:   { top: "21.0%", left: "10.0%",  width: "13.5%", height: "8.0%" } as Rect,
-  rightCircle:  { top: "21.0%", right: "10.0%", width: "13.5%", height: "8.0%" } as Rect,
+  // [2] Header — circles trimmed to the actual drawn ⊙ outlines (red rect
+  //     was bleeding past the circle edge). Pills are aligned, leave them.
+  leftCircle:   { top: "21.0%", left: "11.0%",  width: "12.0%", height: "7.2%" } as Rect,
+  rightCircle:  { top: "21.0%", right: "11.0%", width: "12.0%", height: "7.2%" } as Rect,
   pillLeft:     { top: "31.5%", left: "10.0%",  width: "37.0%", height: "5.6%" } as Rect,
   pillRight:    { top: "31.5%", right: "10.0%", width: "37.0%", height: "5.6%" } as Rect,
 
-  // [3] 10 prediction rows. The PNG draws 10 horizontal stripes between
-  //     ~43.5% and ~84% of the canvas height. We compute each stripe's
-  //     vertical position via rowsTop / rowsHeight / rowGap below.
-  //     Pass-2: rowsTop pushed +2.5% so rows land in the PNG's drawn
-  //     stripes rather than above them.
-  rowsTop:      "43.5%",
-  rowsHeight:   "40.5%",     // total vertical span for all 10 rows + gaps
+  // [3] 10 prediction rows. Pass 3: row band shrunk vertically because
+  //     row 10's red rect was overlapping the top of the max-potential
+  //     box. New band: 43% → 80% (~3.5% buffer above max-potential).
+  rowsTop:      "43.0%",
+  rowsHeight:   "37.0%",
   rowCount:     10,
-  rowGap:       0.7,         // % between adjacent rows
-  // Within each row, content layout — left column for question + answer,
-  // right column for the glow points box.
-  rowQuestion:  { left: "5.5%",  width: "62%" } as Rect,   // small label (top of row)
-  rowAnswer:    { left: "5.5%",  width: "62%" } as Rect,   // large user-pick text (bottom of row)
-  rowPoints:    { right: "5.0%", width: "21%", height: "62%" } as Rect, // glow box
+  rowGap:       0.6,
+  rowQuestion:  { left: "5.5%",  width: "62%" } as Rect,
+  rowAnswer:    { left: "5.5%",  width: "62%" } as Rect,
+  rowPoints:    { right: "5.0%", width: "21%", height: "62%" } as Rect,
 
-  // [4] Bottom-left — MAX POTENTIAL. Pass-2: bumped down 2% so label +
-  //     total render INSIDE the box (was sitting above it).
-  maxPotential: { bottom: "3.5%", left: "6.5%",  width: "30%", height: "9.5%" } as Rect,
+  // [4] Max-potential bumped UP ~3.5% so the label + value land INSIDE
+  //     the PNG's drawn rounded box (was sitting below it at the very
+  //     bottom of the canvas).
+  maxPotential: { bottom: "7.0%", left: "6.5%",  width: "30%", height: "9.5%" } as Rect,
 
-  // [5] Bottom-right — CTA stack (around the ape character which lives in
-  //     the bottom-center of the PNG). Pass-2: bumped down 2% likewise.
-  cta:          { bottom: "3.5%", right: "5.0%", width: "38%", height: "9.5%" } as Rect,
+  // [5] CTA bumped UP the same amount to land inside its rounded box.
+  cta:          { bottom: "7.0%", right: "5.0%", width: "38%", height: "9.5%" } as Rect,
 } as const;
 
 // Inner-content layout constants — consumed by ShareCard's flex containers.
