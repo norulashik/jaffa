@@ -6,8 +6,8 @@ import { ChevronDown, ChevronUp, Share2, ArrowLeft, Link as LinkIcon } from "luc
 import { toast } from "sonner";
 import { toJpeg } from "html-to-image";
 import { api } from "@/lib/api";
-import { JAFFA_LOGO_DATA_URL } from "./jaffaLogo";
 import { getTeamLogoDataUrl } from "./teamLogos";
+import { TEMPLATE, SLOTS, ROW_ORDER, shortLabelFor, type Rect } from "./templateLayout";
 import TeamBadge from "@/components/TeamBadge";
 import { getTeamColor } from "@/lib/teamColors";
 import { GLOBAL_VENUE_ID } from "@/lib/venue";
@@ -173,17 +173,20 @@ export default function PunterCardPage() {
 
   // Rasterize the off-screen ShareCard into a JPEG and pop the share modal.
   // Single entry point for both the manual Share button (top-right) and the
-  // auto-open after the completing Lock In. Same JPEG settings as before:
-  // pixelRatio 1.5 + quality 0.92 keeps the file under ~700KB which is the
-  // ceiling iOS WhatsApp's "Send to" share sheet enforces. cacheBust stays
-  // OFF so the embedded logo isn't raced by the rasterizer.
+  // auto-open after the completing Lock In. pixelRatio 1.5 + quality 0.92
+  // keeps the file under ~700KB which is the ceiling iOS WhatsApp's "Send
+  // to" share sheet enforces.
+  //
+  // The JAFFA wordmark is now baked into the template PNG, so the previous
+  // canvas-composite pass (used to work around html-to-image's iOS-Safari
+  // foreignObject bug for the data-URL logo) is no longer needed.
   const openShareModal = async () => {
     if (!shareRef.current || sharing) return;
     setSharing(true);
     try {
-      // Wait for every embedded image (team crests etc.) to decode before
-      // snapshotting — html-to-image otherwise paints before async decode
-      // finishes and ships incomplete frames.
+      // Wait for every embedded image (template + team crests) to decode
+      // before snapshotting — html-to-image otherwise paints before async
+      // decode finishes and ships incomplete frames.
       const imgs = Array.from(shareRef.current.querySelectorAll("img"));
       await Promise.allSettled(
         imgs.map((img) => {
@@ -191,71 +194,17 @@ export default function PunterCardPage() {
           return img.decode().catch(() => undefined);
         })
       );
-      // Pre-decode the JAFFA logo separately. We composite it onto the
-      // rasterized JPEG by hand (see canvas pass below) instead of relying
-      // on html-to-image's foreignObject pipeline, which silently dropped
-      // the ~180KB data-URL <img> on ~half of iOS Safari renders. By
-      // running drawImage ourselves on a native canvas, the logo always
-      // lands.
-      const jaffaImg = new Image();
-      jaffaImg.src = JAFFA_LOGO_DATA_URL;
-      await jaffaImg.decode().catch(() => undefined);
 
       // One animation frame so layout settles after any decode-triggered
       // reflow before we capture pixels.
       await new Promise((r) => requestAnimationFrame(() => r(null)));
 
       const PIXEL_RATIO = 1.5;
-      const baseDataUrl = await toJpeg(shareRef.current, {
+      const dataUrl = await toJpeg(shareRef.current, {
         pixelRatio: PIXEL_RATIO,
         quality: 0.92,
-        backgroundColor: "#1a0033",
+        backgroundColor: "#0d2bb3",
       });
-
-      // Canvas composite: draw the rasterized card, then draw the JAFFA
-      // logo on top at the placeholder slot's position. Position is read
-      // from the live DOM (data-jaffa-logo-slot) so any layout change to
-      // the slot's size or position is automatically reflected.
-      let dataUrl = baseDataUrl;
-      try {
-        const baseImg = new Image();
-        baseImg.src = baseDataUrl;
-        await baseImg.decode();
-
-        const slot = shareRef.current.querySelector("[data-jaffa-logo-slot]") as HTMLElement | null;
-        const cardRect = shareRef.current.getBoundingClientRect();
-
-        const canvas = document.createElement("canvas");
-        canvas.width = baseImg.naturalWidth;
-        canvas.height = baseImg.naturalHeight;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) throw new Error("canvas 2d context unavailable");
-        ctx.drawImage(baseImg, 0, 0);
-
-        if (slot && jaffaImg.naturalWidth > 0) {
-          const slotRect = slot.getBoundingClientRect();
-          const x = (slotRect.left - cardRect.left) * PIXEL_RATIO;
-          const y = (slotRect.top - cardRect.top) * PIXEL_RATIO;
-          const w = slotRect.width * PIXEL_RATIO;
-          const h = slotRect.height * PIXEL_RATIO;
-
-          // Soft drop-shadow under the logo so the composited result
-          // matches the visual treatment we used to ship via CSS filter.
-          ctx.save();
-          ctx.shadowColor = "rgba(0,0,0,0.55)";
-          ctx.shadowBlur = 40 * PIXEL_RATIO;
-          ctx.shadowOffsetY = 12 * PIXEL_RATIO;
-          ctx.drawImage(jaffaImg, x, y, w, h);
-          ctx.restore();
-        }
-
-        dataUrl = canvas.toDataURL("image/jpeg", 0.92);
-      } catch (compositeErr) {
-        // If the composite pass fails for any reason fall back to the
-        // (logo-less) base image so the user still gets SOMETHING. Logged
-        // so we notice if this branch ever fires in practice.
-        console.error("[ShareCard] logo composite failed, falling back to base:", compositeErr);
-      }
 
       const blob = await (await fetch(dataUrl)).blob();
       setShareDataUrl(dataUrl);
@@ -651,421 +600,324 @@ const ShareCard = forwardRef<HTMLDivElement, {
 }>(function ShareCard({ match, questions, selections, mode }, ref) {
   const t1 = match?.team1Short || match?.team1 || "T1";
   const t2 = match?.team2Short || match?.team2 || "T2";
-  const startLabel = match?.startTime ? new Date(match.startTime).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "";
-  const isResults = mode === "results";
-
-  // Per-match palette: same teamColors map the in-app page uses, so the
-  // shared image and the in-app view stay visually consistent for any
-  // given fixture.
-  const shareC1 = getTeamColor(t1);
-  const shareC2 = getTeamColor(t2);
   const t1Logo = getTeamLogoDataUrl(t1);
   const t2Logo = getTeamLogoDataUrl(t2);
+  const isResults = mode === "results";
 
-  const picks = questions
-    .map((q) => {
-      const key = q.userAnswer?.selectedOption || selections[q.id];
-      if (!key) return null;
-      const opt = q.options.find((o) => o.key === key);
-      if (!opt) return null;
+  // Date badge (top-right): "8 MAY" — uppercase day-month abbreviation.
+  const startLabel = match?.startTime
+    ? new Date(match.startTime)
+        .toLocaleDateString("en-IN", { day: "numeric", month: "short" })
+        .toUpperCase()
+    : "";
 
-      // Build the post-match result state once per row so the JSX below
-      // stays linear. The voided check covers both an explicit "voided"
-      // status (set by resolvePunterCard for VOID_OPTION returns) and
-      // any stray case where correctOption was stored as the sentinel.
-      let result: ResultState | null = null;
-      if (isResults) {
-        const isVoided = isVoidedQuestion(q);
-        if (isVoided) {
-          result = { kind: "voided" };
-        } else if (q.userAnswer?.isCorrect === true) {
-          result = { kind: "correct", points: q.userAnswer.pointsEarned ?? 0 };
-        } else if (q.userAnswer?.isCorrect === false) {
-          result = { kind: "wrong", correctLabels: correctOptionLabels(q) };
-        } else {
-          result = { kind: "pending" };
-        }
-      }
+  // Stable order: every match's row N is the same template across cards.
+  // Anything not in ROW_ORDER (legacy templateKey from an archived card)
+  // slots in at the tail.
+  const ordered = [...questions].sort((a, b) => {
+    const ai = ROW_ORDER.indexOf(a.templateKey);
+    const bi = ROW_ORDER.indexOf(b.templateKey);
+    const ax = ai === -1 ? Number.MAX_SAFE_INTEGER : ai;
+    const bx = bi === -1 ? Number.MAX_SAFE_INTEGER : bi;
+    return ax - bx;
+  });
 
-      return {
-        question: q.question,
-        pick: opt.label,
-        maxPoints: opt.points,
-        result,
-      };
-    })
-    .filter(Boolean) as Array<{
-      question: string;
-      pick: string;
-      maxPoints: number;
-      result: ResultState | null;
-    }>;
+  // Pad / truncate to exactly 10 rows. The template draws 10 stripes; we
+  // never render more, never render fewer.
+  const ROW_COUNT = SLOTS.rowCount;
+  const rows: Array<Question | null> = ordered.slice(0, ROW_COUNT);
+  while (rows.length < ROW_COUNT) rows.push(null);
 
-  // Footer total flips between "max if everything hit" (picks mode) and
-  // "actual points awarded" (results mode). Pending / voided rows
-  // contribute 0 to the results total.
-  const totalPts = isResults
-    ? picks.reduce((s, p) => s + (p.result?.kind === "correct" ? p.result.points : 0), 0)
-    : picks.reduce((s, p) => s + p.maxPoints, 0);
+  // Per-row data: question label, user pick, points-glow text. picksMode =
+  // selectedOption.points (potential); resultsMode = pointsEarned (or
+  // VOID/—).
+  const rowData = rows.map((q) => {
+    if (!q) return { label: "", answer: "—", glow: "—", potentialPts: 0 };
+    const selectedKey = q.userAnswer?.selectedOption || selections[q.id] || "";
+    const opt = q.options.find((o) => o.key === selectedKey);
+    const answerLabel = opt?.label || "—";
+    const potentialPts = opt?.points || 0;
 
-  // Tally row shown only in results mode — small chip at the top of the
-  // glass card so people skimming the image see the headline number first.
-  const correctCount = isResults
-    ? picks.filter((p) => p.result?.kind === "correct").length
-    : 0;
-  const resolvedCount = isResults
-    ? picks.filter((p) => p.result && p.result.kind !== "pending").length
-    : 0;
+    let glow: string;
+    if (isResults) {
+      if (isVoidedQuestion(q)) glow = "VOID";
+      else if (q.userAnswer?.isCorrect === true)
+        glow = `${q.userAnswer.pointsEarned} PTS`;
+      else if (q.userAnswer?.isCorrect === false) glow = "0 PTS";
+      else glow = "—";
+    } else {
+      glow = potentialPts > 0 ? `${potentialPts} PTS` : "—";
+    }
+
+    return {
+      label: shortLabelFor(q.templateKey, q.question),
+      answer: answerLabel,
+      glow,
+      potentialPts,
+    };
+  });
+
+  // MAX POTENTIAL = sum of selectedOption.points across all answered rows.
+  // The card is "worth" this many points if every pick resolves correct.
+  const maxPotential = rowData.reduce((s, r) => s + r.potentialPts, 0);
+
+  // Row vertical layout: divide the rows-stripe band evenly into ROW_COUNT
+  // stripes with ROW_GAP percentage between adjacent rows.
+  const rowsTopPct = parseFloat(SLOTS.rowsTop);
+  const rowsHeightPct = parseFloat(SLOTS.rowsHeight);
+  const rowGapPct = SLOTS.rowGap;
+  const totalGapPct = rowGapPct * (ROW_COUNT - 1);
+  const rowHeightPct = (rowsHeightPct - totalGapPct) / ROW_COUNT;
 
   return (
     <div
       ref={ref}
       style={{
-        width: 1080,
-        height: 1920,
-        padding: 56,
-        // Per-match gradient driven by the playing teams' brand colours
-        // (CSK vs KKR → mustard → deep purple, LSG vs KKR → steel-blue →
-        // purple, etc.). Two soft "lightning" radials at opposite corners
-        // in each team's primary keep the energetic, glassy look the
-        // reference image had without needing extra SVG art.
-        background: `
-          radial-gradient(ellipse at 12% 18%, ${shareC1.primary}88 0%, transparent 42%),
-          radial-gradient(ellipse at 88% 82%, ${shareC2.primary}88 0%, transparent 42%),
-          linear-gradient(135deg, ${shareC1.dark} 0%, #050505 50%, ${shareC2.dark} 100%)
-        `,
-        color: "white",
-        fontFamily: "'Bungee', 'Impact', cursive",
-        display: "flex",
-        flexDirection: "column",
-        boxSizing: "border-box",
+        width: TEMPLATE.width,
+        height: TEMPLATE.height,
         position: "relative",
+        backgroundImage: "url(/punter-card/template.png)",
+        backgroundSize: "100% 100%",
+        backgroundRepeat: "no-repeat",
+        backgroundColor: "#0d2bb3",
+        color: "#ffffff",
+        fontFamily: "system-ui, -apple-system, sans-serif",
         overflow: "hidden",
       }}
     >
-      {/* Date pill — anchored to the OUTER card edge (top: 56 / right: 56
-          matches the card padding) so it can never clip into the header,
-          regardless of how tall the logo is. nowrap forces single-line so
-          "30 SEPT" can't break across rows. */}
-      <div
-        style={{
-          position: "absolute",
-          top: 56,
-          right: 56,
-          fontSize: 28,
-          padding: "8px 22px",
-          borderRadius: 999,
-          background: "rgba(255,255,255,0.14)",
-          border: "1px solid rgba(255,255,255,0.28)",
-          backdropFilter: "blur(8px)",
-          letterSpacing: 1,
-          whiteSpace: "nowrap",
-          zIndex: 3,
-        }}
-      >
-        {startLabel}
-      </div>
-
-      {/* Header — JAFFA brand mark slot. The logo image is NOT rendered
-          here; it's composited onto the rasterized JPEG by openShareModal's
-          canvas pass. We were previously embedding <img src={data:...}>
-          and html-to-image's foreignObject path silently dropped the
-          ~180KB data URL on roughly half of iOS Safari rasterizations,
-          shipping logo-less share images. The placeholder div below
-          reserves the same layout footprint (height 520, no width since
-          the logo is centered horizontally), and a `data-jaffa-logo-slot`
-          attribute lets the composite pass find this exact box at runtime
-          to position the logo over the right pixels. */}
-      <div style={{ position: "relative", marginBottom: 20, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 480 }}>
+      {/* [1] Date badge — top-right rounded box. */}
+      <Slot at={SLOTS.dateBadge} center>
         <div
-          data-jaffa-logo-slot
-          aria-label="JAFFA"
-          role="img"
           style={{
-            height: 520,
-            // Aspect ratio matches the source PNG (1280x720 ≈ 16:9).
-            // Pinning a width keeps the layout stable in the off-screen
-            // measurement pass — the composite step uses this box's
-            // bounding rect as the destination rectangle for drawImage.
-            width: 924,
+            fontFamily: "'Bungee', 'Impact', cursive",
+            fontSize: 28,
+            letterSpacing: 2,
+            color: "#ffffff",
+            textShadow: "0 0 12px rgba(123,200,255,0.65)",
+            whiteSpace: "nowrap",
           }}
-        />
-      </div>
+        >
+          {startLabel}
+        </div>
+      </Slot>
 
-      {/* Glassmorphism inner card. Glow colour is driven by the two playing
-          teams' primaries so the bloom never carries a foreign-team accent
-          (e.g. magenta on a RCB-vs-GT card). Two box-shadows: shareC1 leans
-          toward the top-left where the first radial sits, shareC2 toward the
-          bottom-right where the second radial sits — together they feel
-          symmetric without picking a single team's colour over the other.
-          Inset white stays for the glass highlight. */}
-      <div
-        style={{
-          flex: 1,
-          padding: "32px 36px",
-          borderRadius: 28,
-          background: "rgba(255,255,255,0.07)",
-          border: "2px solid rgba(255,255,255,0.18)",
-          backdropFilter: "blur(20px)",
-          boxShadow: `-32px -32px 80px ${shareC1.primary}55, 32px 32px 80px ${shareC2.primary}55, inset 0 0 40px rgba(255,255,255,0.04)`,
-          display: "flex",
-          flexDirection: "column",
-          gap: 20,
-          position: "relative",
-          zIndex: 1,
-        }}
-      >
-        {/* Title block — team logos flanking the short codes for the
-            chunky, NFT-style banner the user asked for. Each logo sits in
-            a glass-morphism circle so it reads cleanly over the gradient
-            regardless of the team's brand colour. */}
-        <div>
-          <div style={{ fontSize: 24, opacity: 0.7, letterSpacing: 4, fontFamily: "'Bungee', 'Impact', cursive" }}>
-            {isResults ? "PUNTER CARD · FINAL" : "PUNTER CARD"}
-          </div>
-          <div
-            style={{
-              marginTop: 14,
-              display: "flex",
-              alignItems: "center",
-              gap: 24,
-              fontFamily: "'Bungee', 'Impact', cursive",
-            }}
-          >
-            {t1Logo && (
-              <div
-                style={{
-                  width: 120,
-                  height: 120,
-                  borderRadius: "50%",
-                  background: "rgba(255,255,255,0.08)",
-                  border: "2px solid rgba(255,255,255,0.22)",
-                  boxShadow: `0 0 30px ${shareC1.primary}66`,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                }}
-              >
-                <img
-                  src={t1Logo}
-                  alt={t1}
-                  style={{ width: 92, height: 92, objectFit: "contain" }}
-                />
-              </div>
-            )}
+      {/* [2] Header — left circle (Team A logo). */}
+      <Slot at={SLOTS.leftCircle} center>
+        {t1Logo && (
+          <img
+            src={t1Logo}
+            alt={t1}
+            style={{ width: "82%", height: "82%", objectFit: "contain" }}
+          />
+        )}
+      </Slot>
+
+      {/* [2] Header — right circle (Team B logo). */}
+      <Slot at={SLOTS.rightCircle} center>
+        {t2Logo && (
+          <img
+            src={t2Logo}
+            alt={t2}
+            style={{ width: "82%", height: "82%", objectFit: "contain" }}
+          />
+        )}
+      </Slot>
+
+      {/* [2] Header — left pill (Team A short). */}
+      <Slot at={SLOTS.pillLeft} center>
+        <div
+          style={{
+            fontFamily: "'Bungee', 'Impact', cursive",
+            fontSize: 52,
+            letterSpacing: 2,
+            color: "#ffffff",
+            textShadow: "0 0 18px rgba(123,200,255,0.75)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {t1}
+        </div>
+      </Slot>
+
+      {/* [2] Header — right pill (Team B short). */}
+      <Slot at={SLOTS.pillRight} center>
+        <div
+          style={{
+            fontFamily: "'Bungee', 'Impact', cursive",
+            fontSize: 52,
+            letterSpacing: 2,
+            color: "#ffffff",
+            textShadow: "0 0 18px rgba(123,200,255,0.75)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {t2}
+        </div>
+      </Slot>
+
+      {/* [3] 10 prediction rows. Each stripe is positioned absolutely; its
+          top is computed from the rows-band start + (i × stripe pitch). */}
+      {rowData.map((row, i) => {
+        const top = rowsTopPct + i * (rowHeightPct + rowGapPct);
+        const rowRect: Rect = {
+          top: `${top}%`,
+          left: "0",
+          right: "0",
+          height: `${rowHeightPct}%`,
+        };
+        return (
+          <Slot key={i} at={rowRect}>
+            {/* Question label — small text, top-left of row. */}
             <div
               style={{
-                fontSize: 80,
-                lineHeight: 1,
-                letterSpacing: 1,
-                textShadow: "0 0 30px rgba(255,255,255,0.35)",
+                position: "absolute",
+                top: "16%",
+                left: SLOTS.rowQuestion.left,
+                width: SLOTS.rowQuestion.width,
+                fontFamily: "system-ui, -apple-system, sans-serif",
+                fontSize: 18,
+                fontWeight: 700,
+                letterSpacing: 1.2,
+                color: "rgba(255,255,255,0.75)",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {row.label}
+            </div>
+            {/* Selected answer — large text, bottom-left of row. */}
+            <div
+              style={{
+                position: "absolute",
+                bottom: "16%",
+                left: SLOTS.rowAnswer.left,
+                width: SLOTS.rowAnswer.width,
+                fontFamily: "'Bungee', 'Impact', cursive",
+                fontSize: 30,
+                color: "#ffffff",
+                textShadow: "0 0 14px rgba(123,200,255,0.6)",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {row.answer.length > 18 ? row.answer.slice(0, 17) + "…" : row.answer}
+            </div>
+            {/* Points glow box — right side of row. */}
+            <div
+              style={{
+                position: "absolute",
+                top: "50%",
+                right: SLOTS.rowPoints.right,
+                width: SLOTS.rowPoints.width,
+                height: SLOTS.rowPoints.height,
+                transform: "translateY(-50%)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontFamily: "'Bungee', 'Impact', cursive",
+                fontSize: 22,
+                color: "#bfe2ff",
+                textShadow: "0 0 14px rgba(123,200,255,0.85)",
                 whiteSpace: "nowrap",
               }}
             >
-              {t1} <span style={{ opacity: 0.4, fontSize: 56 }}>VS</span> {t2}
+              {row.glow}
             </div>
-            {t2Logo && (
-              <div
-                style={{
-                  width: 120,
-                  height: 120,
-                  borderRadius: "50%",
-                  background: "rgba(255,255,255,0.08)",
-                  border: "2px solid rgba(255,255,255,0.22)",
-                  boxShadow: `0 0 30px ${shareC2.primary}66`,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                  marginLeft: "auto",
-                }}
-              >
-                <img
-                  src={t2Logo}
-                  alt={t2}
-                  style={{ width: 92, height: 92, objectFit: "contain" }}
-                />
-              </div>
-            )}
-          </div>
-        </div>
+          </Slot>
+        );
+      })}
 
-        {/* Results-mode summary chip — small "X/Y RIGHT" tally above the
-            picks list so the headline number is the first thing the eye
-            lands on after the team header. Hidden in picks mode. */}
-        {isResults && resolvedCount > 0 && (
-          <div
-            style={{
-              alignSelf: "flex-start",
-              padding: "6px 14px",
-              borderRadius: 999,
-              background: "rgba(255,255,255,0.10)",
-              border: "1px solid rgba(255,255,255,0.22)",
-              fontSize: 18,
-              letterSpacing: 1.5,
-              fontFamily: "'Bungee', 'Impact', cursive",
-              color: "#7be4ff",
-            }}
-          >
-            {correctCount} / {resolvedCount} RIGHT
-          </div>
-        )}
-
-        {/* Picks list */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {picks.map((p, i) => {
-            // Pill colour + content branches by mode + result state.
-            // Picks mode: cyan {maxPoints} PTS (potential).
-            // Results mode:
-            //   correct → green +{points} PTS
-            //   wrong   → red MISSED  (correct answer rendered inline below pick)
-            //   pending → grey PENDING
-            //   voided  → grey VOIDED
-            let pillBg = "rgba(123,228,255,0.14)";
-            let pillFg = "#7be4ff";
-            let pillGlow = "0 0 12px rgba(123,228,255,0.6)";
-            let pillText = `${p.maxPoints} PTS`;
-
-            if (isResults && p.result) {
-              if (p.result.kind === "correct") {
-                pillBg = "rgba(74,222,128,0.18)";
-                pillFg = "#4ade80";
-                pillGlow = "0 0 12px rgba(74,222,128,0.6)";
-                pillText = `+${p.result.points} PTS`;
-              } else if (p.result.kind === "wrong") {
-                pillBg = "rgba(248,113,113,0.18)";
-                pillFg = "#f87171";
-                pillGlow = "0 0 12px rgba(248,113,113,0.55)";
-                pillText = "MISSED";
-              } else if (p.result.kind === "pending") {
-                pillBg = "rgba(255,255,255,0.08)";
-                pillFg = "rgba(255,255,255,0.55)";
-                pillGlow = "none";
-                pillText = "PENDING";
-              } else {
-                pillBg = "rgba(255,255,255,0.08)";
-                pillFg = "rgba(255,255,255,0.55)";
-                pillGlow = "none";
-                pillText = "VOIDED";
-              }
-            }
-
-            // Show the correct answer inline beneath the user's pick when
-            // the user got it wrong. Helps the screenshot tell the full
-            // story to anyone seeing it on Instagram / WhatsApp.
-            const showAnswerLine =
-              isResults && p.result?.kind === "wrong" && p.result.correctLabels.length > 0;
-
-            return (
-              <div
-                key={i}
-                style={{
-                  background: "rgba(255,255,255,0.05)",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  borderRadius: 14,
-                  padding: "12px 20px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 18,
-                }}
-              >
-                <div style={{ flex: 1, fontFamily: "system-ui, -apple-system, sans-serif" }}>
-                  <div style={{ fontSize: 14, opacity: 0.6, marginBottom: 2, fontWeight: 500 }}>{p.question}</div>
-                  <div
-                    style={{
-                      fontSize: 22,
-                      fontWeight: 700,
-                      // Strike-through the user's pick when wrong so the
-                      // viewer's eye finds the actual answer next.
-                      textDecoration: showAnswerLine ? "line-through" : "none",
-                      opacity: showAnswerLine ? 0.6 : 1,
-                    }}
-                  >
-                    {p.pick}
-                  </div>
-                  {showAnswerLine && (
-                    <div
-                      style={{
-                        marginTop: 4,
-                        fontSize: 16,
-                        fontWeight: 600,
-                        color: "#4ade80",
-                        textShadow: "0 0 10px rgba(74,222,128,0.45)",
-                      }}
-                    >
-                      ANSWER: {(p.result as { correctLabels: string[] }).correctLabels.join(" / ")}
-                    </div>
-                  )}
-                </div>
-                <div
-                  style={{
-                    fontSize: 22,
-                    fontFamily: "'Bungee', 'Impact', cursive",
-                    color: pillFg,
-                    background: pillBg,
-                    padding: "8px 16px",
-                    borderRadius: 10,
-                    whiteSpace: "nowrap",
-                    textShadow: pillGlow !== "none" ? pillGlow : undefined,
-                  }}
-                >
-                  {pillText}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Max-potential footer */}
+      {/* [4] Bottom-left — MAX POTENTIAL label + total. */}
+      <Slot at={SLOTS.maxPotential}>
         <div
           style={{
-            marginTop: "auto",
-            paddingTop: 24,
-            borderTop: "1px solid rgba(255,255,255,0.18)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
+            fontFamily: "system-ui, -apple-system, sans-serif",
+            fontSize: 16,
+            fontWeight: 700,
+            letterSpacing: 2,
+            opacity: 0.75,
+            color: "#ffffff",
           }}
         >
-          <div>
-            <div style={{ fontSize: 18, opacity: 0.6, letterSpacing: 3 }}>
-              {isResults ? "FINAL SCORE" : "MAX POTENTIAL"}
-            </div>
-            <div
-              style={{
-                fontSize: 64,
-                marginTop: 4,
-                // Switch the glow-colour with the label so the FINAL SCORE
-                // moment reads as a celebration (gold) instead of "what
-                // could have been" (pink).
-                color: isResults ? "#ffd60a" : "#ff79f0",
-                fontFamily: "'Bungee', 'Impact', cursive",
-                textShadow: isResults
-                  ? "0 0 22px rgba(255,214,10,0.7)"
-                  : "0 0 22px rgba(255,121,240,0.65)",
-              }}
-            >
-              {totalPts} PTS
-            </div>
+          MAX POTENTIAL
+        </div>
+        <div
+          style={{
+            fontFamily: "'Bungee', 'Impact', cursive",
+            fontSize: 44,
+            marginTop: 4,
+            color: "#ffd60a",
+            textShadow: "0 0 18px rgba(255,214,10,0.6)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {maxPotential} PTS
+        </div>
+      </Slot>
+
+      {/* [5] Bottom-right — CTA stack. */}
+      <Slot at={SLOTS.cta}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            textAlign: "right",
+            fontFamily: "system-ui, -apple-system, sans-serif",
+            color: "#ffffff",
+          }}
+        >
+          <div style={{ fontSize: 18, fontWeight: 700, opacity: 0.85 }}>
+            Predict from anywhere
           </div>
-          <div style={{ textAlign: "right", fontFamily: "system-ui, -apple-system, sans-serif" }}>
-            <div style={{ fontSize: 18, opacity: 0.75, fontWeight: 600 }}>Predict from anywhere</div>
-            <div style={{ fontSize: 16, opacity: 0.6, marginTop: 2 }}>Enjoy your rewards</div>
-            <div
-              style={{
-                fontSize: 18,
-                marginTop: 8,
-                color: "#7be4ff",
-                fontFamily: "'Bungee', 'Impact', cursive",
-                letterSpacing: 1,
-              }}
-            >
-              playjaffa.com
-            </div>
+          <div style={{ fontSize: 14, opacity: 0.65, marginTop: 2 }}>
+            Enjoy your rewards
+          </div>
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 20,
+              letterSpacing: 1.5,
+              fontFamily: "'Bungee', 'Impact', cursive",
+              color: "#bfe2ff",
+              textShadow: "0 0 14px rgba(123,200,255,0.85)",
+            }}
+          >
+            PLAYJAFFA.COM
           </div>
         </div>
-      </div>
+      </Slot>
     </div>
   );
 });
+
+// Tiny helper: renders an absolutely-positioned overlay box at the given
+// slot rectangle. `center` flips the box into a centred flex container so
+// children land in the middle of the slot (used for badges/circles/pills).
+function Slot({
+  at,
+  center,
+  children,
+}: {
+  at: Rect;
+  center?: boolean;
+  children?: React.ReactNode;
+}) {
+  const style: React.CSSProperties = {
+    position: "absolute",
+    top: at.top,
+    left: at.left,
+    right: at.right,
+    bottom: at.bottom,
+    width: at.width,
+    height: at.height,
+  };
+  if (center) {
+    style.display = "flex";
+    style.alignItems = "center";
+    style.justifyContent = "center";
+  }
+  return <div style={style}>{children}</div>;
+}
