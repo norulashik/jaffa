@@ -693,21 +693,22 @@ const ShareCard = forwardRef<HTMLDivElement, {
       }}
     >
       {/* [1] Date badge — top-right rounded box. Single centred text,
-          CSS-only overflow handling. */}
+          CSS-only overflow handling. Pass 6: letterSpacing 2 → 1 so
+          "4 MAY" fits the bubble at the new 18px font. */}
       <Slot at={SLOTS.dateBadge} center debug={debug}>
         <div
           style={{
             fontFamily: "'Bungee', 'Impact', cursive",
             fontSize: HEADER.badgeFontPx,
-            letterSpacing: 2,
+            letterSpacing: 1,
             color: "#ffffff",
             textShadow: "0 0 12px rgba(123,200,255,0.65)",
             whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis",
             maxWidth: "100%",
-            paddingLeft: 8,
-            paddingRight: 8,
+            paddingLeft: 6,
+            paddingRight: 6,
             boxSizing: "border-box",
           }}
         >
@@ -791,21 +792,22 @@ const ShareCard = forwardRef<HTMLDivElement, {
         </div>
       </Slot>
 
-      {/* [3] 10 prediction rows. Pass 4: row content uses absolute pixel
-          anchors INSIDE each row container (label at 14px from row top,
-          answer at 34px, points badge fixed 140×40 at right:22). Every
-          coordinate is row-local — never canvas-relative. */}
+      {/* [3] Pass 6 — row slot covers both the left stripe (label+answer)
+          and the right points box (PNG x=88 → 837). Internal absolute
+          positioning constrains label/answer to the left stripe area
+          and points to the right box area. Coordinates are row-local. */}
       {rowData.map((row, i) => {
         const top = rowsTopPct + i * (rowHeightPct + rowGapPct);
         const rowRect: Rect = {
           top: `${top}%`,
-          left: "0",
-          right: "0",
+          left: SLOTS.rowsLeft,
+          right: SLOTS.rowsRight,
           height: `${rowHeightPct}%`,
         };
-        // Right edge of the left text column — leaves room for the
-        // points badge (right offset + width + gap).
-        const leftColRightPx = ROW.pointsRightPx + ROW.pointsWidthPx + ROW.gap;
+        // Right edge of the left text column — leaves room for the gap
+        // (PNG distance between left stripe and points box) PLUS the
+        // points box itself PLUS the row's right padding.
+        const leftColRightPx = ROW.pointsRightPx + ROW.pointsWidthPx + ROW.gap + ROW.padX;
         return (
           <Slot key={i} at={rowRect} debug={debug}>
             <div

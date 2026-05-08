@@ -36,15 +36,20 @@ export const SLOTS = {
   pillLeft:     { top: "31.04%", left: "14.88%",  width: "24.87%", height: "2.21%" } as Rect,
   pillRight:    { top: "30.56%", right: "20.09%", width: "19.77%", height: "3.05%" } as Rect,
 
-  // [3] 9 prediction rows (was 10 — user dropped one for breathing room).
-  //     Band derived from row1 (80,624→835,653) and row9 (80,1245→835,1277):
-  //     top = row1.top%, height = row9.bottom% − row1.top%.
-  //     rowGap is tuned so the formula's i-th row top lands exactly on
-  //     the stripe coords for i = 0 and i = 8.
-  rowsTop:      "37.32%",
-  rowsHeight:   "39.06%",
+  // [3] 9 prediction rows. Pass 6 — re-measured with finer precision:
+  //     row 1 left stripe = px 88,630 → 710,664; row 9 left stripe = px
+  //     88,1253 → 710,1285; per-row points box = px 770,638 → 837,655
+  //     (vertically centred inside its row stripe). The row SLOT covers
+  //     both the left stripe AND the points box (PNG x=88 → 837), so
+  //     internal positioning constrains label/answer to the left stripe
+  //     area and points to the right box area.
+  rowsTop:      "37.68%",     // = 630/1672
+  rowsHeight:   "39.17%",     // = (1285−630)/1672
   rowCount:     9,
-  rowGap:       2.72,
+  rowGap:       2.61,         // chosen so row 9 stripe top lands at 74.94%
+  rowsLeft:     "9.35%",      // = 88/941 (left edge of row span)
+  rowsRight:    "11.05%",     // = (941−837)/941 (right edge of row span)
+  // Legacy fields kept for back-compat (no longer consumed by the row map).
   rowQuestion:  { left: "8.5%",  width: "65%" } as Rect,
   rowAnswer:    { left: "8.5%",  width: "65%" } as Rect,
   rowPoints:    { right: "5.0%", width: "20%", height: "100%" } as Rect,
@@ -64,27 +69,30 @@ export const SLOTS = {
 // 941×1672 dimensions, so px units are deterministic. Font sizes are also
 // in px for the same reason.
 export const ROW = {
-  padX: 32,             // px — left/right padding inside each row stripe
-  padY: 12,             // px — kept for future use (currently slot ≡ stripe)
-  gap: 16,              // px reserved between left content area and points badge
+  padX: 32,             // px — left/right padding inside the left stripe
+  padY: 12,             // px — kept for future use
+  gap: 60,              // px — actual PNG distance between left stripe right edge
+                        //   (PNG x=710) and points box left edge (PNG x=770)
   labelFontPx: 13,      // small uppercase question label
   answerFontPx: 20,     // bold pick text
-  pointsFontPx: 16,     // points badge ("40 PTS" / "VOID") — shrunk to fit thin stripe
-  // Pass 5 — slot ≡ stripe (~32px tall). Stripe is too thin to fit a
-  // stacked label+answer inside, so label/answer use NEGATIVE top
-  // offsets to render above the stripe (the stripe acts as a visual
-  // underline). Points badge stays inside the stripe, vertically centred.
+  pointsFontPx: 12,     // points badge — shrunk to fit a 17px-tall box
+  // Slot now spans both left stripe + points box. Label/answer use
+  // NEGATIVE top offsets to render above the stripe (the stripe acts as
+  // a visual underline). Points badge stays inside the points box.
   labelTopPx: -42,      // label sits ~42px above stripe top
-  answerTopPx: -18,     // answer sits ~18px above stripe top (just above its top edge)
-  pointsRightPx: 22,    // right offset of the points badge from row right
-  pointsWidthPx: 130,   // fixed-px width of the points badge
-  pointsHeightPx: 24,   // shrunk from 40 → fits inside ~32px stripe
+  answerTopPx: -18,     // answer sits ~18px above stripe top
+  pointsRightPx: 0,     // points sits flush with the slot's right edge (PNG x=837)
+  pointsWidthPx: 67,    // matches user's measured points box width
+  pointsHeightPx: 17,   // matches user's measured points box height
 } as const;
 
 export const HEADER = {
-  logoFitPct: 77,       // pass 4: +18% scale per Position Correction Rules
+  logoFitPct: 280,      // pass 6: image overflows the 55px slot but the visible
+                        //   crest content (which has built-in transparent padding
+                        //   in the source PNG) finally fills the actual bubble.
   pillFontPx: 48,       // team-short text inside each pill
-  badgeFontPx: 26,      // date badge text
+  badgeFontPx: 18,      // pass 6: shrunk so "4 MAY" fits the 73px content area
+                        //   (was 26 + letterSpacing 2 → ~84px, truncated to "4 ...")
 } as const;
 
 export const FOOTER = {
