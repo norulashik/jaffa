@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { toJpeg } from "html-to-image";
 import { api } from "@/lib/api";
 import { getTeamLogoDataUrl } from "./teamLogos";
-import { TEMPLATE, SLOTS, ROW_ORDER, shortLabelFor, type Rect } from "./templateLayout";
+import { TEMPLATE, SLOTS, ROW, HEADER, FOOTER, ROW_ORDER, shortLabelFor, type Rect } from "./templateLayout";
 import TeamBadge from "@/components/TeamBadge";
 import { getTeamColor } from "@/lib/teamColors";
 import { GLOBAL_VENUE_ID } from "@/lib/venue";
@@ -692,29 +692,41 @@ const ShareCard = forwardRef<HTMLDivElement, {
         overflow: "hidden",
       }}
     >
-      {/* [1] Date badge — top-right rounded box. */}
+      {/* [1] Date badge — top-right rounded box. Single centred text,
+          CSS-only overflow handling. */}
       <Slot at={SLOTS.dateBadge} center debug={debug}>
         <div
           style={{
             fontFamily: "'Bungee', 'Impact', cursive",
-            fontSize: 28,
+            fontSize: HEADER.badgeFontPx,
             letterSpacing: 2,
             color: "#ffffff",
             textShadow: "0 0 12px rgba(123,200,255,0.65)",
             whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            maxWidth: "100%",
+            paddingLeft: 8,
+            paddingRight: 8,
+            boxSizing: "border-box",
           }}
         >
           {startLabel}
         </div>
       </Slot>
 
-      {/* [2] Header — left circle (Team A logo). */}
+      {/* [2] Header — left circle (Team A logo). Logo sized at HEADER.logoFitPct
+          (65%) of the slot, centered, contain-fit, never cropped. */}
       <Slot at={SLOTS.leftCircle} center debug={debug}>
         {t1Logo && (
           <img
             src={t1Logo}
             alt={t1}
-            style={{ width: "82%", height: "82%", objectFit: "contain" }}
+            style={{
+              width: `${HEADER.logoFitPct}%`,
+              height: `${HEADER.logoFitPct}%`,
+              objectFit: "contain",
+            }}
           />
         )}
       </Slot>
@@ -725,21 +737,32 @@ const ShareCard = forwardRef<HTMLDivElement, {
           <img
             src={t2Logo}
             alt={t2}
-            style={{ width: "82%", height: "82%", objectFit: "contain" }}
+            style={{
+              width: `${HEADER.logoFitPct}%`,
+              height: `${HEADER.logoFitPct}%`,
+              objectFit: "contain",
+            }}
           />
         )}
       </Slot>
 
-      {/* [2] Header — left pill (Team A short). */}
+      {/* [2] Header — left pill (Team A short). CSS overflow handles
+          unusually long shorts (e.g. PBKS) without escaping the pill. */}
       <Slot at={SLOTS.pillLeft} center debug={debug}>
         <div
           style={{
             fontFamily: "'Bungee', 'Impact', cursive",
-            fontSize: 52,
+            fontSize: HEADER.pillFontPx,
             letterSpacing: 2,
             color: "#ffffff",
             textShadow: "0 0 18px rgba(123,200,255,0.75)",
             whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            maxWidth: "100%",
+            paddingLeft: 12,
+            paddingRight: 12,
+            boxSizing: "border-box",
           }}
         >
           {t1}
@@ -751,19 +774,27 @@ const ShareCard = forwardRef<HTMLDivElement, {
         <div
           style={{
             fontFamily: "'Bungee', 'Impact', cursive",
-            fontSize: 52,
+            fontSize: HEADER.pillFontPx,
             letterSpacing: 2,
             color: "#ffffff",
             textShadow: "0 0 18px rgba(123,200,255,0.75)",
             whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            maxWidth: "100%",
+            paddingLeft: 12,
+            paddingRight: 12,
+            boxSizing: "border-box",
           }}
         >
           {t2}
         </div>
       </Slot>
 
-      {/* [3] 10 prediction rows. Each stripe is positioned absolutely; its
-          top is computed from the rows-band start + (i × stripe pitch). */}
+      {/* [3] 10 prediction rows. Each stripe is a bounded flex container:
+          a left text column (label stacked over answer, vertically centred)
+          and a right points badge (fixed width). Padding/overflow is
+          enforced by CSS — no absolute positioning, no JS truncation. */}
       {rowData.map((row, i) => {
         const top = rowsTopPct + i * (rowHeightPct + rowGapPct);
         const rowRect: Rect = {
@@ -774,128 +805,200 @@ const ShareCard = forwardRef<HTMLDivElement, {
         };
         return (
           <Slot key={i} at={rowRect} debug={debug}>
-            {/* Question label — small text, anchored deeper into the
-                stripe so it sits clearly inside the row's drawn outline
-                rather than at its top edge. */}
             <div
               style={{
-                position: "absolute",
-                top: "30%",
-                left: SLOTS.rowQuestion.left,
-                width: SLOTS.rowQuestion.width,
-                fontFamily: "system-ui, -apple-system, sans-serif",
-                fontSize: 14,
-                lineHeight: 1,
-                fontWeight: 700,
-                letterSpacing: 1.2,
-                color: "rgba(255,255,255,0.7)",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {row.label}
-            </div>
-            {/* Selected answer — stacked under the label, anchored at
-                top:60% so it sits in the lower-middle of the stripe with
-                a predictable gap from the label. */}
-            <div
-              style={{
-                position: "absolute",
-                top: "60%",
-                left: SLOTS.rowAnswer.left,
-                width: SLOTS.rowAnswer.width,
-                fontFamily: "'Bungee', 'Impact', cursive",
-                fontSize: 22,
-                lineHeight: 1,
-                color: "#ffffff",
-                textShadow: "0 0 12px rgba(123,200,255,0.55)",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {row.answer.length > 14 ? row.answer.slice(0, 13) + "…" : row.answer}
-            </div>
-            {/* Points glow box — right side of row. */}
-            <div
-              style={{
-                position: "absolute",
-                top: "50%",
-                right: SLOTS.rowPoints.right,
-                width: SLOTS.rowPoints.width,
-                height: SLOTS.rowPoints.height,
-                transform: "translateY(-50%)",
+                width: "100%",
+                height: "100%",
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "center",
-                fontFamily: "'Bungee', 'Impact', cursive",
-                fontSize: 22,
-                color: "#bfe2ff",
-                textShadow: "0 0 14px rgba(123,200,255,0.85)",
-                whiteSpace: "nowrap",
+                paddingLeft: ROW.padX,
+                paddingRight: ROW.padX,
+                paddingTop: ROW.padY,
+                paddingBottom: ROW.padY,
+                boxSizing: "border-box",
+                gap: ROW.gap,
               }}
             >
-              {row.glow}
+              {/* Left text column — label on top, answer below, centred
+                  vertically. minWidth:0 lets the CSS ellipsis pipeline
+                  kick in on long names. */}
+              <div
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  justifyContent: "center",
+                  gap: 2,
+                }}
+              >
+                <div
+                  style={{
+                    fontFamily: "system-ui, -apple-system, sans-serif",
+                    fontSize: ROW.labelFontPx,
+                    lineHeight: 1.15,
+                    fontWeight: 700,
+                    letterSpacing: 1.2,
+                    color: "rgba(255,255,255,0.65)",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {row.label}
+                </div>
+                <div
+                  style={{
+                    fontFamily: "'Bungee', 'Impact', cursive",
+                    fontSize: ROW.answerFontPx,
+                    lineHeight: 1.1,
+                    color: "#ffffff",
+                    textShadow: "0 0 10px rgba(123,200,255,0.5)",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {row.answer}
+                </div>
+              </div>
+
+              {/* Points badge — fixed width, centred text, ellipsis if
+                  somehow overflowed. */}
+              <div
+                style={{
+                  width: `${ROW.pointsWidthPct}%`,
+                  flexShrink: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontFamily: "'Bungee', 'Impact', cursive",
+                  fontSize: ROW.pointsFontPx,
+                  color: "#bfe2ff",
+                  textShadow: "0 0 12px rgba(123,200,255,0.85)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  paddingLeft: 6,
+                  paddingRight: 6,
+                  boxSizing: "border-box",
+                }}
+              >
+                {row.glow}
+              </div>
             </div>
           </Slot>
         );
       })}
 
-      {/* [4] Bottom-left — MAX POTENTIAL label + total. */}
+      {/* [4] Bottom-left — MAX POTENTIAL label + total. Flex column,
+          centred vertically inside the rounded box. */}
       <Slot at={SLOTS.maxPotential} debug={debug}>
         <div
           style={{
-            fontFamily: "system-ui, -apple-system, sans-serif",
-            fontSize: 16,
-            fontWeight: 700,
-            letterSpacing: 2,
-            opacity: 0.75,
-            color: "#ffffff",
+            width: "100%",
+            height: "100%",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            alignItems: "flex-start",
+            paddingLeft: FOOTER.padX,
+            paddingRight: FOOTER.padX,
+            boxSizing: "border-box",
+            gap: 4,
           }}
         >
-          MAX POTENTIAL
-        </div>
-        <div
-          style={{
-            fontFamily: "'Bungee', 'Impact', cursive",
-            fontSize: 44,
-            marginTop: 4,
-            color: "#ffd60a",
-            textShadow: "0 0 18px rgba(255,214,10,0.6)",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {maxPotential} PTS
+          <div
+            style={{
+              fontFamily: "system-ui, -apple-system, sans-serif",
+              fontSize: FOOTER.maxPotLabelPx,
+              fontWeight: 700,
+              letterSpacing: 2,
+              opacity: 0.75,
+              color: "#ffffff",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              maxWidth: "100%",
+            }}
+          >
+            MAX POTENTIAL
+          </div>
+          <div
+            style={{
+              fontFamily: "'Bungee', 'Impact', cursive",
+              fontSize: FOOTER.maxPotValuePx,
+              lineHeight: 1.05,
+              color: "#ffd60a",
+              textShadow: "0 0 18px rgba(255,214,10,0.6)",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              maxWidth: "100%",
+            }}
+          >
+            {maxPotential} PTS
+          </div>
         </div>
       </Slot>
 
-      {/* [5] Bottom-right — CTA stack. */}
+      {/* [5] Bottom-right — CTA stack. Flex column, right-aligned, three
+          stacked lines centred vertically inside the rounded box. */}
       <Slot at={SLOTS.cta} debug={debug}>
         <div
           style={{
+            width: "100%",
+            height: "100%",
             display: "flex",
             flexDirection: "column",
+            justifyContent: "center",
             alignItems: "flex-end",
             textAlign: "right",
+            paddingLeft: FOOTER.padX,
+            paddingRight: FOOTER.padX,
+            boxSizing: "border-box",
             fontFamily: "system-ui, -apple-system, sans-serif",
             color: "#ffffff",
+            gap: 2,
           }}
         >
-          <div style={{ fontSize: 18, fontWeight: 700, opacity: 0.85 }}>
+          <div
+            style={{
+              fontSize: FOOTER.ctaLine1Px,
+              fontWeight: 700,
+              opacity: 0.9,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              maxWidth: "100%",
+            }}
+          >
             Predict from anywhere
           </div>
-          <div style={{ fontSize: 14, opacity: 0.65, marginTop: 2 }}>
+          <div
+            style={{
+              fontSize: FOOTER.ctaLine2Px,
+              opacity: 0.65,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              maxWidth: "100%",
+            }}
+          >
             Enjoy your rewards
           </div>
           <div
             style={{
-              marginTop: 8,
-              fontSize: 20,
+              marginTop: 6,
+              fontSize: FOOTER.ctaLine3Px,
               letterSpacing: 1.5,
               fontFamily: "'Bungee', 'Impact', cursive",
               color: "#bfe2ff",
               textShadow: "0 0 14px rgba(123,200,255,0.85)",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              maxWidth: "100%",
             }}
           >
             PLAYJAFFA.COM
@@ -930,10 +1033,10 @@ function Slot({
     bottom: at.bottom,
     width: at.width,
     height: at.height,
+    boxSizing: "border-box",
     ...(debug ? {
       border: "2px solid rgba(255,0,0,0.85)",
       background: "rgba(255,0,0,0.10)",
-      boxSizing: "border-box" as const,
     } : {}),
   };
   if (center) {

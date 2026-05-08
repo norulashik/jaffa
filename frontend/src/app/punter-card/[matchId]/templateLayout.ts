@@ -58,6 +58,38 @@ export const SLOTS = {
   cta:          { bottom: "3.5%", right: "5.0%", width: "38%", height: "9.5%" } as Rect,
 } as const;
 
+// Inner-content layout constants — consumed by ShareCard's flex containers.
+// Change one number here and every container re-flows. NOT to be confused
+// with SLOTS, which positions the bounding boxes on the canvas.
+//
+// Padding values are in px because the canvas is rendered at fixed
+// 941×1672 dimensions, so px units are deterministic. Font sizes are also
+// in px for the same reason.
+export const ROW = {
+  padX: 28,           // px — left + right padding inside each row stripe
+  padY: 12,           // px — top + bottom padding inside each row stripe
+  gap: 16,            // px between left text column and right points badge
+  labelFontPx: 13,    // small uppercase question label
+  answerFontPx: 20,   // bold pick text
+  pointsFontPx: 18,   // points badge ("40 PTS" / "VOID")
+  pointsWidthPct: 22, // % of card width for the right points badge
+} as const;
+
+export const HEADER = {
+  logoFitPct: 65,     // logo image fills 65% of its circle slot diameter
+  pillFontPx: 48,     // team-short text inside each pill
+  badgeFontPx: 26,    // date badge text
+} as const;
+
+export const FOOTER = {
+  maxPotLabelPx: 14,
+  maxPotValuePx: 42,
+  ctaLine1Px: 17,
+  ctaLine2Px: 13,
+  ctaLine3Px: 19,     // PLAYJAFFA.COM
+  padX: 18,
+} as const;
+
 // Map of templateKey → short uppercase label for the row's small text.
 // The raw `prediction.question` string is too long for the row strip
 // (e.g. "Who scores less today: V Kohli or R Sharma?"), so we surface a
