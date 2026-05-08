@@ -23,8 +23,15 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     });
 
     if (!res.ok) {
-      const error = await res.json().catch(() => ({ error: "Request failed" }));
-      throw new Error(error.error || "Request failed");
+      // Surface the structured error body + HTTP status so callers can
+      // distinguish 404/409/500 (e.g., the universal "Got a code?" panel
+      // falls through 404 to the next room type, and routes 409 "already
+      // joined" responses to the existing room).
+      const data = await res.json().catch(() => ({ error: "Request failed" }));
+      const err: any = new Error(data.error || "Request failed");
+      err.body = data;
+      err.status = res.status;
+      throw err;
     }
 
     return res.json();

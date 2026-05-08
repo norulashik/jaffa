@@ -47,14 +47,14 @@ const MODE_OPTIONS: ModeOption[] = [
   {
     key: "season",
     label: "Season Room",
-    description: "Persists across the IPL season — same code, same crew.",
+    description: "Persists across the IPL season — same code, same crew. Create or join.",
     icon: <Calendar className="w-4 h-4" />,
     href: "/room/create?mode=season",
   },
   {
     key: "friendly",
     label: "Friendly Room",
-    description: "Private room for one match. Invite friends with the code.",
+    description: "Private room for one match. Invite friends with the code, or join one.",
     icon: <Users className="w-4 h-4" />,
     href: "/room/create?mode=friendly",
   },

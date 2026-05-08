@@ -11,6 +11,7 @@ import { cafeUrl, isCafeRoute } from "@/lib/navigation";
 import { toast } from "sonner";
 import RoomCard from "@/components/RoomCard";
 import HomeDashboard from "@/components/HomeDashboard";
+import JoinByCodePanel from "@/components/JoinByCodePanel";
 import { useGame } from "@/context/GameContext";
 import { GLOBAL_VENUE_ID } from "@/lib/venue";
 
@@ -190,6 +191,19 @@ export default function HomeLiveMatches() {
             instead of a wall of room CTAs. Room creation moved into the
             hamburger drawer's Modes section. */}
         <HomeDashboard />
+
+        {/* Universal join field — accepts any 6-char room code (5v5,
+            season, or friendly) and routes to the right room page. The
+            mode entries in the hamburger only let users *create* rooms,
+            so without this panel a user holding a code from a friend has
+            no entry point on home. */}
+        {!hasVenue && (
+          <JoinByCodePanel
+            title="Got a Code?"
+            accentColor="#ff6341"
+            hint="Enter a 6-character code to drop into a Season Room, Friendly Room, or 5v5."
+          />
+        )}
 
         {/* My Active Rooms — only when the user has any. Keeps the
             quick-jump-back-into-a-room flow intact even though the
