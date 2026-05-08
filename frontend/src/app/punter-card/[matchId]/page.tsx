@@ -46,6 +46,12 @@ export default function PunterCardPage() {
     searchParams?.get("roomId") ||
     (typeof window !== "undefined" ? localStorage.getItem("jaffa_room_id") || undefined : undefined) ||
     undefined;
+  // Calibration aid: ?debug=1 paints every overlay slot with a red
+  // border + translucent fill on the OFF-SCREEN ShareCard (which gets
+  // rasterized into the share JPEG). Lets us screenshot once and read
+  // exact alignment vs the template PNG's drawn boxes. Strip after the
+  // overlay is calibrated.
+  const debug = searchParams?.get("debug") === "1";
 
   const [loading, setLoading] = useState(true);
   const [match, setMatch] = useState<any>(null);
@@ -527,7 +533,7 @@ export default function PunterCardPage() {
           Instagram Story / 9:16 portrait size — also fits Snapchat,
           WhatsApp Status, and TikTok story crops without letterboxing. */}
       <div style={{ position: "fixed", left: -10000, top: 0, pointerEvents: "none" }} aria-hidden>
-        <ShareCard ref={shareRef} match={match} questions={questions} selections={selections} mode={shareMode} />
+        <ShareCard ref={shareRef} match={match} questions={questions} selections={selections} mode={shareMode} debug={debug} />
       </div>
 
       <PunterCardShareModal
@@ -597,7 +603,8 @@ const ShareCard = forwardRef<HTMLDivElement, {
   questions: Question[];
   selections: Record<string, string>;
   mode: ShareCardMode;
-}>(function ShareCard({ match, questions, selections, mode }, ref) {
+  debug?: boolean;
+}>(function ShareCard({ match, questions, selections, mode, debug }, ref) {
   const t1 = match?.team1Short || match?.team1 || "T1";
   const t2 = match?.team2Short || match?.team2 || "T2";
   const t1Logo = getTeamLogoDataUrl(t1);
@@ -686,7 +693,7 @@ const ShareCard = forwardRef<HTMLDivElement, {
       }}
     >
       {/* [1] Date badge — top-right rounded box. */}
-      <Slot at={SLOTS.dateBadge} center>
+      <Slot at={SLOTS.dateBadge} center debug={debug}>
         <div
           style={{
             fontFamily: "'Bungee', 'Impact', cursive",
@@ -702,7 +709,7 @@ const ShareCard = forwardRef<HTMLDivElement, {
       </Slot>
 
       {/* [2] Header — left circle (Team A logo). */}
-      <Slot at={SLOTS.leftCircle} center>
+      <Slot at={SLOTS.leftCircle} center debug={debug}>
         {t1Logo && (
           <img
             src={t1Logo}
@@ -713,7 +720,7 @@ const ShareCard = forwardRef<HTMLDivElement, {
       </Slot>
 
       {/* [2] Header — right circle (Team B logo). */}
-      <Slot at={SLOTS.rightCircle} center>
+      <Slot at={SLOTS.rightCircle} center debug={debug}>
         {t2Logo && (
           <img
             src={t2Logo}
@@ -724,7 +731,7 @@ const ShareCard = forwardRef<HTMLDivElement, {
       </Slot>
 
       {/* [2] Header — left pill (Team A short). */}
-      <Slot at={SLOTS.pillLeft} center>
+      <Slot at={SLOTS.pillLeft} center debug={debug}>
         <div
           style={{
             fontFamily: "'Bungee', 'Impact', cursive",
@@ -740,7 +747,7 @@ const ShareCard = forwardRef<HTMLDivElement, {
       </Slot>
 
       {/* [2] Header — right pill (Team B short). */}
-      <Slot at={SLOTS.pillRight} center>
+      <Slot at={SLOTS.pillRight} center debug={debug}>
         <div
           style={{
             fontFamily: "'Bungee', 'Impact', cursive",
@@ -766,19 +773,22 @@ const ShareCard = forwardRef<HTMLDivElement, {
           height: `${rowHeightPct}%`,
         };
         return (
-          <Slot key={i} at={rowRect}>
-            {/* Question label — small text, top-left of row. */}
+          <Slot key={i} at={rowRect} debug={debug}>
+            {/* Question label — small text, anchored deeper into the
+                stripe so it sits clearly inside the row's drawn outline
+                rather than at its top edge. */}
             <div
               style={{
                 position: "absolute",
-                top: "16%",
+                top: "30%",
                 left: SLOTS.rowQuestion.left,
                 width: SLOTS.rowQuestion.width,
                 fontFamily: "system-ui, -apple-system, sans-serif",
-                fontSize: 18,
+                fontSize: 14,
+                lineHeight: 1,
                 fontWeight: 700,
                 letterSpacing: 1.2,
-                color: "rgba(255,255,255,0.75)",
+                color: "rgba(255,255,255,0.7)",
                 whiteSpace: "nowrap",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -786,23 +796,26 @@ const ShareCard = forwardRef<HTMLDivElement, {
             >
               {row.label}
             </div>
-            {/* Selected answer — large text, bottom-left of row. */}
+            {/* Selected answer — stacked under the label, anchored at
+                top:60% so it sits in the lower-middle of the stripe with
+                a predictable gap from the label. */}
             <div
               style={{
                 position: "absolute",
-                bottom: "16%",
+                top: "60%",
                 left: SLOTS.rowAnswer.left,
                 width: SLOTS.rowAnswer.width,
                 fontFamily: "'Bungee', 'Impact', cursive",
-                fontSize: 30,
+                fontSize: 22,
+                lineHeight: 1,
                 color: "#ffffff",
-                textShadow: "0 0 14px rgba(123,200,255,0.6)",
+                textShadow: "0 0 12px rgba(123,200,255,0.55)",
                 whiteSpace: "nowrap",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
               }}
             >
-              {row.answer.length > 18 ? row.answer.slice(0, 17) + "…" : row.answer}
+              {row.answer.length > 14 ? row.answer.slice(0, 13) + "…" : row.answer}
             </div>
             {/* Points glow box — right side of row. */}
             <div
@@ -830,7 +843,7 @@ const ShareCard = forwardRef<HTMLDivElement, {
       })}
 
       {/* [4] Bottom-left — MAX POTENTIAL label + total. */}
-      <Slot at={SLOTS.maxPotential}>
+      <Slot at={SLOTS.maxPotential} debug={debug}>
         <div
           style={{
             fontFamily: "system-ui, -apple-system, sans-serif",
@@ -858,7 +871,7 @@ const ShareCard = forwardRef<HTMLDivElement, {
       </Slot>
 
       {/* [5] Bottom-right — CTA stack. */}
-      <Slot at={SLOTS.cta}>
+      <Slot at={SLOTS.cta} debug={debug}>
         <div
           style={{
             display: "flex",
@@ -896,13 +909,17 @@ const ShareCard = forwardRef<HTMLDivElement, {
 // Tiny helper: renders an absolutely-positioned overlay box at the given
 // slot rectangle. `center` flips the box into a centred flex container so
 // children land in the middle of the slot (used for badges/circles/pills).
+// `debug` paints a red border + translucent fill so the ?debug=1 share
+// JPEG visualises every slot rectangle for alignment calibration.
 function Slot({
   at,
   center,
+  debug,
   children,
 }: {
   at: Rect;
   center?: boolean;
+  debug?: boolean;
   children?: React.ReactNode;
 }) {
   const style: React.CSSProperties = {
@@ -913,6 +930,11 @@ function Slot({
     bottom: at.bottom,
     width: at.width,
     height: at.height,
+    ...(debug ? {
+      border: "2px solid rgba(255,0,0,0.85)",
+      background: "rgba(255,0,0,0.10)",
+      boxSizing: "border-box" as const,
+    } : {}),
   };
   if (center) {
     style.display = "flex";
