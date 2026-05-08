@@ -29,9 +29,10 @@ export const SLOTS = {
   // [1] Date badge — px 777,53 → 866,76.
   dateBadge:    { top: "3.17%", right: "7.97%", width: "9.46%", height: "1.38%" } as Rect,
 
-  // [2] Header circles — px 85,371 → 140,426 (left), 787,375 → 840,424 (right).
-  leftCircle:   { top: "22.19%", left: "9.03%",   width: "5.84%", height: "3.29%" } as Rect,
-  rightCircle:  { top: "22.43%", right: "10.73%", width: "5.63%", height: "2.93%" } as Rect,
+  // [2] Header circles — pass 7: shifted to user's specified corner
+  //     (PNG 99,383) with logoFitPct bumped (see HEADER.logoFitPct).
+  leftCircle:   { top: "22.91%", left: "10.52%",  width: "5.84%", height: "3.29%" } as Rect,
+  rightCircle:  { top: "22.91%", right: "10.52%", width: "5.84%", height: "3.29%" } as Rect,
   // [2] Pills — px 140,519 → 374,556 (left), 566,511 → 752,562 (right).
   pillLeft:     { top: "31.04%", left: "14.88%",  width: "24.87%", height: "2.21%" } as Rect,
   pillRight:    { top: "30.56%", right: "20.09%", width: "19.77%", height: "3.05%" } as Rect,
@@ -69,30 +70,31 @@ export const SLOTS = {
 // 941×1672 dimensions, so px units are deterministic. Font sizes are also
 // in px for the same reason.
 export const ROW = {
-  padX: 32,             // px — left/right padding inside the left stripe
+  padX: 13,             // pass 7: shrunk so label starts at PNG x=101 (user's
+                        //   measured "Player of the match" left edge =
+                        //   slot.left(88) + 13 = 101).
   padY: 12,             // px — kept for future use
   gap: 60,              // px — actual PNG distance between left stripe right edge
                         //   (PNG x=710) and points box left edge (PNG x=770)
   labelFontPx: 13,      // small uppercase question label
   answerFontPx: 20,     // bold pick text
   pointsFontPx: 12,     // points badge — shrunk to fit a 17px-tall box
-  // Slot now spans both left stripe + points box. Label/answer use
-  // NEGATIVE top offsets to render above the stripe (the stripe acts as
-  // a visual underline). Points badge stays inside the points box.
-  labelTopPx: -42,      // label sits ~42px above stripe top
-  answerTopPx: -18,     // answer sits ~18px above stripe top
+  // Pass 7: labels were rendering ABOVE the stripe outline (out of the box).
+  // Now sit AT THE TOP of the stripe (matches user's "y=945 JPEG = y=630 PNG").
+  labelTopPx: 0,        // label at stripe top
+  answerTopPx: 18,      // answer just below label, mostly inside stripe
   pointsRightPx: 0,     // points sits flush with the slot's right edge (PNG x=837)
   pointsWidthPx: 67,    // matches user's measured points box width
   pointsHeightPx: 17,   // matches user's measured points box height
 } as const;
 
 export const HEADER = {
-  logoFitPct: 280,      // pass 6: image overflows the 55px slot but the visible
-                        //   crest content (which has built-in transparent padding
-                        //   in the source PNG) finally fills the actual bubble.
+  logoFitPct: 400,      // pass 7: bumped further — at 280 the visible crest was
+                        //   still ~50% of the bubble. 400% renders the IMG at
+                        //   220px on a 55px slot, with the visible content
+                        //   (after SVG padding) filling more of the bubble.
   pillFontPx: 48,       // team-short text inside each pill
   badgeFontPx: 18,      // pass 6: shrunk so "4 MAY" fits the 73px content area
-                        //   (was 26 + letterSpacing 2 → ~84px, truncated to "4 ...")
 } as const;
 
 export const FOOTER = {
