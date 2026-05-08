@@ -22,21 +22,21 @@ export type Rect = {
 };
 
 export const SLOTS = {
-  // [1] Date badge — pass 3 (debug-overlay reading): tightened width +
-  //     nudged in to land inside the PNG's bubble outline (was bleeding
-  //     past the bubble's left edge into the wordmark area).
-  dateBadge:    { top: "4.5%",  right: "5.0%", width: "19.0%", height: "3.8%" } as Rect,
+  // [1] Date badge — pass 4: shift LEFT 12px (right += 0.85%) and DOWN
+  //     6px (top += 0.36%) per Position Correction Rules.
+  dateBadge:    { top: "4.86%", right: "5.85%", width: "19.0%", height: "3.8%" } as Rect,
 
-  // [2] Header — circles trimmed to the actual drawn ⊙ outlines (red rect
-  //     was bleeding past the circle edge). Pills are aligned, leave them.
-  leftCircle:   { top: "21.0%", left: "11.0%",  width: "12.0%", height: "7.2%" } as Rect,
-  rightCircle:  { top: "21.0%", right: "11.0%", width: "12.0%", height: "7.2%" } as Rect,
-  pillLeft:     { top: "31.5%", left: "10.0%",  width: "37.0%", height: "5.6%" } as Rect,
-  pillRight:    { top: "31.5%", right: "10.0%", width: "37.0%", height: "5.6%" } as Rect,
+  // [2] Header — pass 4: circles shifted UP 18px (top -= 1.08%); logo
+  //     scale itself bumps via HEADER.logoFitPct below. Pills shifted
+  //     DOWN 8px (top += 0.48%).
+  leftCircle:   { top: "19.92%", left: "11.0%",  width: "12.0%", height: "7.2%" } as Rect,
+  rightCircle:  { top: "19.92%", right: "11.0%", width: "12.0%", height: "7.2%" } as Rect,
+  pillLeft:     { top: "31.98%", left: "10.0%",  width: "37.0%", height: "5.6%" } as Rect,
+  pillRight:    { top: "31.98%", right: "10.0%", width: "37.0%", height: "5.6%" } as Rect,
 
-  // [3] 10 prediction rows. Pass 3: row band shrunk vertically because
-  //     row 10's red rect was overlapping the top of the max-potential
-  //     box. New band: 43% → 80% (~3.5% buffer above max-potential).
+  // [3] 10 prediction rows. Pass 3 band-position kept; pass 4 changes
+  //     happen INSIDE each row container (see ROW.* below + page.tsx row
+  //     JSX, switched from flex-centre to absolute pixel anchors).
   rowsTop:      "43.0%",
   rowsHeight:   "37.0%",
   rowCount:     10,
@@ -45,13 +45,12 @@ export const SLOTS = {
   rowAnswer:    { left: "5.5%",  width: "62%" } as Rect,
   rowPoints:    { right: "5.0%", width: "21%", height: "62%" } as Rect,
 
-  // [4] Max-potential bumped UP ~3.5% so the label + value land INSIDE
-  //     the PNG's drawn rounded box (was sitting below it at the very
-  //     bottom of the canvas).
-  maxPotential: { bottom: "7.0%", left: "6.5%",  width: "30%", height: "9.5%" } as Rect,
+  // [4] Max-potential — pass 4: shifted DOWN 14px (bottom -= 0.84%) per
+  //     Position Correction Rules.
+  maxPotential: { bottom: "6.16%", left: "6.5%",  width: "30%", height: "9.5%" } as Rect,
 
-  // [5] CTA bumped UP the same amount to land inside its rounded box.
-  cta:          { bottom: "7.0%", right: "5.0%", width: "38%", height: "9.5%" } as Rect,
+  // [5] CTA — pass 4: shifted DOWN 10px (bottom -= 0.6%) likewise.
+  cta:          { bottom: "6.4%", right: "5.0%", width: "38%", height: "9.5%" } as Rect,
 } as const;
 
 // Inner-content layout constants — consumed by ShareCard's flex containers.
@@ -62,19 +61,24 @@ export const SLOTS = {
 // 941×1672 dimensions, so px units are deterministic. Font sizes are also
 // in px for the same reason.
 export const ROW = {
-  padX: 28,           // px — left + right padding inside each row stripe
-  padY: 12,           // px — top + bottom padding inside each row stripe
-  gap: 16,            // px between left text column and right points badge
-  labelFontPx: 13,    // small uppercase question label
-  answerFontPx: 20,   // bold pick text
-  pointsFontPx: 18,   // points badge ("40 PTS" / "VOID")
-  pointsWidthPct: 22, // % of card width for the right points badge
+  padX: 32,             // px — was 28; matches Position Correction Rules
+  padY: 12,             // px — top + bottom padding inside each row stripe
+  gap: 16,              // px reserved between left content area and points badge
+  labelFontPx: 13,      // small uppercase question label
+  answerFontPx: 20,     // bold pick text
+  pointsFontPx: 18,     // points badge ("40 PTS" / "VOID")
+  // Pass 4 — fixed-px anchors inside each row container.
+  labelTopPx: 14,       // top offset of the question label from row top
+  answerTopPx: 34,      // top offset of the answer from row top
+  pointsRightPx: 22,    // right offset of the points badge from row right
+  pointsWidthPx: 140,   // fixed-px width of the points badge
+  pointsHeightPx: 40,   // fixed-px height of the points badge
 } as const;
 
 export const HEADER = {
-  logoFitPct: 65,     // logo image fills 65% of its circle slot diameter
-  pillFontPx: 48,     // team-short text inside each pill
-  badgeFontPx: 26,    // date badge text
+  logoFitPct: 77,       // pass 4: +18% scale per Position Correction Rules
+  pillFontPx: 48,       // team-short text inside each pill
+  badgeFontPx: 26,      // date badge text
 } as const;
 
 export const FOOTER = {

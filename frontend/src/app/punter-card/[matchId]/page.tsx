@@ -791,10 +791,10 @@ const ShareCard = forwardRef<HTMLDivElement, {
         </div>
       </Slot>
 
-      {/* [3] 10 prediction rows. Each stripe is a bounded flex container:
-          a left text column (label stacked over answer, vertically centred)
-          and a right points badge (fixed width). Padding/overflow is
-          enforced by CSS — no absolute positioning, no JS truncation. */}
+      {/* [3] 10 prediction rows. Pass 4: row content uses absolute pixel
+          anchors INSIDE each row container (label at 14px from row top,
+          answer at 34px, points badge fixed 140×40 at right:22). Every
+          coordinate is row-local — never canvas-relative. */}
       {rowData.map((row, i) => {
         const top = rowsTopPct + i * (rowHeightPct + rowGapPct);
         const rowRect: Rect = {
@@ -803,72 +803,72 @@ const ShareCard = forwardRef<HTMLDivElement, {
           right: "0",
           height: `${rowHeightPct}%`,
         };
+        // Right edge of the left text column — leaves room for the
+        // points badge (right offset + width + gap).
+        const leftColRightPx = ROW.pointsRightPx + ROW.pointsWidthPx + ROW.gap;
         return (
           <Slot key={i} at={rowRect} debug={debug}>
             <div
               style={{
                 width: "100%",
                 height: "100%",
-                display: "flex",
-                alignItems: "center",
-                paddingLeft: ROW.padX,
-                paddingRight: ROW.padX,
-                paddingTop: ROW.padY,
-                paddingBottom: ROW.padY,
+                position: "relative",
                 boxSizing: "border-box",
-                gap: ROW.gap,
               }}
             >
-              {/* Left text column — label on top, answer below, centred
-                  vertically. minWidth:0 lets the CSS ellipsis pipeline
-                  kick in on long names. */}
+              {/* Question label — anchored 14px from row top, 32px from
+                  row left, right edge stops before the points badge. */}
               <div
                 style={{
-                  flex: 1,
-                  minWidth: 0,
-                  display: "flex",
-                  flexDirection: "column",
-                  justifyContent: "center",
-                  gap: 2,
+                  position: "absolute",
+                  top: ROW.labelTopPx,
+                  left: ROW.padX,
+                  right: leftColRightPx,
+                  fontFamily: "system-ui, -apple-system, sans-serif",
+                  fontSize: ROW.labelFontPx,
+                  lineHeight: 1.15,
+                  fontWeight: 700,
+                  letterSpacing: 1.2,
+                  color: "rgba(255,255,255,0.65)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
                 }}
               >
-                <div
-                  style={{
-                    fontFamily: "system-ui, -apple-system, sans-serif",
-                    fontSize: ROW.labelFontPx,
-                    lineHeight: 1.15,
-                    fontWeight: 700,
-                    letterSpacing: 1.2,
-                    color: "rgba(255,255,255,0.65)",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {row.label}
-                </div>
-                <div
-                  style={{
-                    fontFamily: "'Bungee', 'Impact', cursive",
-                    fontSize: ROW.answerFontPx,
-                    lineHeight: 1.1,
-                    color: "#ffffff",
-                    textShadow: "0 0 10px rgba(123,200,255,0.5)",
-                    whiteSpace: "nowrap",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                  }}
-                >
-                  {row.answer}
-                </div>
+                {row.label}
               </div>
 
-              {/* Points badge — fixed width, centred text, ellipsis if
-                  somehow overflowed. */}
+              {/* Answer text — anchored 34px from row top, same
+                  horizontal bounds as the label. */}
               <div
                 style={{
-                  width: `${ROW.pointsWidthPct}%`,
-                  flexShrink: 0,
+                  position: "absolute",
+                  top: ROW.answerTopPx,
+                  left: ROW.padX,
+                  right: leftColRightPx,
+                  fontFamily: "'Bungee', 'Impact', cursive",
+                  fontSize: ROW.answerFontPx,
+                  lineHeight: 1.1,
+                  color: "#ffffff",
+                  textShadow: "0 0 10px rgba(123,200,255,0.5)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {row.answer}
+              </div>
+
+              {/* Points badge — fixed 140×40, vertically centred, 22px
+                  from row right. */}
+              <div
+                style={{
+                  position: "absolute",
+                  top: "50%",
+                  right: ROW.pointsRightPx,
+                  width: ROW.pointsWidthPx,
+                  height: ROW.pointsHeightPx,
+                  transform: "translateY(-50%)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
