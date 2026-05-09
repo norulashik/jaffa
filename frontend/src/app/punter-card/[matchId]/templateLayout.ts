@@ -29,10 +29,11 @@ export const SLOTS = {
   // [1] Date badge — px 777,53 → 866,76.
   dateBadge:    { top: "3.17%", right: "7.97%", width: "9.46%", height: "1.38%" } as Rect,
 
-  // [2] Header circles — pass 7: shifted to user's specified corner
-  //     (PNG 99,383) with logoFitPct bumped (see HEADER.logoFitPct).
-  leftCircle:   { top: "22.91%", left: "10.52%",  width: "5.84%", height: "3.29%" } as Rect,
-  rightCircle:  { top: "22.91%", right: "10.52%", width: "5.84%", height: "3.29%" } as Rect,
+  // [2] Header circles — pass 8b: bubble bounds measured by manually
+  //     placing the source logo PNGs in the template. Bubbles are
+  //     ~96×109 PNG (was 55×55 in pass 7), located at PNG 73,342.
+  leftCircle:   { top: "20.45%", left: "7.76%",  width: "10.20%", height: "6.52%" } as Rect,
+  rightCircle:  { top: "20.45%", right: "8.40%", width: "10.20%", height: "6.52%" } as Rect,
   // [2] Pills — px 140,519 → 374,556 (left), 566,511 → 752,562 (right).
   pillLeft:     { top: "31.04%", left: "14.88%",  width: "24.87%", height: "2.21%" } as Rect,
   pillRight:    { top: "30.56%", right: "20.09%", width: "19.77%", height: "3.05%" } as Rect,
@@ -78,21 +79,22 @@ export const ROW = {
                         //   (PNG x=710) and points box left edge (PNG x=770)
   labelFontPx: 13,      // small uppercase question label
   answerFontPx: 20,     // bold pick text
-  pointsFontPx: 12,     // points badge — shrunk to fit a 17px-tall box
+  pointsFontPx: 18,     // pass 8b: bumped 12 → 18 so points text is readable
+                        //   when viewing the share image at normal zoom.
   // Pass 7: labels were rendering ABOVE the stripe outline (out of the box).
   // Now sit AT THE TOP of the stripe (matches user's "y=945 JPEG = y=630 PNG").
   labelTopPx: 0,        // label at stripe top
   answerTopPx: 18,      // answer just below label, mostly inside stripe
   pointsRightPx: 0,     // points sits flush with the slot's right edge (PNG x=837)
-  pointsWidthPx: 67,    // matches user's measured points box width
-  pointsHeightPx: 17,   // matches user's measured points box height
+  pointsWidthPx: 100,   // pass 8b: 67 → 100 so "10 PTS" at 18px font fits cleanly
+  pointsHeightPx: 28,   // pass 8b: 17 → 28 so the bigger font has breathing room
 } as const;
 
 export const HEADER = {
-  logoFitPct: 400,      // pass 7: bumped further — at 280 the visible crest was
-                        //   still ~50% of the bubble. 400% renders the IMG at
-                        //   220px on a 55px slot, with the visible content
-                        //   (after SVG padding) filling more of the bubble.
+  logoFitPct: 100,      // pass 8b: dropped back to 100 — the slot now matches
+                        //   the actual bubble (96×109 PNG), so 100% fills it.
+                        //   Logos render with their full content (no crop) and
+                        //   transparent padding for non-square sources.
   pillFontPx: 48,       // team-short text inside each pill
   badgeFontPx: 18,      // pass 6: shrunk so "4 MAY" fits the 73px content area
 } as const;
