@@ -85,12 +85,13 @@ export const ROW = {
   // Now sit AT THE TOP of the stripe (matches user's "y=945 JPEG = y=630 PNG").
   labelTopPx: 0,        // label at stripe top
   answerTopPx: 18,      // answer just below label, mostly inside stripe
-  // Pass 10: HTML rect aligned to the user's measured visible box
-  // (PNG x=730–811, width 81). Row slot ends at PNG x=837, so right
-  // offset = 837−811 = 26.
-  pointsRightPx: 26,    // sits 26px in from the row slot's right edge
-  pointsWidthPx: 81,    // matches user's measured box width
-  pointsHeightPx: 28,   // matches user's measured box height
+  // Pass 11: shifted rect right by 38 PNG (= 36 px in user's 900-scale
+  // viewer) so the text lands inside the visible box. Negative right
+  // offset means the rect extends beyond the row slot's right edge.
+  // Resulting rect: PNG x=768–849 (per pass-11 measurement target).
+  pointsRightPx: -12,   // rect right edge = 837 − (−12) = 849 PNG
+  pointsWidthPx: 81,    // unchanged
+  pointsHeightPx: 28,   // unchanged
 } as const;
 
 export const HEADER = {
