@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, forwardRef } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, forwardRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronUp, Share2, ArrowLeft, Link as LinkIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -676,6 +676,14 @@ const ShareCard = forwardRef<HTMLDivElement, {
   const totalGapPct = rowGapPct * (ROW_COUNT - 1);
   const rowHeightPct = (rowsHeightPct - totalGapPct) / ROW_COUNT;
 
+  // Pass 9: points column has its own band (independent pitch from
+  // stripes). Same formula, separate constants.
+  const pointsRowsTopPct = parseFloat(SLOTS.pointsRowsTop);
+  const pointsRowsHeightPct = parseFloat(SLOTS.pointsRowsHeight);
+  const pointsRowGapPct = SLOTS.pointsRowGap;
+  const pointsTotalGapPct = pointsRowGapPct * (ROW_COUNT - 1);
+  const pointsRowHeightPct = (pointsRowsHeightPct - pointsTotalGapPct) / ROW_COUNT;
+
   return (
     <div
       ref={ref}
@@ -792,88 +800,80 @@ const ShareCard = forwardRef<HTMLDivElement, {
         </div>
       </Slot>
 
-      {/* [3] Pass 6 — row slot covers both the left stripe (label+answer)
-          and the right points box (PNG x=88 → 837). Internal absolute
-          positioning constrains label/answer to the left stripe area
-          and points to the right box area. Coordinates are row-local. */}
+      {/* [3] Pass 9 — TWO slots per row: stripe slot (label+answer) and
+          points slot (independent y-band measured separately by the user
+          since the PNG draws points on a different pitch than stripes). */}
       {rowData.map((row, i) => {
-        const top = rowsTopPct + i * (rowHeightPct + rowGapPct);
-        const rowRect: Rect = {
-          top: `${top}%`,
+        const stripeTop = rowsTopPct + i * (rowHeightPct + rowGapPct);
+        const pointsTop = pointsRowsTopPct + i * (pointsRowHeightPct + pointsRowGapPct);
+
+        const stripeRect: Rect = {
+          top: `${stripeTop}%`,
           left: SLOTS.rowsLeft,
           right: SLOTS.rowsRight,
           height: `${rowHeightPct}%`,
         };
-        // Right edge of the left text column — leaves room for the gap
-        // (PNG distance between left stripe and points box) PLUS the
-        // points box itself PLUS the row's right padding.
-        const leftColRightPx = ROW.pointsRightPx + ROW.pointsWidthPx + ROW.gap + ROW.padX;
+        const pointsRect: Rect = {
+          top: `${pointsTop}%`,
+          left: SLOTS.pointsLeft,
+          width: SLOTS.pointsWidth,
+          height: SLOTS.pointsHeight,
+        };
+
         return (
-          <Slot key={i} at={rowRect} debug={debug}>
-            <div
-              style={{
-                width: "100%",
-                height: "100%",
-                position: "relative",
-                boxSizing: "border-box",
-              }}
-            >
-              {/* Question label — anchored 14px from row top, 32px from
-                  row left, right edge stops before the points badge. */}
+          <Fragment key={i}>
+            <Slot at={stripeRect} debug={debug}>
               <div
                 style={{
-                  position: "absolute",
-                  top: ROW.labelTopPx,
-                  left: ROW.padX,
-                  right: leftColRightPx,
-                  fontFamily: "system-ui, -apple-system, sans-serif",
-                  fontSize: ROW.labelFontPx,
-                  lineHeight: 1.15,
-                  fontWeight: 700,
-                  letterSpacing: 1.2,
-                  color: "rgba(255,255,255,0.65)",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
+                  width: "100%",
+                  height: "100%",
+                  position: "relative",
+                  boxSizing: "border-box",
                 }}
               >
-                {row.label}
+                <div
+                  style={{
+                    position: "absolute",
+                    top: ROW.labelTopPx,
+                    left: ROW.padX,
+                    right: ROW.padX,
+                    fontFamily: "system-ui, -apple-system, sans-serif",
+                    fontSize: ROW.labelFontPx,
+                    lineHeight: 1.15,
+                    fontWeight: 700,
+                    letterSpacing: 1.2,
+                    color: "rgba(255,255,255,0.65)",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {row.label}
+                </div>
+                <div
+                  style={{
+                    position: "absolute",
+                    top: ROW.answerTopPx,
+                    left: ROW.padX,
+                    right: ROW.padX,
+                    fontFamily: "'Bungee', 'Impact', cursive",
+                    fontSize: ROW.answerFontPx,
+                    lineHeight: 1.1,
+                    color: "#ffffff",
+                    textShadow: "0 0 10px rgba(123,200,255,0.5)",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {row.answer}
+                </div>
               </div>
+            </Slot>
 
-              {/* Answer text — anchored 34px from row top, same
-                  horizontal bounds as the label. */}
+            <Slot at={pointsRect} center debug={debug}>
               <div
                 style={{
-                  position: "absolute",
-                  top: ROW.answerTopPx,
-                  left: ROW.padX,
-                  right: leftColRightPx,
-                  fontFamily: "'Bungee', 'Impact', cursive",
-                  fontSize: ROW.answerFontPx,
-                  lineHeight: 1.1,
-                  color: "#ffffff",
-                  textShadow: "0 0 10px rgba(123,200,255,0.5)",
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }}
-              >
-                {row.answer}
-              </div>
-
-              {/* Points badge — fixed 140×40, vertically centred, 22px
-                  from row right. */}
-              <div
-                style={{
-                  position: "absolute",
-                  top: "50%",
-                  right: ROW.pointsRightPx,
-                  width: ROW.pointsWidthPx,
-                  height: ROW.pointsHeightPx,
-                  transform: "translateY(-50%)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
                   fontFamily: "'Bungee', 'Impact', cursive",
                   fontSize: ROW.pointsFontPx,
                   color: "#bfe2ff",
@@ -881,15 +881,17 @@ const ShareCard = forwardRef<HTMLDivElement, {
                   whiteSpace: "nowrap",
                   overflow: "hidden",
                   textOverflow: "ellipsis",
-                  paddingLeft: 6,
-                  paddingRight: 6,
+                  maxWidth: "100%",
+                  lineHeight: 1,
+                  paddingLeft: 4,
+                  paddingRight: 4,
                   boxSizing: "border-box",
                 }}
               >
                 {row.glow}
               </div>
-            </div>
-          </Slot>
+            </Slot>
+          </Fragment>
         );
       })}
 
