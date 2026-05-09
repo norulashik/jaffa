@@ -38,29 +38,19 @@ export const SLOTS = {
   pillLeft:     { top: "31.04%", left: "14.88%",  width: "24.87%", height: "2.21%" } as Rect,
   pillRight:    { top: "30.56%", right: "20.09%", width: "19.77%", height: "3.05%" } as Rect,
 
-  // [3] 9 prediction rows. Pass 9 — points column moved to its own band
-  //     (independent y-pitch from the row stripes) since the user's
-  //     measurements showed points pitch (74.375 PNG) differs from the
-  //     stripe pitch (~77.875 PNG).
-  //     Row stripe (label + answer area): user-measured from earlier:
-  //       row 1 left stripe = px 88,630 → 710,664
-  //       row 9 left stripe = px 88,1253 → 710,1285
+  // [3] 9 prediction rows. Pass 6 — re-measured with finer precision:
+  //     row 1 left stripe = px 88,630 → 710,664; row 9 left stripe = px
+  //     88,1253 → 710,1285; per-row points box = px 770,638 → 837,655
+  //     (vertically centred inside its row stripe). The row SLOT covers
+  //     both the left stripe AND the points box (PNG x=88 → 837), so
+  //     internal positioning constrains label/answer to the left stripe
+  //     area and points to the right box area.
   rowsTop:      "37.68%",     // = 630/1672
   rowsHeight:   "39.17%",     // = (1285−630)/1672
   rowCount:     9,
   rowGap:       2.61,         // chosen so row 9 stripe top lands at 74.94%
-  rowsLeft:     "9.35%",      // = 88/941
-  rowsRight:    "23.49%",     // pass 9: stripe ends ~10px before points column
-                              //   starts (was 11.05% — extended into points area)
-  //     Points column (independent band, pass 9 measurements):
-  //       row 1 points = px 730,604 → 811,632
-  //       row 9 points = px 730,1199 → 811,1227
-  pointsRowsTop:    "36.12%", // = 604/1672
-  pointsRowsHeight: "37.26%", // = (1227−604)/1672
-  pointsRowGap:     2.78,     // gives pitch 4.45% (= 74.375 PNG)
-  pointsLeft:       "77.58%", // = 730/941
-  pointsWidth:      "8.61%",  // = 81/941
-  pointsHeight:     "1.67%",  // = 28/1672
+  rowsLeft:     "9.35%",      // = 88/941 (left edge of row span)
+  rowsRight:    "11.05%",     // = (941−837)/941 (right edge of row span)
   // Legacy fields kept for back-compat (no longer consumed by the row map).
   rowQuestion:  { left: "8.5%",  width: "65%" } as Rect,
   rowAnswer:    { left: "8.5%",  width: "65%" } as Rect,
@@ -81,17 +71,26 @@ export const SLOTS = {
 // 941×1672 dimensions, so px units are deterministic. Font sizes are also
 // in px for the same reason.
 export const ROW = {
-  padX: 13,             // px — label/answer left+right padding inside stripe
+  padX: 13,             // pass 7: shrunk so label starts at PNG x=101 (user's
+                        //   measured "Player of the match" left edge =
+                        //   slot.left(88) + 13 = 101).
   padY: 12,             // px — kept for future use
+  gap: 60,              // px — actual PNG distance between left stripe right edge
+                        //   (PNG x=710) and points box left edge (PNG x=770)
   labelFontPx: 13,      // small uppercase question label
   answerFontPx: 20,     // bold pick text
-  pointsFontPx: 18,     // pass 8b: readable at normal zoom
-  // Pass 7: labels sit AT THE TOP of the stripe.
+  pointsFontPx: 18,     // pass 8b: bumped 12 → 18 so points text is readable
+                        //   when viewing the share image at normal zoom.
+  // Pass 7: labels were rendering ABOVE the stripe outline (out of the box).
+  // Now sit AT THE TOP of the stripe (matches user's "y=945 JPEG = y=630 PNG").
   labelTopPx: 0,        // label at stripe top
   answerTopPx: 18,      // answer just below label, mostly inside stripe
-  // Removed in pass 9: gap, pointsRightPx, pointsWidthPx, pointsHeightPx.
-  // The points column is now a separate per-row Slot (see SLOTS.points*),
-  // so its position/size lives there, not here.
+  // Pass 10: HTML rect aligned to the user's measured visible box
+  // (PNG x=730–811, width 81). Row slot ends at PNG x=837, so right
+  // offset = 837−811 = 26.
+  pointsRightPx: 26,    // sits 26px in from the row slot's right edge
+  pointsWidthPx: 81,    // matches user's measured box width
+  pointsHeightPx: 28,   // matches user's measured box height
 } as const;
 
 export const HEADER = {
@@ -106,10 +105,12 @@ export const HEADER = {
 export const FOOTER = {
   maxPotLabelPx: 14,
   maxPotValuePx: 42,
-  ctaLine1Px: 17,
-  ctaLine2Px: 13,
-  ctaLine3Px: 19,     // PLAYJAFFA.COM
-  padX: 18,
+  // Pass 10: shrunk so "Predict from anywhere" / "PLAYJAFFA.COM" fully
+  // fit the 210px CTA slot (was truncating with ellipsis).
+  ctaLine1Px: 13,     // "Predict from anywhere"
+  ctaLine2Px: 11,     // "Enjoy your rewards"
+  ctaLine3Px: 16,     // PLAYJAFFA.COM
+  padX: 8,            // shrunk 18→8 for ~194px content area
 } as const;
 
 // Map of templateKey → short uppercase label for the row's small text.
