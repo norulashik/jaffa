@@ -10,3 +10,8 @@ backend/.env
 /tmp/
 *.log
 .sportsmonk-cache.json
+
+# Meshy source GLBs live alongside compressed assets in public/avatars/
+# but should never be committed (17 MB+ each). Compressed per-team *.glb
+# files (kkr/csk/srh/rcb/default) stay tracked.
+frontend/public/avatars/Meshy_*_texture.glb

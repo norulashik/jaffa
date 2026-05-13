@@ -6,7 +6,7 @@ import { X, Check, Dice5, Save } from "lucide-react";
 import { AvatarConfig, TEAM_KEYS } from "@/types/avatar";
 import CricketAvatar from "./CricketAvatar";
 import Avatar3D from "./avatar/Avatar3D";
-import { get3DModelForTeam } from "./avatar/team3DModels";
+import { get3DModelForTeamOrDefault } from "./avatar/team3DModels";
 import { TEAM_COLORS } from "@/lib/teamColors";
 import {
   HAIR_LABELS,
@@ -136,39 +136,42 @@ export default function AvatarCustomizer({ initialConfig, onSave, onClose }: Ava
         </div>
       </div>
 
-      {/* Main avatar preview */}
-      <main className="relative h-full flex items-center justify-center pt-20 pb-[420px] overflow-hidden">
+      {/* Main avatar preview — Phase 2: every user sees a full-body 3D
+          model (KKR ape or default red-hoodie ape). The legacy SVG-with-
+          scale(2.5) preview was causing the avatar to clip at the bottom
+          (parent `overflow-hidden` + 420px reserved space below). Now the
+          Canvas just owns its own 320×480 box. SVG only renders as the
+          Suspense fallback during GLB decode. */}
+      <main className="relative h-full flex items-center justify-center pt-20 pb-[420px] overflow-visible">
         <motion.div
           key={JSON.stringify(config)}
           initial={{ scale: 0.92 }}
           animate={{ scale: 1 }}
           transition={{ type: "spring", stiffness: 380, damping: 22 }}
         >
-          <div style={{ width: 250, height: 450, position: "relative", overflow: "visible" }}>
-            {(() => {
-              // Phase 1b: swap to 3D model when the picked jersey team has
-              // a GLB. The SVG renders as the Suspense fallback so the
-              // preview never goes blank during decode.
-              const modelUrl = get3DModelForTeam(config.jerseyTeam);
-              if (modelUrl) {
-                return (
-                  <Suspense
-                    fallback={
-                      <div style={{ transform: "scale(2.5)", transformOrigin: "top center", display: "inline-block" }}>
-                        <CricketAvatar config={config} size="lg" mood={mood} interactive={false} />
-                      </div>
-                    }
-                  >
-                    <Avatar3D url={modelUrl} size={250} interactive />
-                  </Suspense>
-                );
-              }
-              return (
-                <div style={{ transform: "scale(2.5)", transformOrigin: "top center", display: "inline-block" }}>
+          <div style={{ width: 320, height: 480, position: "relative" }}>
+            <Suspense
+              fallback={
+                <div
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
                   <CricketAvatar config={config} size="lg" mood={mood} interactive={false} />
                 </div>
-              );
-            })()}
+              }
+            >
+              <Avatar3D
+                url={get3DModelForTeamOrDefault(config.jerseyTeam)}
+                size={320}
+                frame="full"
+                interactive
+              />
+            </Suspense>
           </div>
         </motion.div>
       </main>

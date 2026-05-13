@@ -92,7 +92,13 @@ function LeaderboardPageInner() {
         try {
           const matchState: any = await api.getMatchState(matchId, venueId, validatedRoomId);
           if (cancelled) return;
-          if (matchState?.match) {
+          // Only treat the match context as valid for showing Round /
+          // Full-Match tabs when the match is actually LIVE. If it's
+          // "completed" or "upcoming", a stale matchId in localStorage
+          // (from a previous match the user watched) would otherwise
+          // resurface those tabs with old data. Fall through to the
+          // season-leaderboard path below for all non-live cases.
+          if (matchState?.match && matchState.match.status === "live") {
             setHasValidMatchContext(true);
             setResolvedRoomId(validatedRoomId);
             setResolvedRoomIsSeason(validatedRoomIsSeason);

@@ -1,13 +1,12 @@
 "use client";
 
-// Phase 1: single GLB rendered in a fixed-size <Canvas>. Loads from
-// /public/avatars/ape.glb by default. Designed as a drop-in alternative
-// to the procedural SVG AvatarPreview — same containing div size, same
-// onClick semantics, just a different visual.
+// Renders a per-team GLB in a fixed-size <Canvas>. Phase 2 adds the
+// `frame` prop: "full" shows head-to-feet (used in the avatar customizer
+// preview), "bust" tightly crops head + chest (used on the profile page).
 //
-// Bundle impact: ~700 KB gzipped (three + r3f + drei). Next.js
-// code-splits on the importing route, so only `/profile` (or wherever
-// Avatar3D is used) pays this cost.
+// Bundle impact: ~700 KB gzipped (three + r3f + drei). Next.js code-splits
+// on the importing route, so only `/profile` and the customizer modal pay
+// this cost.
 
 import { Suspense } from "react";
 import { Canvas } from "@react-three/fiber";
@@ -22,20 +21,28 @@ interface Avatar3DProps {
   interactive?: boolean;
   /** Background colour of the canvas (default transparent so card BG shows). */
   background?: string;
+  /** "full" = head-to-feet (customizer), "bust" = head + chest (profile). */
+  frame?: "full" | "bust";
 }
 
-function ApeModel({ url }: { url: string }) {
+function ApeModel({ url, frame }: { url: string; frame: "full" | "bust" }) {
   // useGLTF caches by URL across mounts.
   const { scene } = useGLTF(url);
+  // For the bust shot we shift the model down so the chest sits at world
+  // origin (the camera looks at origin by default), making the head+chest
+  // appear centred in the frame. `disableY` on <Center> keeps the model's
+  // intrinsic vertical position so the shift is meaningful.
+  const yShift = frame === "bust" ? -0.55 : 0;
   return (
-    <Center>
-      <primitive object={scene} />
+    <Center disableY={frame === "bust"}>
+      <group position={[0, yShift, 0]}>
+        <primitive object={scene} />
+      </group>
     </Center>
   );
 }
 
 function LoadingFallback() {
-  // Tiny ambient cube so the Canvas isn't entirely empty during decode.
   return (
     <mesh>
       <boxGeometry args={[0.5, 0.5, 0.5]} />
@@ -49,10 +56,18 @@ export default function Avatar3D({
   size = 320,
   interactive = true,
   background = "transparent",
+  frame = "full",
 }: Avatar3DProps) {
+  const isBust = frame === "bust";
+  // Closer camera + tighter FOV crops to the upper body; pulled-back camera
+  // shows head-to-feet for the customizer. Both keep the model looking down
+  // at the lens (no extreme angles).
+  const cameraPos: [number, number, number] = isBust ? [0, 0, 1.25] : [0, 0, 3.5];
+  const cameraFov = isBust ? 28 : 35;
+
   const content = (
     <Suspense fallback={<LoadingFallback />}>
-      <ApeModel url={url} />
+      <ApeModel url={url} frame={frame} />
     </Suspense>
   );
 
@@ -65,7 +80,7 @@ export default function Avatar3D({
       }}
     >
       <Canvas
-        camera={{ position: [0, 1.2, 3.2], fov: 35 }}
+        camera={{ position: cameraPos, fov: cameraFov }}
         dpr={[1, 2]}
         style={{ background }}
         gl={{ preserveDrawingBuffer: false, antialias: true }}

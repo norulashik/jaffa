@@ -8,7 +8,7 @@ import BottomNav from "@/components/BottomNav";
 import CricketAvatar from "@/components/CricketAvatar";
 import AvatarCustomizer from "@/components/AvatarCustomizer";
 import Avatar3D from "@/components/avatar/Avatar3D";
-import { get3DModelForTeam } from "@/components/avatar/team3DModels";
+import { get3DModelForTeamOrDefault } from "@/components/avatar/team3DModels";
 import { Settings, HelpCircle, LogOut, ChevronRight, User, MapPin, Trophy, Ticket } from "lucide-react";
 import { api } from "@/lib/api";
 import { AvatarConfig } from "@/types/avatar";
@@ -111,25 +111,23 @@ export default function ProfilePage() {
         {/* Profile Card */}
         <section className="game-card mb-8" style={{ boxShadow: "6px 6px 0 0 #ff6341" }}>
           <div className="flex flex-col items-center text-center py-4">
-            {/* Avatar — Phase 1b: 3D model when the user's team has a GLB,
-                otherwise falls back to the procedural SVG. The SVG also
-                acts as the Suspense fallback during GLB decode so the
-                avatar never flashes blank. */}
+            {/* Avatar — Phase 2: every user gets a 3D model. KKR users
+                see the Knight Rider ape; everyone else sees the default
+                red-hoodie ape. Bust frame crops to head + chest only
+                (reference image 3). SVG renders as the Suspense fallback
+                during GLB decode so the avatar never flashes blank. */}
             <div className="relative mb-4">
               {avatarConfig ? (
-                (() => {
-                  const modelUrl = get3DModelForTeam(avatarConfig.jerseyTeam);
-                  if (modelUrl) {
-                    return (
-                      <Suspense
-                        fallback={<CricketAvatar config={avatarConfig} size="lg" interactive />}
-                      >
-                        <Avatar3D url={modelUrl} size={240} interactive />
-                      </Suspense>
-                    );
-                  }
-                  return <CricketAvatar config={avatarConfig} size="lg" interactive />;
-                })()
+                <Suspense
+                  fallback={<CricketAvatar config={avatarConfig} size="lg" interactive />}
+                >
+                  <Avatar3D
+                    url={get3DModelForTeamOrDefault(avatarConfig.jerseyTeam)}
+                    size={280}
+                    frame="bust"
+                    interactive
+                  />
+                </Suspense>
               ) : (
                 <div
                   className="w-24 h-24 flex items-center justify-center"
