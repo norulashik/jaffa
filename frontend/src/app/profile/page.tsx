@@ -124,7 +124,7 @@ export default function ProfilePage() {
                   <Avatar3D
                     url={get3DModelForTeamOrDefault(avatarConfig.jerseyTeam)}
                     size={280}
-                    frame="bust"
+                    frame="full"
                     interactive
                   />
                 </Suspense>
