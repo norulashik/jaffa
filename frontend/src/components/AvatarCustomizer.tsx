@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { motion } from "framer-motion";
 import { X, Check, Dice5, Save } from "lucide-react";
 import { AvatarConfig, TEAM_KEYS } from "@/types/avatar";
 import CricketAvatar from "./CricketAvatar";
+import Avatar3D from "./avatar/Avatar3D";
+import { get3DModelForTeam } from "./avatar/team3DModels";
 import { TEAM_COLORS } from "@/lib/teamColors";
 import {
   HAIR_LABELS,
@@ -143,9 +145,30 @@ export default function AvatarCustomizer({ initialConfig, onSave, onClose }: Ava
           transition={{ type: "spring", stiffness: 380, damping: 22 }}
         >
           <div style={{ width: 250, height: 450, position: "relative", overflow: "visible" }}>
-            <div style={{ transform: "scale(2.5)", transformOrigin: "top center", display: "inline-block" }}>
-              <CricketAvatar config={config} size="lg" mood={mood} interactive={false} />
-            </div>
+            {(() => {
+              // Phase 1b: swap to 3D model when the picked jersey team has
+              // a GLB. The SVG renders as the Suspense fallback so the
+              // preview never goes blank during decode.
+              const modelUrl = get3DModelForTeam(config.jerseyTeam);
+              if (modelUrl) {
+                return (
+                  <Suspense
+                    fallback={
+                      <div style={{ transform: "scale(2.5)", transformOrigin: "top center", display: "inline-block" }}>
+                        <CricketAvatar config={config} size="lg" mood={mood} interactive={false} />
+                      </div>
+                    }
+                  >
+                    <Avatar3D url={modelUrl} size={250} interactive />
+                  </Suspense>
+                );
+              }
+              return (
+                <div style={{ transform: "scale(2.5)", transformOrigin: "top center", display: "inline-block" }}>
+                  <CricketAvatar config={config} size="lg" mood={mood} interactive={false} />
+                </div>
+              );
+            })()}
           </div>
         </motion.div>
       </main>

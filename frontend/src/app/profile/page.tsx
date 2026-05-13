@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import Header from "@/components/Header";
 import BottomNav from "@/components/BottomNav";
 import CricketAvatar from "@/components/CricketAvatar";
 import AvatarCustomizer from "@/components/AvatarCustomizer";
+import Avatar3D from "@/components/avatar/Avatar3D";
+import { get3DModelForTeam } from "@/components/avatar/team3DModels";
 import { Settings, HelpCircle, LogOut, ChevronRight, User, MapPin, Trophy, Ticket } from "lucide-react";
 import { api } from "@/lib/api";
 import { AvatarConfig } from "@/types/avatar";
@@ -109,10 +111,25 @@ export default function ProfilePage() {
         {/* Profile Card */}
         <section className="game-card mb-8" style={{ boxShadow: "6px 6px 0 0 #ff6341" }}>
           <div className="flex flex-col items-center text-center py-4">
-            {/* Avatar */}
+            {/* Avatar — Phase 1b: 3D model when the user's team has a GLB,
+                otherwise falls back to the procedural SVG. The SVG also
+                acts as the Suspense fallback during GLB decode so the
+                avatar never flashes blank. */}
             <div className="relative mb-4">
               {avatarConfig ? (
-                <CricketAvatar config={avatarConfig} size="lg" interactive />
+                (() => {
+                  const modelUrl = get3DModelForTeam(avatarConfig.jerseyTeam);
+                  if (modelUrl) {
+                    return (
+                      <Suspense
+                        fallback={<CricketAvatar config={avatarConfig} size="lg" interactive />}
+                      >
+                        <Avatar3D url={modelUrl} size={240} interactive />
+                      </Suspense>
+                    );
+                  }
+                  return <CricketAvatar config={avatarConfig} size="lg" interactive />;
+                })()
               ) : (
                 <div
                   className="w-24 h-24 flex items-center justify-center"
